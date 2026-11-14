@@ -47,6 +47,10 @@ target_sources(Nektar PRIVATE
   Source/PluginEditor.cpp
   Source/SamplePlayer.cpp)
 
+# Own standalone app (so the microphone input is not muted by default and we can go full screen later)
+target_sources(Nektar_Standalone PRIVATE Source/StandaloneApp.cpp)
+target_compile_definitions(Nektar_Standalone PRIVATE JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
+
 target_include_directories(Nektar SYSTEM PRIVATE
   ${sstretch_SOURCE_DIR}/include
   ${slinear_SOURCE_DIR}/include)

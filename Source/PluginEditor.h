@@ -38,9 +38,21 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 
+// Live parts of the top bar: timer, progress bar and the Record button (they change while recording).
+class RecordHud : public juce::Component
+{
+public:
+    RecordHud (NektarProcessor& p, juce::Typeface::Ptr tf) : proc (p), typeface (std::move (tf)) { setInterceptsMouseClicks (false, false); }
+    void paint (juce::Graphics&) override;
+private:
+    NektarProcessor& proc;
+    juce::Typeface::Ptr typeface;
+};
+
 class NektarEditor : public juce::AudioProcessorEditor,
                      public juce::FileDragAndDropTarget,
-                     private juce::ChangeListener
+                     private juce::ChangeListener,
+                     private juce::Timer
 {
 public:
     explicit NektarEditor (NektarProcessor&);
@@ -57,6 +69,9 @@ public:
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;
+    void toggleRecording();
+    void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);
     void chooseFile();
@@ -72,9 +87,11 @@ private:
     juce::OwnedArray<KnobComponent> knobs;
     juce::Array<juce::Point<float>> knobPos; // centre of each knob in design units
     std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<RecordHud> hud;
     juce::String message;
     std::set<int> heldNotes;
     int octaveShift = 0;
+    bool hudWasRecording = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NektarEditor)
 };

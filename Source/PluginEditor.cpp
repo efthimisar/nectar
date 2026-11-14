@@ -197,6 +197,48 @@ void KnobComponent::mouseDoubleClick (const juce::MouseEvent&)
     parameter->endChangeGesture();
 }
 
+// ------------------------------------------------------------------ live top bar
+void RecordHud::paint (Graphics& g)
+{
+    g.addTransform (juce::AffineTransform::scale ((float) getWidth() / 1000.0f));
+    const bool rec = proc.isRecording();
+    const bool can = proc.canRecord();
+    const float a = can ? 1.0f : 0.35f;
+
+    // timer
+    const double secs = rec ? proc.getRecordedSeconds() : 0.0;
+    const int m = (int) (secs / 60.0);
+    const double s = secs - 60.0 * m;
+    g.setColour (kLight.withMultipliedAlpha (rec ? 1.0f : 0.6f));
+    g.setFont (font (typeface, 19));
+    g.drawText (juce::String::formatted ("%02d:%04.1f", m, s), juce::Rectangle<float> (100, 14, 90, 32), juce::Justification::centredLeft);
+
+    // progress (how much of the 60 s limit is used)
+    const float frac = (float) juce::jlimit (0.0, 1.0, secs / NektarProcessor::kMaxRecordSeconds);
+    if (frac > 0.0f)
+    {
+        g.setColour (kLight);
+        g.fillRoundedRectangle (196, 26, juce::jmax (9.0f, 110.0f * frac), 9, 4.5f);
+    }
+
+    // record button: ring glows with the microphone level while recording
+    const float cx = 398, cy = 30;
+    if (rec)
+    {
+        const float lv = juce::jlimit (0.0f, 1.0f, proc.getInputLevel() * 1.5f);
+        g.setColour (kAcc.withAlpha (0.12f + 0.4f * lv));
+        g.fillEllipse (cx - 27, cy - 27, 54, 54);
+    }
+    g.setColour (Colour (0xff1e1d1b));
+    g.fillEllipse (cx - 21, cy - 21, 42, 42);
+    g.setColour (kAcc.withMultipliedAlpha (a));
+    g.drawEllipse (cx - 21, cy - 21, 42, 42, 2.0f);
+    if (rec)
+        g.fillRoundedRectangle (cx - 8, cy - 8, 16, 16, 3.0f); // stop
+    else
+        g.fillEllipse (cx - 9, cy - 9, 18, 18);                 // record
+}
+
 // ------------------------------------------------------------------ Editor
 namespace
 {
@@ -246,12 +288,16 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     setResizable (true, true);
     setWantsKeyboardFocus (true);
     proc.addChangeListener (this);
+    hud = std::make_unique<RecordHud> (proc, regular);
+    addAndMakeVisible (*hud);
+    startTimerHz (20);
     setSize (860, 860);
     grabKeyboardFocus();
 }
 
 NektarEditor::~NektarEditor()
 {
+    stopTimer();
     proc.removeChangeListener (this);
     releaseAllKeys();
 }
@@ -268,6 +314,7 @@ void NektarEditor::addKnob (float cx, float cy, float r, const juce::String& lab
 void NektarEditor::resized()
 {
     const float s = (float) getWidth() / 1000.0f;
+    hud->setBounds (getLocalBounds());
     for (int i = 0; i < knobs.size(); ++i)
     {
         auto* k = knobs[i];
@@ -323,6 +370,43 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
     const auto p = e.position / ((float) getWidth() / 1000.0f);
     if (juce::Rectangle<float> (125, 194, 160, 46).contains (p))
         chooseFile();
+    else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
+        toggleRecording();
+    else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
+        say (proc.saveToLibrary());
+}
+
+void NektarEditor::say (const juce::String& text)
+{
+    message = text;
+    cache = juce::Image();
+    repaint();
+}
+
+void NektarEditor::toggleRecording()
+{
+    if (! proc.canRecord())
+    {
+        say ("Recording works in the standalone app.");
+        return;
+    }
+    if (proc.isRecording())
+    {
+        proc.stopRecording();
+        return;
+    }
+    if (message.isNotEmpty())
+        say ({});
+    proc.startRecording();
+}
+
+void NektarEditor::timerCallback()
+{
+    if (proc.recordingFinishedByLimit())
+        proc.stopRecording();
+    if (proc.isRecording() || hudWasRecording)
+        hud->repaint();
+    hudWasRecording = proc.isRecording();
 }
 
 void NektarEditor::chooseFile()
@@ -433,12 +517,7 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setColour (kAcc);
     g.setFont (font (bld, 26));
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xcf\x80/-")), juce::Rectangle<float> (22, 12, 70, 36), juce::Justification::centredLeft);
-    g.setColour (kLight);
-    g.setFont (font (reg, 19));
-    g.drawText ("00:02.4", juce::Rectangle<float> (100, 14, 90, 32), juce::Justification::centredLeft);
     insetBox (g, { 196, 26, 110, 9 }, 4.5f);
-    g.setColour (kLight);
-    g.fillRoundedRectangle (196, 26, 52, 9, 4.5f);
 
     const float bx[] = { 398, 447, 497 };
     for (int i = 0; i < 3; ++i)
