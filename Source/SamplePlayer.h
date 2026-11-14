@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include "SpectralStretch.h"
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
 struct Sample
@@ -34,6 +35,7 @@ public:
         float releaseSec = 0.25f;
         float keepLength = 1.0f; // 0..1
         bool loop = false;       // sustain: a smooth loop in a steady part of the sound
+        float stretch = 0.0f;    // 0 = off, otherwise extreme stretch (see stretchFactor)
     };
 
     SamplePlayer();
@@ -41,6 +43,10 @@ public:
 
     // Message thread: resamples to the host rate and finds a smooth sustain loop.
     static void makePlayable (Sample& s, double hostRate);
+
+    // knob 0..1 -> how many times slower the sound moves (0 / tiny = off). 0.01 -> x2, 1 -> x256
+    static double stretchFactor (float knob) noexcept;
+    static bool stretchOn (float knob) noexcept { return knob > 0.01f; }
 
     void prepare (double sampleRate);
     void setSample (std::shared_ptr<const Sample> s);
@@ -50,6 +56,7 @@ private:
     using Stretch = signalsmith::stretch::SignalsmithStretch<float, void>;
     static constexpr int kVoices = 32;
     static constexpr int kStretchVoices = 16;
+    static constexpr int kSpectralVoices = 8;
     static constexpr int kChunk = 256;
     static constexpr float kAttackSec = 0.005f;
 
@@ -57,6 +64,7 @@ private:
     {
         bool active = false;
         bool stretched = false;
+        bool spectral = false;
         int note = -1;
         double pos = 0.0;      // read position (tape style)
         double inAccum = 0.0;  // fractional input samples (stretch style)
@@ -69,11 +77,13 @@ private:
     void noteOff (int note, const Params& p);
     void renderTape (Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     void renderStretch (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
+    void renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     void fillInput (Voice& v, int count, const Params& p, float* l, float* r);
 
     std::array<Voice, kVoices> voices;
     std::array<std::unique_ptr<Stretch>, kStretchVoices> stretchers;
-    std::vector<float> inL, inR, outL, outR;
+    std::array<SpectralStretch, kSpectralVoices> spectrals;
+    std::vector<float> inL, inR, outL, outR, specL, specR;
     std::shared_ptr<const Sample> sample;
     double sr = 44100.0;
     juce::uint64 counter = 0;

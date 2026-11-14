@@ -8,4 +8,4 @@ GitHub → Actions → "Build Nektar (macOS, Apple Silicon)" → Run workflow.
 The result is `Nektar-macOS-arm64.zip` under the run's Artifacts (contains `Nektar.vst3` and `Nektar.app`).
 
 ## Status
-Step 4: pitch without changing length (Keep length knob), smooth sustain loop (Loop), band-limited playback. Other knobs are not wired yet.
+Step 5: pitch without changing length (Keep length knob), smooth sustain loop (Loop), band-limited playback. Other knobs are not wired yet.

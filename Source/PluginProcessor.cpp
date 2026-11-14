@@ -18,6 +18,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "stretch", 1 }, "Stretch",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
 }
 
@@ -113,6 +115,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.releaseSec = apvts.getRawParameterValue ("tail")->load();
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
     p.keepLength = apvts.getRawParameterValue ("keeplength")->load();
+    p.stretch = apvts.getRawParameterValue ("stretch")->load();
 
     player.process (buffer, midi, p);
     midi.clear();

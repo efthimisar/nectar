@@ -170,9 +170,18 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
 
 // ---------------------------------------------------------------- player
 
+double SamplePlayer::stretchFactor (float knob) noexcept
+{
+    return std::pow (2.0, 1.0 + 7.0 * (double) juce::jlimit (0.0f, 1.0f, knob));
+}
+
 void SamplePlayer::prepare (double sampleRate)
 {
     sr = sampleRate;
+    for (auto& sp : spectrals)
+        sp.prepare (sr);
+    specL.assign ((size_t) kChunk, 0.0f);
+    specR.assign ((size_t) kChunk, 0.0f);
     for (auto& v : voices)
     {
         v.active = false;
@@ -243,12 +252,18 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.inAccum = 0.0;
     v.velocity = velocity;
     v.startedAt = ++counter;
-    v.stretched = index < kStretchVoices && p.keepLength > 0.02f;
+    v.spectral = index < kSpectralVoices && stretchOn (p.stretch);
+    v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
     v.adsr.noteOn();
 
-    if (v.stretched)
+    if (v.spectral)
+    {
+        const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
+        spectrals[(size_t) index].start (sample->play, 0.0, R);
+    }
+    else if (v.stretched)
     {
         auto& st = *stretchers[(size_t) index];
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
@@ -347,6 +362,35 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
     }
 }
 
+void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
+{
+    const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
+    const double factor = stretchFactor (p.stretch);
+    const float gain = p.level * p.level * v.velocity;
+    float* oL = out.getWritePointer (0);
+    float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
+
+    int done = 0;
+    while (done < num)
+    {
+        const int chunk = juce::jmin (kChunk, num - done);
+        spectrals[(size_t) index].process (sample->play, factor, R, specL.data(), specR.data(), chunk);
+        for (int i = 0; i < chunk; ++i)
+        {
+            const float env = v.adsr.getNextSample() * gain;
+            oL[start + done + i] += specL[(size_t) i] * env;
+            if (oR != nullptr)
+                oR[start + done + i] += specR[(size_t) i] * env;
+        }
+        done += chunk;
+        if (! v.adsr.isActive())
+        {
+            v.active = false;
+            return;
+        }
+    }
+}
+
 void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
 {
     out.clear();
@@ -366,7 +410,9 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
             auto& v = voices[(size_t) i];
             if (! v.active)
                 continue;
-            if (v.stretched)
+            if (v.spectral)
+                renderSpectral (i, v, out, done, num, p);
+            else if (v.stretched)
                 renderStretch (i, v, out, done, num, p);
             else
                 renderTape (v, out, done, num, p);
