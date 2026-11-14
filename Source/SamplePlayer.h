@@ -30,7 +30,7 @@ public:
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p);
 
 private:
-    static constexpr int kVoices = 16;
+    static constexpr int kVoices = 32;
     static constexpr float kAttackSec = 0.005f; // tiny fixed attack, avoids clicks
 
     struct Voice

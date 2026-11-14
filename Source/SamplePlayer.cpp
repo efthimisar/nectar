@@ -1,5 +1,34 @@
 #include "SamplePlayer.h"
 #include <cmath>
+#include <array>
+
+namespace
+{
+// Windowed-sinc kernel (Blackman window), 8 zero crossings each side, sampled finely.
+// Reading the sample faster than the output rate (high notes) uses a stretched kernel = low-pass,
+// so frequencies above the output's Nyquist are removed instead of folding back as metallic aliasing.
+constexpr int kHalf = 8;
+constexpr int kRes = 256;
+
+const float* kernelTable()
+{
+    static const std::array<float, kHalf * kRes + 2> table = []
+    {
+        std::array<float, kHalf * kRes + 2> t {};
+        for (size_t j = 0; j < t.size(); ++j)
+        {
+            const double u = (double) j / kRes;
+            const double s = u < 1.0e-9 ? 1.0 : std::sin (juce::MathConstants<double>::pi * u) / (juce::MathConstants<double>::pi * u);
+            const double x = juce::jmin (1.0, u / kHalf);
+            const double w = 0.42 + 0.5 * std::cos (juce::MathConstants<double>::pi * x)
+                                  + 0.08 * std::cos (2.0 * juce::MathConstants<double>::pi * x);
+            t[j] = (float) (s * w);
+        }
+        return t;
+    }();
+    return table.data();
+}
+} // namespace
 
 void SamplePlayer::prepare (double sampleRate)
 {
@@ -86,13 +115,34 @@ void SamplePlayer::renderVoice (Voice& v, juce::AudioBuffer<float>& out, int sta
         }
 
         const int i0 = (int) v.pos;
-        int i1 = i0 + 1;
-        if (i1 >= n)
-            i1 = p.loop ? 0 : n - 1;
-        const float f = (float) (v.pos - (double) i0);
+        const float* T = kernelTable();
+        const float cut = juce::jlimit (0.25f, 1.0f, (float) (1.0 / ratio)); // low-pass when reading fast
+        const int hw = (int) std::ceil ((float) kHalf / cut);
 
-        const float l = srcL[i0] + (srcL[i1] - srcL[i0]) * f;
-        const float r = srcR[i0] + (srcR[i1] - srcR[i0]) * f;
+        float accL = 0.0f, accR = 0.0f, wsum = 0.0f;
+        for (int k = 1 - hw; k <= hw; ++k)
+        {
+            const int idx = i0 + k;
+            const float u = std::abs ((float) ((double) idx - v.pos)) * cut;
+            if (u >= (float) kHalf)
+                continue;
+            const float fi = u * (float) kRes;
+            const int ti = (int) fi;
+            const float w = cut * (T[ti] + (T[ti + 1] - T[ti]) * (fi - (float) ti));
+            wsum += w; // counted even outside the sample (silence), so the ends fade instead of jumping
+            int ii = idx;
+            if (ii < 0 || ii >= n)
+            {
+                if (! p.loop)
+                    continue;
+                ii = ((ii % n) + n) % n;
+            }
+            accL += w * srcL[ii];
+            accR += w * srcR[ii];
+        }
+        const float norm = wsum > 1.0e-6f ? 1.0f / wsum : 0.0f;
+        const float l = accL * norm;
+        const float r = accR * norm;
         const float env = v.adsr.getNextSample() * gain;
 
         outL[start + i] += l * env;
