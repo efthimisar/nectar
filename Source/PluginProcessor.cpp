@@ -79,6 +79,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "blur", 1 }, "Blur",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph", 1 }, "Morph",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
@@ -116,6 +118,7 @@ NektarProcessor::NektarProcessor()
     brightP = apvts.getRawParameterValue ("bright");
     blurP = apvts.getRawParameterValue ("blur");
     freezeP = apvts.getRawParameterValue ("freeze");
+    morphP = apvts.getRawParameterValue ("morph");
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -299,6 +302,10 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.stretch = apvts.getRawParameterValue ("stretch")->load();
     p.blur = blurP->load();
     p.freeze = freezeP->load();
+    p.morph = morphP->load();
+    // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
+    players[0].setPartner (players[1].getSample());
+    players[2].setPartner (players[3].getSample());
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;

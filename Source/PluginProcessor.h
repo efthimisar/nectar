@@ -84,6 +84,7 @@ private:
     std::atomic<float>* brightP = nullptr;
     std::atomic<float>* blurP = nullptr;
     std::atomic<float>* freezeP = nullptr;
+    std::atomic<float>* morphP = nullptr;
 
     // cleaning (analysis, noise, hum, low cut) runs in a background thread; the result replaces the sound of the slot
     std::array<std::atomic<bool>, kSlots> cleanDirty {};

@@ -253,7 +253,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.inAccum = 0.0;
     v.velocity = velocity;
     v.startedAt = ++counter;
-    v.spectral = index < kSpectralVoices && spectralOn (p);
+    v.spectral = index < kSpectralVoices && (spectralOn (p) || partnerBuffer (p) != nullptr);
     v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
@@ -262,7 +262,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     if (v.spectral)
     {
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
-        spectrals[(size_t) index].start (sample->play, 0.0, R);
+        spectrals[(size_t) index].start (sample->play, 0.0, R, partnerBuffer (p), p.morph);
     }
     else if (v.stretched)
     {
@@ -363,6 +363,13 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
     }
 }
 
+const juce::AudioBuffer<float>* SamplePlayer::partnerBuffer (const Params& p) const noexcept
+{
+    if (p.morph <= 0.01f || partner == nullptr || partner->play.getNumSamples() < 2)
+        return nullptr;
+    return &partner->play;
+}
+
 void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
@@ -375,7 +382,8 @@ void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>
     while (done < num)
     {
         const int chunk = juce::jmin (kChunk, num - done);
-        spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk);
+        spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
+                                           partnerBuffer (p), p.morph);
         for (int i = 0; i < chunk; ++i)
         {
             const float env = v.adsr.getNextSample() * gain;

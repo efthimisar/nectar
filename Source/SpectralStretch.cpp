@@ -3,6 +3,7 @@
 
 void SpectralStretch::prepare (double sampleRate)
 {
+    rate = sampleRate;
     order = sampleRate > 60000.0 ? 15 : 14; // about 0.37 s of sound per frame
     N = 1 << order;
     hop = N / 2;
@@ -15,6 +16,11 @@ void SpectralStretch::prepare (double sampleRate)
     shifted.assign ((size_t) N / 2 + 1, 0.0f);
     smooth.assign ((size_t) N / 2 + 1, 0.0f);
     prefix.assign ((size_t) N / 2 + 2, 0.0f);
+    workB.assign ((size_t) N * 2, 0.0f);
+    magB.assign ((size_t) N / 2 + 1, 0.0f);
+    envA.assign ((size_t) N / 2 + 1, 0.0f);
+    envB.assign ((size_t) N / 2 + 1, 0.0f);
+    envTmp.assign ((size_t) N / 2 + 1, 0.0f);
     for (int c = 0; c < 2; ++c)
     {
         tail[c].assign ((size_t) hop, 0.0f);
@@ -23,21 +29,86 @@ void SpectralStretch::prepare (double sampleRate)
     readIdx = hop;
 }
 
-void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPos, double ratio)
+void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPos, double ratio,
+                             const juce::AudioBuffer<float>* partner, float morph)
 {
     const int n = src.getNumSamples();
     pos = n > 0 ? std::fmod (juce::jmax (0.0, startPos), (double) n) : 0.0;
+    posB = 0.0;
     for (int c = 0; c < 2; ++c)
     {
         std::fill (tail[c].begin(), tail[c].end(), 0.0f);
         std::fill (hopOut[c].begin(), hopOut[c].end(), 0.0f);
     }
     // One frame in advance, so that the very first output is already at full level (no slow fade-in).
-    makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false);
+    makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false, partner, morph);
     readIdx = hop; // the next call to process() makes the second frame
 }
 
-void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance)
+void SpectralStretch::envelope (const float* in, float* out)
+{
+    const int bins = N / 2;
+    const int hwMin = juce::jmax (2, (int) std::lround (150.0 * (double) N / rate)); // never narrower than about +-150 Hz
+    std::copy (in, in + bins + 1, envTmp.begin());
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        prefix[0] = 0.0f;
+        for (int k = 0; k <= bins; ++k) prefix[(size_t) k + 1] = prefix[(size_t) k] + envTmp[(size_t) k];
+        for (int k = 0; k <= bins; ++k)
+        {
+            const int hw = juce::jmax (hwMin, (int) (0.15 * (double) k)); // wider at high frequencies, like hearing
+            const int a = juce::jmax (0, k - hw), b = juce::jmin (bins, k + hw);
+            out[k] = (prefix[(size_t) b + 1] - prefix[(size_t) a]) / (float) (b - a + 1);
+        }
+        std::copy (out, out + bins + 1, envTmp.begin());
+    }
+}
+
+void SpectralStretch::applyMorph (const juce::AudioBuffer<float>& partner, int channel, float morph)
+{
+    const int nb = partner.getNumSamples();
+    const int bins = N / 2;
+    const float* s = partner.getReadPointer (juce::jmin (channel, partner.getNumChannels() - 1));
+    const int base = (int) posB;
+    for (int i = 0; i < N; ++i)
+    {
+        int idx = base + i;
+        if (idx >= nb) idx %= nb;
+        workB[(size_t) i] = s[idx] * window[(size_t) i];
+    }
+    std::fill (workB.begin() + N, workB.end(), 0.0f);
+    fft->performRealOnlyForwardTransform (workB.data(), true);
+    for (int k = 0; k <= bins; ++k)
+        magB[(size_t) k] = std::hypot (workB[(size_t) (2 * k)], workB[(size_t) (2 * k + 1)]);
+
+    envelope (shifted.data(), envA.data());
+    envelope (magB.data(), envB.data());
+
+    float maxA = 0.0f, maxB = 0.0f;
+    double before = 0.0;
+    for (int k = 0; k <= bins; ++k)
+    {
+        maxA = juce::jmax (maxA, envA[(size_t) k]);
+        maxB = juce::jmax (maxB, envB[(size_t) k]);
+        before += (double) shifted[(size_t) k] * shifted[(size_t) k];
+    }
+    if (maxA < 1.0e-12f || maxB < 1.0e-12f)
+        return; // one of the two is silent here: nothing to morph
+    const float flA = 1.0e-3f * maxA, flB = 1.0e-3f * maxB; // floors, so that empty regions do not explode
+    double after = 0.0;
+    for (int k = 0; k <= bins; ++k)
+    {
+        const float ratio = (envB[(size_t) k] + flB) / (envA[(size_t) k] + flA);
+        const float g = juce::jlimit (0.01f, 100.0f, std::pow (ratio, morph));
+        shifted[(size_t) k] *= g;
+        after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+    }
+    const float fix = (float) std::sqrt (before / juce::jmax (1.0e-20, after)); // the loudness stays that of this sound
+    for (int k = 0; k <= bins; ++k) shifted[(size_t) k] *= fix;
+}
+
+void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance,
+                                 const juce::AudioBuffer<float>* partner, float morph)
 {
     const int n = src.getNumSamples();
     const int chs = src.getNumChannels();
@@ -71,6 +142,9 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
             const float f = (float) (q - (double) i0);
             shifted[(size_t) k] = mag[(size_t) i0] * (1.0f - f) + mag[(size_t) (i0 + 1)] * f;
         }
+
+        if (partner != nullptr && morph > 0.01f && partner->getNumSamples() >= 2)
+            applyMorph (*partner, c, morph);
 
         if (blur > 0.01f)
         {
@@ -116,17 +190,23 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
     {
         pos += (double) hop / juce::jmax (1.0, stretch) * (1.0 - (double) juce::jlimit (0.0f, 1.0f, freeze));
         pos = std::fmod (pos, (double) n);
+        if (partner != nullptr && partner->getNumSamples() >= 2)
+        {
+            posB += (double) hop / juce::jmax (1.0, stretch) * (1.0 - (double) juce::jlimit (0.0f, 1.0f, freeze));
+            posB = std::fmod (posB, (double) partner->getNumSamples());
+        }
     }
 }
 
 void SpectralStretch::process (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze,
-                               float* outL, float* outR, int num)
+                               float* outL, float* outR, int num,
+                               const juce::AudioBuffer<float>* partner, float morph)
 {
     for (int i = 0; i < num; ++i)
     {
         if (readIdx >= hop)
         {
-            makeFrame (src, stretch, ratio, blur, freeze, true);
+            makeFrame (src, stretch, ratio, blur, freeze, true, partner, morph);
             readIdx = 0;
         }
         outL[i] = hopOut[0][(size_t) readIdx];

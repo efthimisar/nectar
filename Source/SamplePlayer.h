@@ -43,6 +43,7 @@ public:
         float stretch = 0.0f;    // 0 = off, otherwise extreme stretch (see stretchFactor)
         float blur = 0.0f;       // 0..1 smooths the spectrum (spectral voices)
         float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)
+        float morph = 0.0f;      // 0..1 moves the colour (spectral envelope) towards the partner sound
     };
 
     SamplePlayer();
@@ -62,6 +63,9 @@ public:
     // clearOutput = false adds this player's sound to what is already in `out` (used to mix the slots).
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, bool clearOutput = true);
     bool hasSample() const noexcept { return sample != nullptr; }
+    std::shared_ptr<const Sample> getSample() const { return sample; }
+    // The sound this one morphs towards (set from the audio thread; nullptr = none).
+    void setPartner (const std::shared_ptr<const Sample>& s) { if (s.get() != partner.get()) partner = s; }
     // How many voices a new note may use (the processor shares a fixed budget between the loaded slots).
     void setVoiceLimit (int n) noexcept { voiceLimit = juce::jlimit (1, kVoices, n); }
     static constexpr int kMaxVoices = 32;
@@ -87,6 +91,7 @@ private:
         juce::ADSR adsr;
     };
 
+    const juce::AudioBuffer<float>* partnerBuffer (const Params& p) const noexcept;
     void noteOn (int note, float velocity, const Params& p);
     void noteOff (int note, const Params& p);
     void renderTape (Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
@@ -98,7 +103,7 @@ private:
     std::array<std::unique_ptr<Stretch>, kStretchVoices> stretchers;
     std::array<SpectralStretch, kSpectralVoices> spectrals;
     std::vector<float> inL, inR, outL, outR, specL, specR;
-    std::shared_ptr<const Sample> sample;
+    std::shared_ptr<const Sample> sample, partner;
     double sr = 44100.0;
     int voiceLimit = 32;
     juce::uint64 counter = 0;

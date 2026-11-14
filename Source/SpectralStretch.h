@@ -15,22 +15,33 @@ class SpectralStretch
 public:
     void prepare (double sampleRate);
     // pos = where in the sample to start (in samples)
-    void start (const juce::AudioBuffer<float>& src, double startPos, double ratio);
+    // partner / morph: see process()
+    void start (const juce::AudioBuffer<float>& src, double startPos, double ratio,
+                const juce::AudioBuffer<float>* partner = nullptr, float morph = 0.0f);
     // Writes n samples. stretch >= 1 (time slows down by that factor), ratio = pitch ratio (1 = original),
     // blur 0..1 (smooths the spectrum, loudness stays), freeze 0..1 (1 = the position in the sound stops).
+    // Morph (0..1) with a partner sound: the spectral envelope (the broad shape of the spectrum, i.e. the "colour")
+    // moves from this sound's towards the partner's, while this sound's pitch and fine structure stay.
+    // partner = nullptr or morph = 0: no effect at all.
     void process (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze,
-                  float* outL, float* outR, int n);
+                  float* outL, float* outR, int n,
+                  const juce::AudioBuffer<float>* partner = nullptr, float morph = 0.0f);
 
     int frameSize() const noexcept { return N; }
 
 private:
-    void makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance);
+    void makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance,
+                    const juce::AudioBuffer<float>* partner, float morph);
+    void applyMorph (const juce::AudioBuffer<float>& partner, int channel, float morph);
+    void envelope (const float* in, float* out); // broad spectral shape (two box filters whose width grows with frequency)
 
     static constexpr float kGain = 1.41421356f; // measured: restores the level that the random phases and the two windows take away
 
     int order = 14, N = 1 << 14, hop = 1 << 13;
     std::unique_ptr<juce::dsp::FFT> fft;
     std::vector<float> window, work, mag, shifted, smooth, prefix;
+    std::vector<float> workB, magB, envA, envB, envTmp; // morph
+    double rate = 44100.0, posB = 0.0;
     std::vector<float> tail[2], hopOut[2];
     int readIdx = 0;
     double pos = 0.0;
