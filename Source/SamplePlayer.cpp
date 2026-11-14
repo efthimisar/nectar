@@ -253,7 +253,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.inAccum = 0.0;
     v.velocity = velocity;
     v.startedAt = ++counter;
-    v.spectral = index < kSpectralVoices && stretchOn (p.stretch);
+    v.spectral = index < kSpectralVoices && spectralOn (p);
     v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
@@ -366,7 +366,7 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
 void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
-    const double factor = stretchFactor (p.stretch);
+    const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
     const float gain = p.level * p.level * v.velocity;
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
@@ -375,7 +375,7 @@ void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>
     while (done < num)
     {
         const int chunk = juce::jmin (kChunk, num - done);
-        spectrals[(size_t) index].process (sample->play, factor, R, specL.data(), specR.data(), chunk);
+        spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk);
         for (int i = 0; i < chunk; ++i)
         {
             const float env = v.adsr.getNextSample() * gain;

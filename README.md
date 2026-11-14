@@ -8,4 +8,4 @@ GitHub → Actions → "Build Nektar (macOS, Apple Silicon)" → Run workflow.
 The result is `Nektar-macOS-arm64.zip` under the run's Artifacts (contains `Nektar.vst3` and `Nektar.app`).
 
 ## Status
-Step 7: cleaning per slot (Noise, Hum, Low cut knobs; analysis report in the centre screen; Room tone button in the standalone). Four slots, Stretch, Keep length, Loop, microphone recording. Other knobs are not wired yet.
+Step 8A: Spectral module with Bright (tilt), Blur and Freeze. Cleaning per slot (Noise, Hum, Low cut; analysis report; Room tone). Four slots, Stretch, Keep length, Loop, microphone recording. Other knobs are not wired yet.

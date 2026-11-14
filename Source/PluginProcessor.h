@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include "SamplePlayer.h"
+#include "TiltFilter.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -71,6 +72,7 @@ private:
     friend class CleanJob;
 
     std::array<SamplePlayer, kSlots> players;
+    TiltFilter tilt;
     juce::AudioFormatManager formats;
     mutable juce::SpinLock sampleLock;
     std::array<std::shared_ptr<const Sample>, kSlots> currentSamples; // owned by the UI side
@@ -79,6 +81,9 @@ private:
     std::atomic<int> recSlot { 0 };
     std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {}, tailP {};
     std::array<std::atomic<float>*, kSlots> noiseP {}, humP {}, lowCutP {};
+    std::atomic<float>* brightP = nullptr;
+    std::atomic<float>* blurP = nullptr;
+    std::atomic<float>* freezeP = nullptr;
 
     // cleaning (analysis, noise, hum, low cut) runs in a background thread; the result replaces the sound of the slot
     std::array<std::atomic<bool>, kSlots> cleanDirty {};

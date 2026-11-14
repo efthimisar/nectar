@@ -41,6 +41,8 @@ public:
         float keepLength = 1.0f; // 0..1
         bool loop = false;       // sustain: a smooth loop in a steady part of the sound
         float stretch = 0.0f;    // 0 = off, otherwise extreme stretch (see stretchFactor)
+        float blur = 0.0f;       // 0..1 smooths the spectrum (spectral voices)
+        float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)
     };
 
     SamplePlayer();
@@ -52,6 +54,8 @@ public:
     // knob 0..1 -> how many times slower the sound moves (0 / tiny = off). 0.01 -> x2, 1 -> x256
     static double stretchFactor (float knob) noexcept;
     static bool stretchOn (float knob) noexcept { return knob > 0.01f; }
+    // the spectral (random-phase) voices are used when stretch, blur or freeze is up
+    static bool spectralOn (const Params& p) noexcept { return p.stretch > 0.01f || p.blur > 0.01f || p.freeze > 0.01f; }
 
     void prepare (double sampleRate);
     void setSample (std::shared_ptr<const Sample> s);

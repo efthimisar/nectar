@@ -13,6 +13,8 @@ void SpectralStretch::prepare (double sampleRate)
     work.assign ((size_t) N * 2, 0.0f);
     mag.assign ((size_t) N / 2 + 1, 0.0f);
     shifted.assign ((size_t) N / 2 + 1, 0.0f);
+    smooth.assign ((size_t) N / 2 + 1, 0.0f);
+    prefix.assign ((size_t) N / 2 + 2, 0.0f);
     for (int c = 0; c < 2; ++c)
     {
         tail[c].assign ((size_t) hop, 0.0f);
@@ -31,11 +33,11 @@ void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPo
         std::fill (hopOut[c].begin(), hopOut[c].end(), 0.0f);
     }
     // One frame in advance, so that the very first output is already at full level (no slow fade-in).
-    makeFrame (src, 1.0, ratio, false);
+    makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false);
     readIdx = hop; // the next call to process() makes the second frame
 }
 
-void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, bool advance)
+void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance)
 {
     const int n = src.getNumSamples();
     const int chs = src.getNumChannels();
@@ -70,6 +72,29 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
             shifted[(size_t) k] = mag[(size_t) i0] * (1.0f - f) + mag[(size_t) (i0 + 1)] * f;
         }
 
+        if (blur > 0.01f)
+        {
+            // smooth the spectrum with a triangle (two box filters); the loudness is kept
+            const int hw = juce::jmax (1, (int) std::lround ((1.0 + 79.0 * (double) blur * blur) * (double) N / 16384.0));
+            double before = 0.0;
+            for (int k = 0; k <= bins; ++k) before += (double) shifted[(size_t) k] * shifted[(size_t) k];
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                prefix[0] = 0.0f;
+                for (int k = 0; k <= bins; ++k) prefix[(size_t) k + 1] = prefix[(size_t) k] + shifted[(size_t) k];
+                for (int k = 0; k <= bins; ++k)
+                {
+                    const int a = juce::jmax (0, k - hw), b = juce::jmin (bins, k + hw);
+                    smooth[(size_t) k] = (prefix[(size_t) b + 1] - prefix[(size_t) a]) / (float) (b - a + 1);
+                }
+                shifted.swap (smooth);
+            }
+            double after = 0.0;
+            for (int k = 0; k <= bins; ++k) after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+            const float fix = (float) std::sqrt (before / juce::jmax (1.0e-20, after));
+            for (int k = 0; k <= bins; ++k) shifted[(size_t) k] *= fix;
+        }
+
         for (int k = 0; k <= bins; ++k)
         {
             const float ph = rng.nextFloat() * juce::MathConstants<float>::twoPi;
@@ -89,18 +114,19 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
 
     if (advance)
     {
-        pos += (double) hop / juce::jmax (1.0, stretch);
+        pos += (double) hop / juce::jmax (1.0, stretch) * (1.0 - (double) juce::jlimit (0.0f, 1.0f, freeze));
         pos = std::fmod (pos, (double) n);
     }
 }
 
-void SpectralStretch::process (const juce::AudioBuffer<float>& src, double stretch, double ratio, float* outL, float* outR, int num)
+void SpectralStretch::process (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze,
+                               float* outL, float* outR, int num)
 {
     for (int i = 0; i < num; ++i)
     {
         if (readIdx >= hop)
         {
-            makeFrame (src, stretch, ratio, true);
+            makeFrame (src, stretch, ratio, blur, freeze, true);
             readIdx = 0;
         }
         outL[i] = hopOut[0][(size_t) readIdx];

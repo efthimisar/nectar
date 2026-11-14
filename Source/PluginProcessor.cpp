@@ -75,6 +75,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "stretch", 1 }, "Stretch",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bright", 1 }, "Bright",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "blur", 1 }, "Blur",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
 }
 
@@ -107,6 +113,9 @@ NektarProcessor::NektarProcessor()
         latestJob[(size_t) slot] = 0;
     }
     startTimer (100);
+    brightP = apvts.getRawParameterValue ("bright");
+    blurP = apvts.getRawParameterValue ("blur");
+    freezeP = apvts.getRawParameterValue ("freeze");
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -205,6 +214,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int)
 {
     for (auto& pl : players)
         pl.prepare (sampleRate);
+    tilt.prepare (sampleRate);
     keyboardState.reset();
     if (recordingAllowed && recState.load() == 0)
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
@@ -287,6 +297,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
     p.keepLength = apvts.getRawParameterValue ("keeplength")->load();
     p.stretch = apvts.getRawParameterValue ("stretch")->load();
+    p.blur = blurP->load();
+    p.freeze = freezeP->load();
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;
@@ -306,6 +318,10 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         pl.setVoiceLimit (limit);
         pl.process (buffer, midi, p, false);
     }
+
+    // Bright: tilt of the whole sound (0.5 = off)
+    tilt.setTilt ((brightP->load() - 0.5f) * 2.0f * 9.0f);
+    tilt.process (buffer);
     midi.clear();
 }
 
