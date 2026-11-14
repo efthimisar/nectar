@@ -13,7 +13,10 @@ jobs:
       - name: Cache JUCE download
         uses: actions/cache@v4
         with:
-          path: build/_deps/juce-src
+          path: |
+            build/_deps/juce-src
+            build/_deps/sstretch-src
+            build/_deps/slinear-src
           key: juce-8.0.6-${{ runner.os }}
 
       - name: Configure

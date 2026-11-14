@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <atomic>
 #include "SamplePlayer.h"
 
 class NektarProcessor : public juce::AudioProcessor,
@@ -49,6 +50,7 @@ private:
     std::shared_ptr<const Sample> currentSample;   // owned by the UI side
     std::shared_ptr<const Sample> pendingSample;   // handed to the audio thread
     bool samplePending = false;
+    std::atomic<double> hostRate { 44100.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NektarProcessor)
 };

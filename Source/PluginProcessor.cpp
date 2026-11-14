@@ -16,6 +16,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
                                                          juce::AudioParameterFloatAttributes().withLabel ("s")));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
     return l;
 }
 
@@ -30,6 +32,19 @@ void NektarProcessor::prepareToPlay (double sampleRate, int)
 {
     player.prepare (sampleRate);
     keyboardState.reset();
+
+    // the sound must be converted to the new host rate
+    hostRate = sampleRate;
+    if (auto s = getSample())
+        if (std::abs (s->playRate - sampleRate) > 0.5)
+        {
+            auto copy = std::make_shared<Sample> (*s);
+            SamplePlayer::makePlayable (*copy, sampleRate);
+            const juce::SpinLock::ScopedLockType lock (sampleLock);
+            currentSample = copy;
+            pendingSample = copy;
+            samplePending = true;
+        }
 }
 
 bool NektarProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -57,6 +72,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.pitchSemis = apvts.getRawParameterValue ("pitch")->load();
     p.releaseSec = apvts.getRawParameterValue ("tail")->load();
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
+    p.keepLength = apvts.getRawParameterValue ("keeplength")->load();
 
     player.process (buffer, midi, p);
     midi.clear();
@@ -78,6 +94,8 @@ juce::String NektarProcessor::loadSample (const juce::File& file)
     s->path = file.getFullPathName();
     s->data.setSize ((int) juce::jmin (2u, reader->numChannels), (int) reader->lengthInSamples);
     reader->read (&s->data, 0, (int) reader->lengthInSamples, 0, true, s->data.getNumChannels() > 1);
+
+    SamplePlayer::makePlayable (*s, hostRate.load());
 
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);

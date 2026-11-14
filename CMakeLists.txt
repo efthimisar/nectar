@@ -12,6 +12,18 @@ FetchContent_Declare(juce
   GIT_SHALLOW ON)
 FetchContent_MakeAvailable(juce)
 
+# Signalsmith Stretch (MIT) - pitch/time library, header-only. Fetched without its own CMake files.
+FetchContent_Declare(sstretch
+  GIT_REPOSITORY https://github.com/Signalsmith-Audio/signalsmith-stretch.git
+  GIT_TAG 88061fd4eda56a2353c5d65c74aa3f4ccf76f9da
+  SOURCE_SUBDIR not-used)
+FetchContent_Declare(slinear
+  GIT_REPOSITORY https://github.com/Signalsmith-Audio/linear.git
+  GIT_TAG 0.6.6
+  GIT_SHALLOW ON
+  SOURCE_SUBDIR not-used)
+FetchContent_MakeAvailable(sstretch slinear)
+
 juce_add_binary_data(NektarAssets SOURCES
   assets/Carlito-Regular.ttf
   assets/Carlito-Bold.ttf)
@@ -34,6 +46,10 @@ target_sources(Nektar PRIVATE
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp
   Source/SamplePlayer.cpp)
+
+target_include_directories(Nektar SYSTEM PRIVATE
+  ${sstretch_SOURCE_DIR}/include
+  ${slinear_SOURCE_DIR}/include)
 
 target_compile_definitions(Nektar PUBLIC
   JUCE_WEB_BROWSER=0
