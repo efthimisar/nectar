@@ -1,6 +1,49 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+// Cleans one slot in the background: analysis once per sound, then low cut, hum and noise reduction.
+class CleanJob : public juce::ThreadPoolJob
+{
+public:
+    CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
+              SampleCleaner::NoiseProfile room, double rate)
+        : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
+          roomCopy (std::move (room)), hostRate (rate) {}
+
+    JobStatus runJob() override
+    {
+        if (generation != owner.latestJob[(size_t) slot].load() || shouldExit())
+            return jobHasFinished;
+        auto s = std::make_shared<Sample> (*base);
+        if (! s->analysis.valid)
+        {
+            s->analysis = SampleCleaner::analyse (s->data, s->rate);
+            s->autoProfile = SampleCleaner::estimateProfile (s->data, s->rate, true);
+        }
+        if (params.any())
+        {
+            const auto& prof = roomCopy.valid ? roomCopy : s->autoProfile;
+            s->cleaned = SampleCleaner::clean (s->data, s->rate, params, prof, s->analysis.humHz, s->analysis.humHarmonics);
+        }
+        else
+            s->cleaned.setSize (0, 0);
+        if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
+            return jobHasFinished;
+        SamplePlayer::makePlayable (*s, hostRate);
+        const juce::ScopedLock sl (owner.resultLock);
+        owner.results[(size_t) slot] = s;
+        return jobHasFinished;
+    }
+
+private:
+    NektarProcessor& owner;
+    int slot, generation;
+    std::shared_ptr<const Sample> base;
+    SampleCleaner::CleanParams params;
+    SampleCleaner::NoiseProfile roomCopy;
+    double hostRate;
+};
+
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
 {
     using juce::NormalisableRange;
@@ -20,6 +63,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail" + sfx, 1 }, "Tail" + nm,
                                                              NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("s")));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lowcut" + sfx, 1 }, "Low cut" + nm,
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     }
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
@@ -48,9 +97,108 @@ NektarProcessor::NektarProcessor()
         levelP[(size_t) slot] = apvts.getRawParameterValue ("level" + sfx);
         pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
         tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
+        noiseP[(size_t) slot] = apvts.getRawParameterValue ("noise" + sfx);
+        humP[(size_t) slot] = apvts.getRawParameterValue ("hum" + sfx);
+        lowCutP[(size_t) slot] = apvts.getRawParameterValue ("lowcut" + sfx);
+        apvts.addParameterListener ("noise" + sfx, this);
+        apvts.addParameterListener ("hum" + sfx, this);
+        apvts.addParameterListener ("lowcut" + sfx, this);
+        cleanDirty[(size_t) slot] = false;
+        latestJob[(size_t) slot] = 0;
     }
+    startTimer (100);
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
+}
+
+NektarProcessor::~NektarProcessor()
+{
+    stopTimer();
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        apvts.removeParameterListener ("noise" + sfx, this);
+        apvts.removeParameterListener ("hum" + sfx, this);
+        apvts.removeParameterListener ("lowcut" + sfx, this);
+    }
+    cleanPool.removeAllJobs (true, 20000);
+}
+
+void NektarProcessor::parameterChanged (const juce::String& id, float)
+{
+    const juce::juce_wchar last = id.getLastCharacter();
+    const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
+    cleanDirty[(size_t) slot] = true;
+}
+
+void NektarProcessor::timerCallback()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (cleanDirty[(size_t) slot].load() && now - cleanChangedAt[(size_t) slot].load() >= 250) // wait until the knob stops moving
+        {
+            cleanDirty[(size_t) slot] = false;
+            scheduleClean (slot);
+        }
+
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        std::shared_ptr<Sample> r;
+        {
+            const juce::ScopedLock sl (resultLock);
+            r = std::move (results[(size_t) slot]);
+            results[(size_t) slot] = nullptr;
+        }
+        if (r != nullptr)
+            installResult (slot, r);
+    }
+}
+
+void NektarProcessor::scheduleClean (int slot)
+{
+    auto base = getSample (slot);
+    if (base == nullptr)
+        return;
+    SampleCleaner::CleanParams cp;
+    cp.noise = noiseP[(size_t) slot]->load();
+    cp.hum = humP[(size_t) slot]->load();
+    cp.lowCut = lowCutP[(size_t) slot]->load();
+    SampleCleaner::NoiseProfile room;
+    {
+        const juce::ScopedLock sl (roomLock);
+        room = roomProfile;
+    }
+    const int gen = ++latestJob[(size_t) slot];
+    cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load()), true);
+}
+
+void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
+{
+    if (s->serial != serials[(size_t) slot])
+        return; // another sound was loaded in the meantime
+    if (std::abs (s->playRate - hostRate.load()) > 0.5)
+        s->serial = ++serials[(size_t) slot];
+    SamplePlayer::makePlayable (*s, hostRate.load());
+    {
+        const juce::SpinLock::ScopedLockType lock (sampleLock);
+        currentSamples[(size_t) slot] = s;
+        pendingSamples[(size_t) slot] = s;
+        samplePending[(size_t) slot] = true;
+    }
+    sendChangeMessage();
+}
+
+void NektarProcessor::recleanAll()
+{
+    for (int slot = 0; slot < kSlots; ++slot)
+        scheduleClean (slot);
+}
+
+bool NektarProcessor::hasRoomTone() const
+{
+    const juce::ScopedLock sl (roomLock);
+    return roomProfile.valid;
 }
 
 void NektarProcessor::prepareToPlay (double sampleRate, int)
@@ -194,6 +342,7 @@ void NektarProcessor::publishSample (std::shared_ptr<Sample> s, int slot)
         samplePending[(size_t) slot] = true;
     }
     sendChangeMessage();
+    scheduleClean (slot); // analysis (and cleaning, if the knobs are up)
 }
 
 // ---- microphone recording
@@ -201,7 +350,7 @@ void NektarProcessor::startRecording (int slot)
 {
     if (! recordingAllowed || recState.load() == 1)
         return;
-    recSlot.store (juce::jlimit (0, kSlots - 1, slot));
+    recSlot.store (juce::jlimit (-1, kSlots - 1, slot));
     recChannels.store (juce::jlimit (1, 2, getTotalNumInputChannels()));
     recBuffer.clear();
     recPos.store (0);
@@ -214,15 +363,30 @@ double NektarProcessor::getRecordedSeconds() const
     return sr > 0.0 ? (double) recPos.load() / sr : 0.0;
 }
 
-void NektarProcessor::stopRecording()
+juce::String NektarProcessor::stopRecording()
 {
     if (recState.load() == 0)
-        return;
+        return {};
     recState.store (0);
     const int n = recPos.load();
     const int ch = recChannels.load();
+    if (recSlot.load() < 0) // room tone: only the noise profile is kept
+    {
+        if (n < (int) (hostRate.load() * 0.5))
+            return "Room tone is too short (0.5 s or more).";
+        juce::AudioBuffer<float> room (ch, n);
+        for (int c = 0; c < ch; ++c)
+            room.copyFrom (c, 0, recBuffer, c, 0, n);
+        auto prof = SampleCleaner::estimateProfile (room, hostRate.load(), false);
+        {
+            const juce::ScopedLock sl (roomLock);
+            roomProfile = prof;
+        }
+        recleanAll();
+        return "Room tone saved.";
+    }
     if (n < (int) (hostRate.load() * 0.1)) // shorter than 0.1 s: ignore
-        return;
+        return {};
 
     auto s = std::make_shared<Sample>();
     s->rate = hostRate.load();
@@ -232,6 +396,7 @@ void NektarProcessor::stopRecording()
     for (int c = 0; c < ch; ++c)
         s->data.copyFrom (c, 0, recBuffer, c, 0, n);
     publishSample (s, recSlot.load());
+    return {};
 }
 
 juce::File NektarProcessor::getLibraryFolder()

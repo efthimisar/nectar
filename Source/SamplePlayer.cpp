@@ -63,12 +63,13 @@ SamplePlayer::~SamplePlayer() = default;
 // ---------------------------------------------------------------- preparing a sound for playback
 void SamplePlayer::makePlayable (Sample& s, double hostRate)
 {
-    const int ch = s.data.getNumChannels();
-    const int nIn = s.data.getNumSamples();
+    const auto& src0 = s.cleaned.getNumSamples() > 0 ? s.cleaned : s.data; // the cleaned sound, if there is one
+    const int ch = src0.getNumChannels();
+    const int nIn = src0.getNumSamples();
 
     // 1. convert to the host sample rate (so everything after this is simple)
     if (std::abs (s.rate - hostRate) < 0.5)
-        s.play = s.data;
+        s.play = src0;
     else
     {
         const double step = s.rate / hostRate; // input samples per output sample
@@ -77,7 +78,7 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
         s.play.setSize (ch, nOut);
         for (int c = 0; c < ch; ++c)
         {
-            const float* src = s.data.getReadPointer (c);
+            const float* src = src0.getReadPointer (c);
             float* dst = s.play.getWritePointer (c);
             for (int i = 0; i < nOut; ++i)
                 dst[i] = sincRead (src, nIn, (double) i * step, cut, 0, 0);

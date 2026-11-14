@@ -71,6 +71,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void toggleRecording();
+    void toggleRoomTone();
     void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);

@@ -75,6 +75,28 @@ void sphere (Graphics& g, float x, float y, float s, Colour c)
     g.fillEllipse (x - s, y - s, 2 * s, 2 * s);
 }
 
+// Heights of 40 bars that draw the sound (0..1), or nothing for an empty slot.
+juce::Array<float> peaksOf (const Sample* smp)
+{
+    juce::Array<float> peaks;
+    if (smp == nullptr)
+        return peaks;
+    const int n = smp->data.getNumSamples();
+    const int bars = 40;
+    float mx = 1.0e-6f;
+    for (int b = 0; b < bars; ++b)
+    {
+        const int a = (int) ((juce::int64) n * b / bars), e = juce::jmax (a + 1, (int) ((juce::int64) n * (b + 1) / bars));
+        float m = 0.0f;
+        for (int c = 0; c < smp->data.getNumChannels(); ++c)
+            m = juce::jmax (m, smp->data.findMinMax (c, a, e - a).getLength() * 0.5f);
+        peaks.add (m);
+        mx = juce::jmax (mx, m);
+    }
+    for (auto& v : peaks) v /= mx;
+    return peaks;
+}
+
 // Slot disc without the knobs (the knobs are live components on top).
 void slotDisc (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface::Ptr& bold,
                float cx, float cy, int index, const juce::String& title, bool empty,
@@ -208,15 +230,16 @@ void KnobComponent::mouseDoubleClick (const juce::MouseEvent&)
 void RecordHud::paint (Graphics& g)
 {
     g.addTransform (juce::AffineTransform::scale ((float) getWidth() / 1000.0f));
-    const bool rec = proc.isRecording();
+    const bool rt = proc.isRecordingRoomTone();
+    const bool rec = proc.isRecording() && ! rt;
     const bool can = proc.canRecord();
     const float a = can ? 1.0f : 0.35f;
 
     // timer
-    const double secs = rec ? proc.getRecordedSeconds() : 0.0;
+    const double secs = (rec || rt) ? proc.getRecordedSeconds() : 0.0;
     const int m = (int) (secs / 60.0);
     const double s = secs - 60.0 * m;
-    g.setColour (kLight.withMultipliedAlpha (rec ? 1.0f : 0.6f));
+    g.setColour (kLight.withMultipliedAlpha ((rec || rt) ? 1.0f : 0.6f));
     g.setFont (font (typeface, 19));
     g.drawText (juce::String::formatted ("%02d:%04.1f", m, s), juce::Rectangle<float> (100, 14, 90, 32), juce::Justification::centredLeft);
 
@@ -226,6 +249,23 @@ void RecordHud::paint (Graphics& g)
     {
         g.setColour (kLight);
         g.fillRoundedRectangle (196, 26, juce::jmax (9.0f, 110.0f * frac), 9, 4.5f);
+    }
+
+    // room tone button: the ring glows while the room is being recorded
+    if (rt)
+    {
+        const float lv = juce::jlimit (0.0f, 1.0f, proc.getInputLevel() * 1.5f);
+        g.setColour (kAcc.withAlpha (0.12f + 0.4f * lv));
+        g.fillEllipse (447 - 27, 30 - 27, 54, 54);
+        g.setColour (Colour (0xff1e1d1b));
+        g.fillEllipse (447 - 21, 30 - 21, 42, 42);
+        g.setColour (kAcc);
+        g.drawEllipse (447 - 21, 30 - 21, 42, 42, 2.0f);
+        for (int k = -2; k <= 2; ++k)
+        {
+            const float hh = 4.0f + (float) (3 - std::abs (k)) * 3.0f;
+            g.drawLine (447 + (float) k * 4.5f, 30 - hh, 447 + (float) k * 4.5f, 30 + hh, 2.0f);
+        }
     }
 
     // record button: ring glows with the microphone level while recording
@@ -272,11 +312,17 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
             static const char* const levelIds[] = { "level", "level2", "level3", "level4" };
             static const char* const pitchIds[] = { "pitch", "pitch2", "pitch3", "pitch4" };
             static const char* const tailIds[] = { "tail", "tail2", "tail3", "tail4" };
+            static const char* const noiseIds[] = { "noise", "noise2", "noise3", "noise4" };
+            static const char* const humIds[] = { "hum", "hum2", "hum3", "hum4" };
+            static const char* const lowCutIds[] = { "lowcut", "lowcut2", "lowcut3", "lowcut4" };
             if (i == 0) id = levelIds[s];
             if (i == 1) id = pitchIds[s];
+            if (i == 2) id = noiseIds[s];
+            if (i == 3) id = humIds[s];
+            if (i == 4) id = lowCutIds[s];
             if (i == 5) id = tailIds[s];
             addKnob (slotX[s] + ((float) (i % 3) - 1.0f) * 52.0f, slotY[s] + 21.0f + (float) (i / 3) * 53.0f, 15.5f,
-                     names[i], s == 2, fixedVals[s][i], id);
+                     names[i], false, fixedVals[s][i], id);
         }
 
     // module panel: 4 modules x 3 knobs (only Loop is wired for now)
@@ -388,6 +434,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         selectSlot (slot);
     else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
         toggleRecording();
+    else if (p.getDistanceFrom ({ 447.0f, 30.0f }) <= 22.0f)
+        toggleRoomTone();
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
         say (proc.saveToLibrary (selectedSlot));
 }
@@ -425,7 +473,7 @@ void NektarEditor::toggleRecording()
     }
     if (proc.isRecording())
     {
-        proc.stopRecording();
+        say (proc.stopRecording());
         return;
     }
     if (message.isNotEmpty())
@@ -433,10 +481,28 @@ void NektarEditor::toggleRecording()
     proc.startRecording (selectedSlot);
 }
 
+void NektarEditor::toggleRoomTone()
+{
+    if (! proc.canRecord())
+    {
+        say ("Room tone works in the standalone app.");
+        return;
+    }
+    if (proc.isRecordingRoomTone())
+    {
+        say (proc.stopRecording());
+        return;
+    }
+    if (proc.isRecording())
+        return; // a normal recording is running
+    say ("Keep quiet: recording the room. Click again.");
+    proc.startRecording (-1);
+}
+
 void NektarEditor::timerCallback()
 {
     if (proc.recordingFinishedByLimit())
-        proc.stopRecording();
+        say (proc.stopRecording());
     if (proc.isRecording() || hudWasRecording)
         hud->repaint();
     hudWasRecording = proc.isRecording();
@@ -652,48 +718,53 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setGradientFill (ColourGradient (Colour (0xff181716), kCx - 40, kCy - 60, Colour (0xff201f1d), kCx + 60, kCy + 70, false));
     g.fillEllipse (kCx - 94, kCy - 94, 188, 188);
 
+    const auto sel = proc.getSample (selectedSlot);
     g.setColour (kMuted);
     g.setFont (font (reg, 13));
     g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot ")) + juce::String (selectedSlot + 1), juce::Rectangle<float> (kCx - 80, kCy - 88, 160, 18), juce::Justification::centred);
-    wave (g, kCx, kCy - 52, 114, 10.0f, 11, 1.2f, 34);
-    const char* rows[] = { "Noise floor", "Hum 50 Hz", "Clipping" };
-    const char* vals[] = { "-58 dB", "+3 harm.", "none" };
+    {
+        const auto pk = peaksOf (sel.get());
+        if (pk.size() > 0)
+            realWave (g, kCx, kCy - 52, 114, 10.0f, pk);
+    }
+    const char* rows[] = { "Noise floor", "Hum", "Clipping" };
+    juce::String vals[3] = { "-", "-", "-" };
+    bool good[3] = { false, false, false };
+    if (sel != nullptr && ! sel->analysis.valid)
+        vals[0] = "analysing...";
+    else if (sel != nullptr)
+    {
+        const auto& an = sel->analysis;
+        vals[0] = juce::String (an.noiseFloorDb, 0) + " dB";
+        good[0] = an.noiseFloorDb <= -45.0f;
+        if (an.humHz > 0) vals[1] = juce::String (an.humHz) + " Hz, " + juce::String (an.humHarmonics) + " harm.";
+        else              { vals[1] = "none"; good[1] = true; }
+        if (an.clippedSpots > 0) vals[2] = juce::String (an.clippedSpots) + " spots";
+        else                     { vals[2] = "none"; good[2] = true; }
+    }
     for (int i = 0; i < 3; ++i)
     {
         const float y = kCy - 12 + (float) i * 22.0f;
         g.setColour (kAcc);
-        if (i < 2) g.fillEllipse (kCx - 80, y - 5, 10, 10);
-        else       g.drawEllipse (kCx - 79.5f, y - 4.5f, 9, 9, 1.3f);
+        if (good[i]) g.fillEllipse (kCx - 80, y - 5, 10, 10);
+        else         g.drawEllipse (kCx - 79.5f, y - 4.5f, 9, 9, 1.3f);
         g.setColour (kLight);
         g.setFont (font (reg, 14));
         g.drawText (rows[i], juce::Rectangle<float> (kCx - 64, y - 9, 90, 18), juce::Justification::centredLeft);
         g.setColour (kMuted);
-        g.setFont (font (reg, 13));
-        g.drawText (vals[i], juce::Rectangle<float> (kCx + 10, y - 9, 70, 18), juce::Justification::centredRight);
+        g.setFont (font (reg, 12));
+        g.drawText (vals[i], juce::Rectangle<float> (kCx - 4, y - 9, 84, 18), juce::Justification::centredRight);
     }
+    g.setColour (kMuted.withAlpha (0.8f));
+    g.setFont (font (reg, 11));
+    g.drawText (proc.hasRoomTone() ? "room tone: recorded" : "room tone: automatic", juce::Rectangle<float> (kCx - 70, kCy + 58, 140, 16), juce::Justification::centred);
 
     // ---- four slots: each one holds its own sound
     const float p3[] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f };
     for (int slot = 0; slot < 4; ++slot)
     {
         const auto smp = proc.getSample (slot);
-        juce::Array<float> peaks;
-        if (smp != nullptr)
-        {
-            const int n = smp->data.getNumSamples();
-            const int bars = 40;
-            float mx = 1.0e-6f;
-            for (int b = 0; b < bars; ++b)
-            {
-                const int a = (int) ((juce::int64) n * b / bars), e = juce::jmax (a + 1, (int) ((juce::int64) n * (b + 1) / bars));
-                float m = 0.0f;
-                for (int c = 0; c < smp->data.getNumChannels(); ++c)
-                    m = juce::jmax (m, smp->data.findMinMax (c, a, e - a).getLength() * 0.5f);
-                peaks.add (m);
-                mx = juce::jmax (mx, m);
-            }
-            for (auto& v : peaks) v /= mx;
-        }
+        const auto peaks = peaksOf (smp.get());
         slotDisc (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String ("Empty"),
                   smp == nullptr, "load WAV", &peaks, 0, slot == selectedSlot);
     }

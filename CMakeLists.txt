@@ -46,7 +46,8 @@ target_sources(Nektar PRIVATE
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp
   Source/SamplePlayer.cpp
-  Source/SpectralStretch.cpp)
+  Source/SpectralStretch.cpp
+  Source/SampleCleaner.cpp)
 
 # Own standalone app (so the microphone input is not muted by default and we can go full screen later)
 target_sources(Nektar_Standalone PRIVATE Source/StandaloneApp.cpp)

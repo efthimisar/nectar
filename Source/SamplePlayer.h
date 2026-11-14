@@ -5,11 +5,16 @@
 #include <memory>
 #include <vector>
 #include "SpectralStretch.h"
+#include "SampleCleaner.h"
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
 struct Sample
 {
     juce::AudioBuffer<float> data; // as read from the file
+    juce::AudioBuffer<float> cleaned;                // data after cleaning (0 samples = not cleaned); what is played
+    SampleCleaner::Analysis analysis;                // what was found in the sound
+    SampleCleaner::NoiseProfile autoProfile;         // noise estimated from the quietest parts
+    int serial = 0;                                  // which loaded sound this belongs to
     double rate = 44100.0;         // file sample rate
     juce::String name;
     juce::String path;

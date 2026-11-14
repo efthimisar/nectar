@@ -6,11 +6,13 @@
 #include "SamplePlayer.h"
 
 class NektarProcessor : public juce::AudioProcessor,
-                        public juce::ChangeBroadcaster
+                        public juce::ChangeBroadcaster,
+                        private juce::AudioProcessorValueTreeState::Listener,
+                        private juce::Timer
 {
 public:
     NektarProcessor();
-    ~NektarProcessor() override = default;
+    ~NektarProcessor() override;
 
     void prepareToPlay (double sampleRate, int) override;
     void releaseResources() override {}
@@ -42,9 +44,12 @@ public:
     // Recording from the microphone (standalone app only).
     static constexpr double kMaxRecordSeconds = 60.0;
     bool canRecord() const { return recordingAllowed; }
-    void startRecording (int slot);  // the recording goes into this slot when it stops
-    void stopRecording();            // message thread: turns what was recorded into the sound of that slot
+    void startRecording (int slot);  // the recording goes into this slot when it stops (-1 = room tone)
+    juce::String stopRecording();    // message thread: turns what was recorded into the sound of that slot; returns a message, if any
+    bool isRecordingRoomTone() const { return recState.load() == 1 && recSlot.load() < 0; }
+    bool hasRoomTone() const;
     bool isRecording() const { return recState.load() == 1; }
+    void recleanAll();               // runs the cleaning again for every slot (e.g. after a new room tone)
     bool recordingFinishedByLimit() const { return recState.load() == 2; }
     double getRecordedSeconds() const;
     float getInputLevel() const { return inputLevel.load(); }
@@ -59,6 +64,11 @@ private:
     static BusesProperties makeBuses();
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void publishSample (std::shared_ptr<Sample> s, int slot);
+    void parameterChanged (const juce::String& id, float) override;
+    void timerCallback() override;
+    void scheduleClean (int slot);
+    void installResult (int slot, std::shared_ptr<Sample> s);
+    friend class CleanJob;
 
     std::array<SamplePlayer, kSlots> players;
     juce::AudioFormatManager formats;
@@ -68,6 +78,18 @@ private:
     std::array<bool, kSlots> samplePending {};
     std::atomic<int> recSlot { 0 };
     std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {}, tailP {};
+    std::array<std::atomic<float>*, kSlots> noiseP {}, humP {}, lowCutP {};
+
+    // cleaning (analysis, noise, hum, low cut) runs in a background thread; the result replaces the sound of the slot
+    std::array<std::atomic<bool>, kSlots> cleanDirty {};
+    std::array<std::atomic<juce::uint32>, kSlots> cleanChangedAt {};
+    std::array<std::atomic<int>, kSlots> latestJob {};
+    std::array<int, kSlots> serials {};                       // message thread only
+    juce::CriticalSection resultLock;
+    std::array<std::shared_ptr<Sample>, kSlots> results;      // finished by the background thread, waiting to be installed
+    mutable juce::CriticalSection roomLock;
+    SampleCleaner::NoiseProfile roomProfile;                  // recorded room tone (all slots), not saved with the project
+    juce::ThreadPool cleanPool { 1 };
     std::atomic<double> hostRate { 44100.0 };
 
     bool recordingAllowed = false;
