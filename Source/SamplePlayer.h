@@ -50,7 +50,12 @@ public:
 
     void prepare (double sampleRate);
     void setSample (std::shared_ptr<const Sample> s);
-    void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p);
+    // clearOutput = false adds this player's sound to what is already in `out` (used to mix the slots).
+    void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, bool clearOutput = true);
+    bool hasSample() const noexcept { return sample != nullptr; }
+    // How many voices a new note may use (the processor shares a fixed budget between the loaded slots).
+    void setVoiceLimit (int n) noexcept { voiceLimit = juce::jlimit (1, kVoices, n); }
+    static constexpr int kMaxVoices = 32;
 
 private:
     using Stretch = signalsmith::stretch::SignalsmithStretch<float, void>;
@@ -86,5 +91,6 @@ private:
     std::vector<float> inL, inR, outL, outR, specL, specR;
     std::shared_ptr<const Sample> sample;
     double sr = 44100.0;
+    int voiceLimit = 32;
     juce::uint64 counter = 0;
 };

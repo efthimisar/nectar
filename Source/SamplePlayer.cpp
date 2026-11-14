@@ -236,12 +236,12 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
         return;
 
     int index = -1;
-    for (int i = 0; i < kVoices; ++i)
+    for (int i = 0; i < voiceLimit; ++i)
         if (! voices[(size_t) i].active) { index = i; break; }
     if (index < 0) // steal the oldest voice
     {
         index = 0;
-        for (int i = 0; i < kVoices; ++i)
+        for (int i = 0; i < voiceLimit; ++i)
             if (voices[(size_t) i].startedAt < voices[(size_t) index].startedAt) index = i;
     }
 
@@ -391,9 +391,10 @@ void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>
     }
 }
 
-void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
+void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, bool clearOutput)
 {
-    out.clear();
+    if (clearOutput)
+        out.clear();
     const int total = out.getNumSamples();
     int done = 0;
 

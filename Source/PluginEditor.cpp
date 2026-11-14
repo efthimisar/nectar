@@ -11,6 +11,8 @@ const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark 
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f;
+constexpr float kSlotCx[4] = { 205.0f, 795.0f, 205.0f, 795.0f };
+constexpr float kSlotCy[4] = { 262.0f, 262.0f, 590.0f, 590.0f };
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -76,9 +78,14 @@ void sphere (Graphics& g, float x, float y, float s, Colour c)
 // Slot disc without the knobs (the knobs are live components on top).
 void slotDisc (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface::Ptr& bold,
                float cx, float cy, int index, const juce::String& title, bool empty,
-               const juce::String& emptyText, const juce::Array<float>* peaks, int seed)
+               const juce::String& emptyText, const juce::Array<float>* peaks, int seed, bool selected = false)
 {
     shadowCircle (g, cx, cy, kSlotR, 0.5f, 30, { 14, 22 });
+    if (selected)
+    {
+        g.setColour (kAcc.withAlpha (0.85f));
+        g.drawEllipse (cx - kSlotR - 6, cy - kSlotR - 6, 2 * (kSlotR + 6), 2 * (kSlotR + 6), 1.8f);
+    }
     g.setGradientFill (ColourGradient (Colour (0xff3d3b39), cx - kSlotR * 0.6f, cy - kSlotR * 0.7f,
                                        Colour (0xff222120), cx + kSlotR * 0.7f, cy + kSlotR, false));
     g.fillEllipse (cx - kSlotR, cy - kSlotR, 2 * kSlotR, 2 * kSlotR);
@@ -262,9 +269,12 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         for (int i = 0; i < 6; ++i)
         {
             const char* id = nullptr;
-            if (s == 0 && i == 0) id = "level";
-            if (s == 0 && i == 1) id = "pitch";
-            if (s == 0 && i == 5) id = "tail";
+            static const char* const levelIds[] = { "level", "level2", "level3", "level4" };
+            static const char* const pitchIds[] = { "pitch", "pitch2", "pitch3", "pitch4" };
+            static const char* const tailIds[] = { "tail", "tail2", "tail3", "tail4" };
+            if (i == 0) id = levelIds[s];
+            if (i == 1) id = pitchIds[s];
+            if (i == 5) id = tailIds[s];
             addKnob (slotX[s] + ((float) (i % 3) - 1.0f) * 52.0f, slotY[s] + 21.0f + (float) (i / 3) * 53.0f, 15.5f,
                      names[i], s == 2, fixedVals[s][i], id);
         }
@@ -368,12 +378,35 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / 1000.0f);
-    if (juce::Rectangle<float> (125, 194, 160, 46).contains (p))
-        chooseFile();
+    const int slot = slotAt (p);
+    if (slot >= 0 && juce::Rectangle<float> (kSlotCx[slot] - 80, kSlotCy[slot] - 68, 160, 46).contains (p))
+    {
+        selectSlot (slot);
+        chooseFile (slot);
+    }
+    else if (slot >= 0)
+        selectSlot (slot);
     else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
         toggleRecording();
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
-        say (proc.saveToLibrary());
+        say (proc.saveToLibrary (selectedSlot));
+}
+
+int NektarEditor::slotAt (juce::Point<float> p) const
+{
+    for (int i = 0; i < 4; ++i)
+        if (p.getDistanceFrom ({ kSlotCx[i], kSlotCy[i] }) <= kSlotR)
+            return i;
+    return -1;
+}
+
+void NektarEditor::selectSlot (int slot)
+{
+    if (slot == selectedSlot)
+        return;
+    selectedSlot = slot;
+    cache = juce::Image();
+    repaint();
 }
 
 void NektarEditor::say (const juce::String& text)
@@ -397,7 +430,7 @@ void NektarEditor::toggleRecording()
     }
     if (message.isNotEmpty())
         say ({});
-    proc.startRecording();
+    proc.startRecording (selectedSlot);
 }
 
 void NektarEditor::timerCallback()
@@ -409,22 +442,22 @@ void NektarEditor::timerCallback()
     hudWasRecording = proc.isRecording();
 }
 
-void NektarEditor::chooseFile()
+void NektarEditor::chooseFile (int slot)
 {
-    chooser = std::make_unique<juce::FileChooser> ("Choose a sound for slot 1", juce::File(), "*.wav;*.aif;*.aiff;*.flac");
+    chooser = std::make_unique<juce::FileChooser> ("Choose a sound for slot " + juce::String (slot + 1), juce::File(), "*.wav;*.aif;*.aiff;*.flac");
     juce::Component::SafePointer<NektarEditor> safe (this);
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                          [safe] (const juce::FileChooser& fc)
+                          [safe, slot] (const juce::FileChooser& fc)
                           {
                               const auto f = fc.getResult();
                               if (safe != nullptr && f.existsAsFile())
-                                  safe->loadFile (f);
+                                  safe->loadFile (f, slot);
                           });
 }
 
-void NektarEditor::loadFile (const juce::File& f)
+void NektarEditor::loadFile (const juce::File& f, int slot)
 {
-    message = proc.loadSample (f);
+    message = proc.loadSample (f, slot);
     cache = juce::Image();
     repaint();
 }
@@ -437,12 +470,16 @@ bool NektarEditor::isInterestedInFileDrag (const juce::StringArray& files)
     return false;
 }
 
-void NektarEditor::filesDropped (const juce::StringArray& files, int, int)
+void NektarEditor::filesDropped (const juce::StringArray& files, int x, int y)
 {
+    int slot = slotAt (juce::Point<float> ((float) x, (float) y) / ((float) getWidth() / 1000.0f));
+    if (slot < 0)
+        slot = selectedSlot;
+    selectSlot (slot);
     for (auto& f : files)
         if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac"))
         {
-            loadFile (juce::File (f));
+            loadFile (juce::File (f), slot);
             return;
         }
 }
@@ -617,7 +654,7 @@ void NektarEditor::renderDesign (Graphics& g)
 
     g.setColour (kMuted);
     g.setFont (font (reg, 13));
-    g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot 1")), juce::Rectangle<float> (kCx - 80, kCy - 88, 160, 18), juce::Justification::centred);
+    g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot ")) + juce::String (selectedSlot + 1), juce::Rectangle<float> (kCx - 80, kCy - 88, 160, 18), juce::Justification::centred);
     wave (g, kCx, kCy - 52, 114, 10.0f, 11, 1.2f, 34);
     const char* rows[] = { "Noise floor", "Hum 50 Hz", "Clipping" };
     const char* vals[] = { "-58 dB", "+3 harm.", "none" };
@@ -635,33 +672,31 @@ void NektarEditor::renderDesign (Graphics& g)
         g.drawText (vals[i], juce::Rectangle<float> (kCx + 10, y - 9, 70, 18), juce::Justification::centredRight);
     }
 
-    // ---- four slots (slot 1 is real: the loaded sound; slots 2-4 are placeholders for now)
+    // ---- four slots: each one holds its own sound
     const float p3[] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f };
+    for (int slot = 0; slot < 4; ++slot)
     {
-        const auto s = proc.getSample();
+        const auto smp = proc.getSample (slot);
         juce::Array<float> peaks;
-        if (s != nullptr)
+        if (smp != nullptr)
         {
-            const int n = s->data.getNumSamples();
+            const int n = smp->data.getNumSamples();
             const int bars = 40;
             float mx = 1.0e-6f;
             for (int b = 0; b < bars; ++b)
             {
                 const int a = (int) ((juce::int64) n * b / bars), e = juce::jmax (a + 1, (int) ((juce::int64) n * (b + 1) / bars));
                 float m = 0.0f;
-                for (int c = 0; c < s->data.getNumChannels(); ++c)
-                    m = juce::jmax (m, s->data.findMinMax (c, a, e - a).getLength() * 0.5f);
+                for (int c = 0; c < smp->data.getNumChannels(); ++c)
+                    m = juce::jmax (m, smp->data.findMinMax (c, a, e - a).getLength() * 0.5f);
                 peaks.add (m);
                 mx = juce::jmax (mx, m);
             }
             for (auto& v : peaks) v /= mx;
         }
-        slotDisc (g, reg, bld, 205, 262, 1, s != nullptr ? s->name : juce::String ("Empty"),
-                  s == nullptr, "load WAV", &peaks, 0);
+        slotDisc (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String ("Empty"),
+                  smp == nullptr, "load WAV", &peaks, 0, slot == selectedSlot);
     }
-    slotDisc (g, reg, bld, 795, 262, 2, "Paper rub", false, "", nullptr, 5);
-    slotDisc (g, reg, bld, 205, 590, 3, "Empty", true, "from map", nullptr, 0);
-    slotDisc (g, reg, bld, 795, 590, 4, "Bowl hum", false, "", nullptr, 9);
     (void) p3;
 
     // ---- module panel

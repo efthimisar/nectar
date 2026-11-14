@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <array>
 #include <atomic>
 #include "SamplePlayer.h"
 
@@ -34,21 +35,22 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // Loads a sound into slot 1 (message thread). Returns an error text, or an empty string on success.
-    juce::String loadSample (const juce::File& file);
+    static constexpr int kSlots = 4;
+    // Loads a sound into a slot (0..3, message thread). Returns an error text, or an empty string on success.
+    juce::String loadSample (const juce::File& file, int slot);
 
     // Recording from the microphone (standalone app only).
     static constexpr double kMaxRecordSeconds = 60.0;
     bool canRecord() const { return recordingAllowed; }
-    void startRecording();
-    void stopRecording();            // message thread: turns what was recorded into the sound in slot 1
+    void startRecording (int slot);  // the recording goes into this slot when it stops
+    void stopRecording();            // message thread: turns what was recorded into the sound of that slot
     bool isRecording() const { return recState.load() == 1; }
     bool recordingFinishedByLimit() const { return recState.load() == 2; }
     double getRecordedSeconds() const;
     float getInputLevel() const { return inputLevel.load(); }
-    juce::String saveToLibrary();    // writes slot 1 as a WAV into the library folder; returns a message
+    juce::String saveToLibrary (int slot); // writes the slot as a WAV into the library folder; returns a message
     static juce::File getLibraryFolder();
-    std::shared_ptr<const Sample> getSample() const;
+    std::shared_ptr<const Sample> getSample (int slot) const;
 
     juce::AudioProcessorValueTreeState apvts;
     juce::MidiKeyboardState keyboardState; // computer-keyboard notes from the UI
@@ -56,14 +58,16 @@ public:
 private:
     static BusesProperties makeBuses();
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void publishSample (std::shared_ptr<Sample> s);
+    void publishSample (std::shared_ptr<Sample> s, int slot);
 
-    SamplePlayer player;
+    std::array<SamplePlayer, kSlots> players;
     juce::AudioFormatManager formats;
     mutable juce::SpinLock sampleLock;
-    std::shared_ptr<const Sample> currentSample;   // owned by the UI side
-    std::shared_ptr<const Sample> pendingSample;   // handed to the audio thread
-    bool samplePending = false;
+    std::array<std::shared_ptr<const Sample>, kSlots> currentSamples; // owned by the UI side
+    std::array<std::shared_ptr<const Sample>, kSlots> pendingSamples; // handed to the audio thread
+    std::array<bool, kSlots> samplePending {};
+    std::atomic<int> recSlot { 0 };
+    std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {}, tailP {};
     std::atomic<double> hostRate { 44100.0 };
 
     bool recordingAllowed = false;

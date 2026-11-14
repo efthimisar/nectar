@@ -7,14 +7,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     using juce::ParameterID;
     juce::AudioProcessorValueTreeState::ParameterLayout l;
 
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "level", 1 }, "Level",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.8f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pitch", 1 }, "Pitch",
-                                                         NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
-                                                         juce::AudioParameterFloatAttributes().withLabel ("st")));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail", 1 }, "Tail",
-                                                         NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
-                                                         juce::AudioParameterFloatAttributes().withLabel ("s")));
+    // per slot: Level, Pitch, Tail (slot 1 keeps the original ids, so older saved states still work)
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        const juce::String nm = " " + juce::String (slot + 1);
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "level" + sfx, 1 }, "Level" + nm,
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.8f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pitch" + sfx, 1 }, "Pitch" + nm,
+                                                             NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
+                                                             juce::AudioParameterFloatAttributes().withLabel ("st")));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail" + sfx, 1 }, "Tail" + nm,
+                                                             NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
+                                                             juce::AudioParameterFloatAttributes().withLabel ("s")));
+    }
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
@@ -36,28 +42,46 @@ NektarProcessor::NektarProcessor()
     : AudioProcessor (makeBuses()),
       apvts (*this, nullptr, "STATE", createLayout())
 {
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        levelP[(size_t) slot] = apvts.getRawParameterValue ("level" + sfx);
+        pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
+        tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
+    }
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
 
 void NektarProcessor::prepareToPlay (double sampleRate, int)
 {
-    player.prepare (sampleRate);
+    for (auto& pl : players)
+        pl.prepare (sampleRate);
     keyboardState.reset();
     if (recordingAllowed && recState.load() == 0)
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
 
     // the sound must be converted to the new host rate
     hostRate = sampleRate;
-    if (auto s = getSample())
-        if (std::abs (s->playRate - sampleRate) > 0.5)
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (auto s = getSample (slot))
         {
-            auto copy = std::make_shared<Sample> (*s);
-            SamplePlayer::makePlayable (*copy, sampleRate);
-            const juce::SpinLock::ScopedLockType lock (sampleLock);
-            currentSample = copy;
-            pendingSample = copy;
-            samplePending = true;
+            if (std::abs (s->playRate - sampleRate) > 0.5)
+            {
+                auto copy = std::make_shared<Sample> (*s);
+                SamplePlayer::makePlayable (*copy, sampleRate);
+                const juce::SpinLock::ScopedLockType lock (sampleLock);
+                currentSamples[(size_t) slot] = copy;
+                pendingSamples[(size_t) slot] = copy;
+                samplePending[(size_t) slot] = true;
+            }
+            else
+            {
+                // a new player instance needs the sound again after prepare()
+                const juce::SpinLock::ScopedLockType lock (sampleLock);
+                pendingSamples[(size_t) slot] = s;
+                samplePending[(size_t) slot] = true;
+            }
         }
 }
 
@@ -75,11 +99,13 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     {
         const juce::SpinLock::ScopedTryLockType lock (sampleLock);
-        if (lock.isLocked() && samplePending)
-        {
-            player.setSample (pendingSample);
-            samplePending = false;
-        }
+        if (lock.isLocked())
+            for (size_t i = 0; i < (size_t) kSlots; ++i)
+                if (samplePending[i])
+                {
+                    players[i].setSample (pendingSamples[i]);
+                    samplePending[i] = false;
+                }
     }
 
     // microphone: copy the input before the output is written (the same buffer carries both)
@@ -110,19 +136,35 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
 
     SamplePlayer::Params p;
-    p.level = apvts.getRawParameterValue ("level")->load();
-    p.pitchSemis = apvts.getRawParameterValue ("pitch")->load();
-    p.releaseSec = apvts.getRawParameterValue ("tail")->load();
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
     p.keepLength = apvts.getRawParameterValue ("keeplength")->load();
     p.stretch = apvts.getRawParameterValue ("stretch")->load();
 
-    player.process (buffer, midi, p);
+    // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
+    int loaded = 0;
+    for (auto& pl : players)
+        if (pl.hasSample()) ++loaded;
+    const int limit = juce::jmax (8, 32 / juce::jmax (1, loaded));
+
+    buffer.clear();
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        auto& pl = players[(size_t) slot];
+        if (! pl.hasSample())
+            continue;
+        p.level = levelP[(size_t) slot]->load();
+        p.pitchSemis = pitchP[(size_t) slot]->load();
+        p.releaseSec = tailP[(size_t) slot]->load();
+        pl.setVoiceLimit (limit);
+        pl.process (buffer, midi, p, false);
+    }
     midi.clear();
 }
 
-juce::String NektarProcessor::loadSample (const juce::File& file)
+juce::String NektarProcessor::loadSample (const juce::File& file, int slot)
 {
+    if (slot < 0 || slot >= kSlots)
+        return "No such slot.";
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
     if (reader == nullptr)
         return "Could not read this file.";
@@ -138,27 +180,28 @@ juce::String NektarProcessor::loadSample (const juce::File& file)
     s->data.setSize ((int) juce::jmin (2u, reader->numChannels), (int) reader->lengthInSamples);
     reader->read (&s->data, 0, (int) reader->lengthInSamples, 0, true, s->data.getNumChannels() > 1);
 
-    publishSample (s);
+    publishSample (s, slot);
     return {};
 }
 
-void NektarProcessor::publishSample (std::shared_ptr<Sample> s)
+void NektarProcessor::publishSample (std::shared_ptr<Sample> s, int slot)
 {
     SamplePlayer::makePlayable (*s, hostRate.load());
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);
-        currentSample = s;
-        pendingSample = s;
-        samplePending = true;
+        currentSamples[(size_t) slot] = s;
+        pendingSamples[(size_t) slot] = s;
+        samplePending[(size_t) slot] = true;
     }
     sendChangeMessage();
 }
 
 // ---- microphone recording
-void NektarProcessor::startRecording()
+void NektarProcessor::startRecording (int slot)
 {
     if (! recordingAllowed || recState.load() == 1)
         return;
+    recSlot.store (juce::jlimit (0, kSlots - 1, slot));
     recChannels.store (juce::jlimit (1, 2, getTotalNumInputChannels()));
     recBuffer.clear();
     recPos.store (0);
@@ -188,7 +231,7 @@ void NektarProcessor::stopRecording()
     s->data.setSize (ch, n);
     for (int c = 0; c < ch; ++c)
         s->data.copyFrom (c, 0, recBuffer, c, 0, n);
-    publishSample (s);
+    publishSample (s, recSlot.load());
 }
 
 juce::File NektarProcessor::getLibraryFolder()
@@ -196,9 +239,9 @@ juce::File NektarProcessor::getLibraryFolder()
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Nektar Library");
 }
 
-juce::String NektarProcessor::saveToLibrary()
+juce::String NektarProcessor::saveToLibrary (int slot)
 {
-    auto s = getSample();
+    auto s = getSample (slot);
     if (s == nullptr)
         return "Nothing to save yet.";
 
@@ -223,17 +266,20 @@ juce::String NektarProcessor::saveToLibrary()
     return "Saved: " + file.getFileName();
 }
 
-std::shared_ptr<const Sample> NektarProcessor::getSample() const
+std::shared_ptr<const Sample> NektarProcessor::getSample (int slot) const
 {
+    if (slot < 0 || slot >= kSlots)
+        return nullptr;
     const juce::SpinLock::ScopedLockType lock (sampleLock);
-    return currentSample;
+    return currentSamples[(size_t) slot];
 }
 
 void NektarProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     auto state = apvts.copyState();
-    if (auto s = getSample())
-        state.setProperty ("samplePath", s->path, nullptr);
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (auto s = getSample (slot))
+            state.setProperty ("samplePath" + juce::String (slot + 1), s->path, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -246,9 +292,14 @@ void NektarProcessor::setStateInformation (const void* data, int size)
         if (state.isValid())
         {
             apvts.replaceState (state);
-            const auto path = state.getProperty ("samplePath").toString();
-            if (path.isNotEmpty() && juce::File (path).existsAsFile())
-                loadSample (juce::File (path));
+            for (int slot = 0; slot < kSlots; ++slot)
+            {
+                auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
+                if (path.isEmpty() && slot == 0)
+                    path = state.getProperty ("samplePath").toString(); // saved by an older version
+                if (path.isNotEmpty() && juce::File (path).existsAsFile())
+                    loadSample (juce::File (path), slot);
+            }
         }
     }
 }

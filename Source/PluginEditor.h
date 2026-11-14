@@ -74,8 +74,10 @@ private:
     void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);
-    void chooseFile();
-    void loadFile (const juce::File&);
+    void chooseFile (int slot);
+    void loadFile (const juce::File&, int slot);
+    int slotAt (juce::Point<float> designPos) const; // -1 = none
+    void selectSlot (int slot);
     void releaseAllKeys();
     void addKnob (float cx, float cy, float r, const juce::String& label, bool dim, float fixed,
                   const char* paramId = nullptr, bool toggle = false);
@@ -91,6 +93,7 @@ private:
     juce::String message;
     std::set<int> heldNotes;
     int octaveShift = 0;
+    int selectedSlot = 0;
     bool hudWasRecording = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NektarEditor)
