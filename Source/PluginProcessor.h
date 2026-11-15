@@ -7,6 +7,7 @@
 #include "TiltFilter.h"
 #include "SlotMixer.h"
 #include "Slicer.h"
+#include "MelodicReverb.h"
 #include "CharacterFilter.h"
 #include <unordered_map>
 #include <string>
@@ -121,6 +122,11 @@ private:
     std::array<std::atomic<float>*, 2> imorphP {};
     Resonator resonator;
     Slicer slicer;
+    MelodicReverb reverb;
+    std::atomic<float>* revSizeP = nullptr;
+    std::atomic<float>* revDecayP = nullptr;
+    std::atomic<float>* revShimP = nullptr;
+    std::atomic<float>* revMixP = nullptr;
     CharacterFilter charFilter;
     std::atomic<float>* filTypeP = nullptr;
     std::atomic<float>* filCutP = nullptr;

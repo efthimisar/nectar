@@ -77,3 +77,9 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Type knob in four zones: Ladder (JUCE `dsp::LadderFilter`, 24 dB/oct LP; position in the zone = drive), SVF (LP -> BP -> HP morph, TPT form after Zavalishin), Comb (Cutoff = pitch, Reso = feedback), Formant (three band-pass filters, Cutoff sweeps vowels i-e-a-o-u).
 - Formant frequencies: average adult male American English F1/F2/F3 from Peterson & Barney (1952), J. Acoust. Soc. Am. 24, 175-184 (values read from the Princeton COS 325 reprint and MIT 6.541J table 6.2). Relative formant levels are our own choice.
 - Mix = 0 switches the filter off. Position: after the resonator, before the slicer.
+
+## Step 14E – Melodic reverb
+- 8-line feedback delay network with a Hadamard matrix (the FDN idea after Jot & Chaigne 1991 / Stautner & Puckette 1982; named from general knowledge, the papers were not checked). Two allpass diffusers at the input, a damping low-pass in every line.
+- Own design: the lines are tuned to root x (1, 3/2, 2, 3, 4, 5, 6, 8), so the tail rings as a chord. Note = root (A1 .. A4, semitone steps; changing it glides).
+- Shimmer: octave-up shifted copy of the tail fed back. It is self-limiting and the maximum decay is lowered as shimmer rises (20 s at 0, 6 s at 1). With a very high Note and strong Shimmer the tail can hold as a drone.
+- Decay: 0.3 .. 20 s. Mix = 0 switches the reverb off. Position: after the filter, before the slicer.

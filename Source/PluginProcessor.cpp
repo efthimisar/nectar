@@ -127,6 +127,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filmix", 1 }, "Filter mix (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revsize", 1 }, "Reverb note (root pitch)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revdecay", 1 }, "Reverb decay",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revshimmer", 1 }, "Reverb shimmer",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revmix", 1 }, "Reverb mix (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
@@ -203,6 +211,10 @@ NektarProcessor::NektarProcessor()
     filCutP = apvts.getRawParameterValue ("filcut");
     filResP = apvts.getRawParameterValue ("filres");
     filMixP = apvts.getRawParameterValue ("filmix");
+    revSizeP = apvts.getRawParameterValue ("revsize");
+    revDecayP = apvts.getRawParameterValue ("revdecay");
+    revShimP = apvts.getRawParameterValue ("revshimmer");
+    revMixP = apvts.getRawParameterValue ("revmix");
     slRateP = apvts.getRawParameterValue ("slrate");
     slPatP = apvts.getRawParameterValue ("slpattern");
     slSmoothP = apvts.getRawParameterValue ("slsmooth");
@@ -309,6 +321,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     slicer.prepare (sampleRate);
+    reverb.prepare (sampleRate);
     charFilter.prepare (sampleRate, samplesPerBlock);
     keyboardState.reset();
     if (recState.load() == 0) // the buffer also serves Resample, which works in the plugin too
@@ -436,6 +449,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     // Filter with character (ladder, SVF, comb, formant)
     charFilter.process (buffer, buffer.getNumSamples(), modded (filTypeP), modded (filCutP), modded (filResP), modded (filMixP));
+
+    // Reverb (pitched FDN with shimmer)
+    reverb.process (buffer, buffer.getNumSamples(), modded (revSizeP), modded (revDecayP), modded (revShimP), modded (revMixP));
 
     // Slicer: rhythmic gate at the host tempo (120 bpm when the host gives none); its gate is also a modulation source
     {
