@@ -83,3 +83,9 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Own design: the lines are tuned to root x (1, 3/2, 2, 3, 4, 5, 6, 8), so the tail rings as a chord. Note = root (A1 .. A4, semitone steps; changing it glides).
 - Shimmer: octave-up shifted copy of the tail fed back. It is self-limiting and the maximum decay is lowered as shimmer rises (20 s at 0, 6 s at 1). With a very high Note and strong Shimmer the tail can hold as a drone.
 - Decay: 0.3 .. 20 s. Mix = 0 switches the reverb off. Position: after the filter, before the slicer.
+
+## Step 14F – Melodic delay
+- Ping-pong delay (left, right, left ...) in tempo steps (1/16 note up to 1 bar, 8 steps; host tempo, 120 bpm if none). Time changes glide.
+- Pitch: every repeat is shifted again by the same number of semitones (-12 .. +12, centre = off), so repeats climb or fall like a melody. Each repeat is also darker. Feedback up to 0.92, with a soft limiter in the loop.
+- The pitch shifter (two crossfaded read taps) is our own simple implementation. Measured: with +12 the repeats of a 440 Hz tone were at 440, 862, 1704, 3386 Hz; with -6 at 440, 312, 222, 158 Hz.
+- Mix = 0 switches it off. Order after the reverb and before the slicer.
