@@ -294,12 +294,13 @@ void KnobComponent::mouseDown (const juce::MouseEvent& e)
             menu.addItem (9, "Joystick Y", true, r.src == NektarProcessor::kModJoyY);
             menu.addItem (10, "Velocity", true, r.src == NektarProcessor::kModVel);
             menu.addItem (11, "Key (C3 = centre)", true, r.src == NektarProcessor::kModKey);
+            menu.addItem (12, "Ramp (time after the first key)", true, r.src == NektarProcessor::kModRamp);
             menu.addSeparator();
             menu.addItem (100, "Amount: hold Shift and drag the knob", false);
             juce::Component::SafePointer<KnobComponent> safe (this);
             menu.showMenuAsync (juce::PopupMenu::Options(), [safe, r] (int choice)
             {
-                if (safe == nullptr || choice < 1 || choice > 11)
+                if (safe == nullptr || choice < 1 || choice > 12)
                     return;
                 auto n = r;
                 n.src = choice - 1;
@@ -659,6 +660,10 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         const auto rc = moduleCentre (3);
         addKnob (rc.x - 21.0f, rc.y + 76.0f, 8.0f, "Tune B", false, 0.0f, "restuneb");
         addKnob (rc.x + 21.0f, rc.y + 76.0f, 8.0f, "Mix B", false, 0.0f, "resmixb");
+    }
+    {   // Ramp time, just under the ENV circle
+        const auto ec = moduleCentre (10);
+        addKnob (ec.x, ec.y + 76.0f, 8.0f, "Ramp", false, 0.4f, "ramptime");
     }
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 

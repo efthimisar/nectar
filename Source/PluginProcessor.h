@@ -70,7 +70,7 @@ public:
     static juce::File getLibraryFolder();
 
     // Modulation: every knob can follow a source (LFO 1, LFO 2, Slicer) by an amount (-1..1 of the knob's range).
-    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModSlicer2, kModSlicer3, kModEnv, kModJoyX, kModJoyY, kModVel, kModKey, kModCount };
+    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModSlicer2, kModSlicer3, kModEnv, kModJoyX, kModJoyY, kModVel, kModKey, kModRamp, kModCount };
     struct ModRoute { int src = 0; float amount = 0.0f; };
     ModRoute getModRoute (const juce::String& paramId) const;
     void setModRoute (const juce::String& paramId, ModRoute r);
@@ -131,6 +131,8 @@ private:
     float lfoPrev[2] { 0.0f, 0.0f }, lfoNext[2] { 0.0f, 0.0f };
     // envelope (ADSR) driven by the held keys
     std::array<juce::ValueTree, 2> snapshots;
+    float rampLevel = 1.0f;                // 0 -> 1 over the Ramp time after a note starts with no key held
+    std::atomic<float>* rampTimeP = nullptr;
     int heldNotes = 0;
     float lastVel = 0.0f, lastKey = 0.0f; // last note-on: velocity 0..1, key relative to C3 (-1..1 over +-3 octaves)
     int envStage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release

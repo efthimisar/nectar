@@ -205,6 +205,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          juce::AudioParameterFloatAttributes().withLabel ("st")));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmixb", 1 }, "Resonator B mix (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ramptime", 1 }, "Ramp time (0.05 .. 20 s)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
@@ -267,6 +269,7 @@ NektarProcessor::NektarProcessor()
     resMatP = apvts.getRawParameterValue ("resmat");
     resMixP = apvts.getRawParameterValue ("resmix");
     resTuneBP = apvts.getRawParameterValue ("restuneb");
+    rampTimeP = apvts.getRawParameterValue ("ramptime");
     resMixBP = apvts.getRawParameterValue ("resmixb");
     filTypeP = apvts.getRawParameterValue ("filtype");
     filCutP = apvts.getRawParameterValue ("filcut");
@@ -408,7 +411,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     resBScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
     slicer.prepare (sampleRate);
     crusher.prepare (sampleRate);
-    envStage = 0; envLevel = 0.0f; heldNotes = 0;
+    envStage = 0; envLevel = 0.0f; heldNotes = 0; rampLevel = 1.0f;
     delay.prepare (sampleRate);
     reverb.prepare (sampleRate);
     charFilter.prepare (sampleRate, samplesPerBlock);
@@ -1061,6 +1064,11 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     }
     modVal[(size_t) kModEnv] = envLevel;
     modShown[(size_t) kModEnv].store (envLevel);
+    // Ramp (the Neuron's dynamic crossmorph time, up to 20 s): restarts with the first key of a phrase, then stays at 1
+    if (retrigger && heldBefore == 0) rampLevel = 0.0f;
+    rampLevel = juce::jmin (1.0f, rampLevel + (float) blockSec / (0.05f * std::pow (400.0f, rampTimeP->load())));
+    modVal[(size_t) kModRamp] = rampLevel;
+    modShown[(size_t) kModRamp].store (rampLevel);
     modVal[(size_t) kModVel] = lastVel;
     modShown[(size_t) kModVel].store (lastVel);
     modVal[(size_t) kModKey] = lastKey;

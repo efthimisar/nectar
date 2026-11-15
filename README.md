@@ -129,7 +129,7 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 
 ## Crossmorph inside a slot pair (build 19)
 - New **Cross** knob on slots 2 and 4 (one per pair 1+2 and 3+4). Centre = both slots at full level; towards 0 only the first slot sounds, towards 1 only the second. Equal-power law, each side capped at 1, so the centre position leaves the sound unchanged.
-- It is a normal knob, so the Neuron's two crossmorphs are made by routing: **Velocity** to Cross = velocity crossmorph (soft keys one slot, hard keys the other; set the knob at 0 and amount +1 for a full swing). **Envelope** to Cross = dynamic crossmorph (the balance moves with the note's ADSR). This is our reading of the two names, not a copy of the manual.
+- It is a normal knob, so the Neuron's two crossmorphs are made by routing: **Velocity** to Cross = velocity crossmorph (soft keys one slot, hard keys the other; set the knob at 0 and amount +1 for a full swing). **Envelope** to Cross follows the note's ADSR (our own use; the manual's dynamic crossmorph is a timed crossfade, see build 22). The Velocity crossmorph matches the manual (p. 98: weakest key = only resynator 1, strongest = only resynator 2).
 
 ## Snapshots A and B (build 20)
 - The preset menu has "Store snapshot A/B" and "Recall A/B". A snapshot keeps every knob, all modulation routes and the joystick path, so two settings can be compared by ear. The four sounds are not part of a snapshot, and snapshots live in memory only (lost when the plugin closes, not saved with the project): save a preset to keep a setting.
@@ -139,3 +139,8 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 - Resonator B runs beside the first one on the same input (parallel): out = dry + ring A + ring B. New knobs **Tune B** (default +7 semitones, a fifth) and **Mix B** (0 = off) sit just under the Resonator circle; B shares **Decay** and **Material** with A, so one more pair of knobs is all it costs. Both new knobs take modulation like every other knob.
 - Check: B with the same tune as A gives the same level as A; at +7 st it differs; A + B adds up. Measured on a pad sound with a held note.
 - **Not built:** the Neuron's "Chromophonic" and "Dual sphered" modes (the earlier note said they need another architecture, with the resonator inside each slot). They need the manual's description to be built faithfully: send the page if you want them.
+
+## Ramp source and the Blender types (build 22)
+Source: Hartmann Neuron manual, Blender types p. 96-98.
+- New modulation source **Ramp**: after the first key of a phrase (no key held before) it rises from 0 to 1 in the **Ramp** time (knob under the ENV circle, 0.05 to 20 s, exponential knob law) and stays at 1; a new phrase restarts it. Routed to **Cross** it is the manual's dynamic crossmorph (timed crossfade, "up to 20 seconds"); it can also drive any other knob.
+- Blender types in the manual: Mix, Mix singlesphere, Stereo, Chromophonic (scape 1 through sphere 2 and scape 2 through sphere 1), Dual sphered (scapes mixed, then through sphere 1 and 2 in turn), Intermorph (have: Inter knob), Dyn. transsphere, Dyn. crossmorph, Velo crossmorph, Velo chrome. **Not built:** Chromophonic, Dual sphered, Dyn. transsphere and Velo chrome need a separate "scape" (source) and "sphere" (body/spectral envelope) per slot that can be exchanged; our Morph blends partials of two sounds, which is a different thing. Open for a decision.
