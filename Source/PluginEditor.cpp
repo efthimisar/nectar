@@ -14,10 +14,12 @@ constexpr float kDW = 1360.0f, kDH = 665.0f;   // design space of the editor (wi
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
+constexpr float kDotR = 50.0f;                   // v2: radius of the small slot circles
 constexpr float kLibX = 680.0f, kLibY = 250.0f;
-constexpr float kSlotCx[4] = { 210.0f, 420.0f, 940.0f, 1150.0f };
+constexpr float kSlotCx[4] = { 300.0f, 420.0f, 940.0f, 1060.0f };
 constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
 constexpr float kModR = 56.0f;                   // module radius
+const juce::Rectangle<float> kAllBtn (1160.0f, 412.0f, 70.0f, 28.0f), kMasterBtn (1240.0f, 412.0f, 96.0f, 28.0f);
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -37,7 +39,7 @@ const ModuleDef kModules[] = {
     { "SPACE",     "around the head",                0xff7ec8e3, { "Amount", "Speakers", "Far", "Back" },         { "spmix", "spspk", "spfar", "spback" } },
 };
 constexpr int kNumModules = 13;
-constexpr float kSpaceX = 680.0f, kSpaceY = 474.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
+constexpr float kSpaceX = 680.0f, kSpaceY = 250.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
 constexpr int kJoyModule = 11;
 // four pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
 // (place 0 = top, 1 = bottom left, 2 = bottom right)
@@ -134,13 +136,12 @@ void sphere (Graphics& g, float x, float y, float s, Colour c)
 }
 
 // Heights of 40 bars that draw the sound (0..1), or nothing for an empty slot.
-juce::Array<float> peaksOf (const Sample* smp)
+juce::Array<float> peaksOf (const Sample* smp, int bars = 40)
 {
     juce::Array<float> peaks;
     if (smp == nullptr)
         return peaks;
     const int n = smp->data.getNumSamples();
-    const int bars = 40;
     float mx = 1.0e-6f;
     for (int b = 0; b < bars; ++b)
     {
@@ -201,6 +202,32 @@ void slotDisc (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface
         realWave (g, box.getCentreX(), box.getCentreY(), 140, 17.0f, *peaks);
     else
         wave (g, box.getCentreX(), box.getCentreY(), 140, 17.0f, seed, 1.4f);
+}
+
+// v2: small slot circle with its name underneath.
+void slotDot (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface::Ptr& bold, float cx, float cy, int index,
+              const juce::String& name, bool empty, const juce::Array<float>& peaks, bool selected)
+{
+    shadowCircle (g, cx, cy, kDotR, 0.5f, 18, { 7, 11 });
+    g.setGradientFill (ColourGradient (Colour (0xff3d3b39), cx - kDotR * 0.6f, cy - kDotR * 0.7f,
+                                       Colour (0xff222120), cx + kDotR * 0.7f, cy + kDotR, false));
+    g.fillEllipse (cx - kDotR, cy - kDotR, 2 * kDotR, 2 * kDotR);
+    g.setColour (selected ? kAcc : juce::Colours::white.withAlpha (0.10f));
+    g.drawEllipse (cx - kDotR + 1.0f, cy - kDotR + 1.0f, 2 * kDotR - 2.0f, 2 * kDotR - 2.0f, selected ? 3.0f : 1.5f);
+    g.setColour (selected ? kAcc : kLight);
+    g.setFont (font (bold, 15));
+    g.drawText (juce::String (index), juce::Rectangle<float> (cx - 20, cy - kDotR + 8, 40, 18), juce::Justification::centred);
+    if (empty)
+    {
+        g.setColour (kMuted);
+        g.drawLine (cx - 9, cy + 6, cx + 9, cy + 6, 1.8f);
+        g.drawLine (cx, cy - 3, cx, cy + 15, 1.8f);
+    }
+    else if (peaks.size() > 0)
+        realWave (g, cx, cy + 8, 64, 11.0f, peaks);
+    g.setColour (selected ? kLight : kMuted);
+    g.setFont (font (reg, 15));
+    g.drawText (empty ? juce::String ("Empty") : name, juce::Rectangle<float> (cx - 56, cy + kDotR + 8, 112, 20), juce::Justification::centred, true);
 }
 } // namespace
 
@@ -599,87 +626,11 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     regular = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoRegular_ttf, BinaryData::CarlitoRegular_ttfSize);
     bold    = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoBold_ttf, BinaryData::CarlitoBold_ttfSize);
 
-    // slots: 6 knobs each
-    const float slotX[] = { kSlotCx[0], kSlotCx[1], kSlotCx[2], kSlotCx[3] };
-    const float slotY[] = { kSlotCy[0], kSlotCy[1], kSlotCy[2], kSlotCy[3] };
-    const char* names[] = { "Level", "Pitch", "Noise", "Hum", "Low cut", "Tail" };
-    const float fixedVals[4][6] = { { 0.8f, 0.5f, 0.50f, 0.95f, 0.18f, 0.25f },
-                                    { 0.40f, 0.70f, 0.55f, 0.92f, 0.45f, 0.80f },
-                                    { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f },
-                                    { 0.55f, 0.38f, 0.30f, 0.10f, 0.22f, 0.72f } };
-    // row 1: Level, Pitch, Pan (+ Intermorph on slots 1 and 3); row 2: Noise, Hum, Low cut, Tail
-    for (int s = 0; s < 4; ++s)
     {
-        static const char* const levelIds[] = { "level", "level2", "level3", "level4" };
-        static const char* const pitchIds[] = { "pitch", "pitch2", "pitch3", "pitch4" };
-        static const char* const tailIds[] = { "tail", "tail2", "tail3", "tail4" };
-        static const char* const noiseIds[] = { "noise", "noise2", "noise3", "noise4" };
-        static const char* const humIds[] = { "hum", "hum2", "hum3", "hum4" };
-        static const char* const lowCutIds[] = { "lowcut", "lowcut2", "lowcut3", "lowcut4" };
-        static const char* const panIds[] = { "pan", "pan2", "pan3", "pan4" };
-        struct K { const char* label; const char* id; float fixed; };
-        std::vector<K> row1 { { "Level", levelIds[s], fixedVals[s][0] }, { "Pitch", pitchIds[s], fixedVals[s][1] }, { "Pan", panIds[s], 0.5f } };
-        if (s == 0) row1.push_back ({ "Inter", "imorph12", 0.0f });
-        if (s == 2) row1.push_back ({ "Inter", "imorph34", 0.0f });
-        if (s == 1) row1.push_back ({ "Cross", "xmorph12", 0.5f });
-        if (s == 3) row1.push_back ({ "Cross", "xmorph34", 0.5f });
-        const std::vector<K> row2 { { "Noise", noiseIds[s], fixedVals[s][2] }, { "Hum", humIds[s], fixedVals[s][3] },
-                                    { "Low cut", lowCutIds[s], fixedVals[s][4] }, { "Tail", tailIds[s], fixedVals[s][5] } };
-        const float spacing = 28.0f;
-        for (int r = 0; r < 2; ++r)
-        {
-            const auto& row = r == 0 ? row1 : row2;
-            for (size_t i = 0; i < row.size(); ++i)
-                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + (r == 0 ? 5.0f : 38.0f), 9.5f,
-                         row[i].label, false, row[i].fixed, row[i].id);
-        }
-    }
-    (void) names;
-
-    // module grid (one panel, 3 x 3): see kModules
-    for (int m = 0; m < kNumModules; ++m)
-        for (int k = 0; k < 4; ++k)
-        {
-            const auto& d = kModules[m];
-            if (m == kJoyModule && k >= 2)
-                continue;
-            const auto c = moduleKnobCentre (m, k);
-            addKnob (c.x, c.y, m == kJoyModule ? 7.5f : (kModPlace[m][0] == 4 ? 9.5f : 9.0f), d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k],
-                     d.id[k] != nullptr && isToggleId (d.id[k]));
-        }
-    {
-        const auto c = moduleCentre (kJoyModule);
-        joyPad = std::make_unique<JoyPad> (proc);
-        joyPadCentre = { c.x, c.y - 12.0f };
-        addAndMakeVisible (*joyPad);
         spacePad = std::make_unique<SpacePad> (proc);
         addAndMakeVisible (*spacePad);
     }
 
-    {   // Resonator B (parallel to the first): its own Tune and Mix, sharing Decay and Material; just under the Resonator circle
-        const auto rc = moduleCentre (3);
-        addKnob (rc.x - 21.0f, rc.y + 76.0f, 8.0f, "Tune B", false, 0.0f, "restuneb");
-        addKnob (rc.x + 21.0f, rc.y + 76.0f, 8.0f, "Mix B", false, 0.0f, "resmixb");
-    }
-    {   // Chromophonic: two rows of three, in the free space left of the SPACE pad (design units)
-        const float cx = 557.0f;
-        addKnob (cx - 34.0f, 500.0f, 7.5f, "Chr 1+2", false, 0.0f, "chromo12");
-        addKnob (cx, 500.0f, 7.5f, "Chr 3+4", false, 0.0f, "chromo34");
-        addKnob (cx + 34.0f, 500.0f, 7.5f, "Move", false, 0.0f, "chromomove");
-        addKnob (cx - 34.0f, 548.0f, 7.5f, "Back", false, 0.5f, "chromoback");
-        addKnob (cx, 548.0f, 7.5f, "Dull", false, 0.5f, "chromodull");
-        addKnob (cx + 34.0f, 548.0f, 7.5f, "Speed", false, 0.5f, "chromospeed");
-    }
-    {   // LFO fade in / fade out / spiral: in the free space between REVERB and LFO
-        const float cx = 1090.0f;
-        addKnob (cx - 34.0f, 470.0f, 7.5f, "Fade in", false, 0.0f, "lfodelay");
-        addKnob (cx, 470.0f, 7.5f, "Fade out", false, 0.0f, "lfofade");
-        addKnob (cx + 34.0f, 470.0f, 7.5f, "Spiral", false, 0.0f, "lfospiral");
-    }
-    {   // Ramp time, just under the ENV circle
-        const auto ec = moduleCentre (10);
-        addKnob (ec.x, ec.y + 76.0f, 8.0f, "Ramp", false, 0.4f, "ramptime");
-    }
     addKnob (845, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
@@ -779,13 +730,38 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / kDW);
     const int slot = slotAt (p);
-    if (slot >= 0 && juce::Rectangle<float> (kSlotCx[slot] - 80 * kSlotScale, kSlotCy[slot] - 68 * kSlotScale, 160 * kSlotScale, 46 * kSlotScale).contains (p))
+    if (slot >= 0)
     {
-        selectSlot (slot);
-        chooseFile (slot);
+        if (e.mods.isShiftDown() || e.mods.isCommandDown())
+        {
+            if (selection.count (slot) > 0 && selection.size() > 1 && ! masterView) selection.erase (slot);
+            else selection.insert (slot);
+            masterView = false;
+            selectedSlot = slot;
+            cache = juce::Image();
+            repaint();
+        }
+        else
+        {
+            const bool changed = masterView || selection.size() != 1 || selection.count (slot) == 0;
+            selection = { slot };
+            masterView = false;
+            if (changed) { selectedSlot = slot; cache = juce::Image(); repaint(); }
+        }
     }
-    else if (slot >= 0)
-        selectSlot (slot);
+    else if (kAllBtn.contains (p))
+    {
+        selection = { 0, 1, 2, 3 };
+        masterView = false;
+        cache = juce::Image();
+        repaint();
+    }
+    else if (kMasterBtn.contains (p))
+    {
+        masterView = ! masterView;
+        cache = juce::Image();
+        repaint();
+    }
     else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
         toggleRecording();
     else if (p.getDistanceFrom ({ 447.0f, 30.0f }) <= 22.0f)
@@ -802,9 +778,23 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 int NektarEditor::slotAt (juce::Point<float> p) const
 {
     for (int i = 0; i < 4; ++i)
-        if (p.getDistanceFrom ({ kSlotCx[i], kSlotCy[i] }) <= kSlotR * kSlotScale)
+        if (p.getDistanceFrom ({ kSlotCx[i], kSlotCy[i] }) <= kDotR)
             return i;
     return -1;
+}
+
+void NektarEditor::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const int slot = slotAt (e.position / ((float) getWidth() / kDW));
+    if (slot >= 0)
+    {
+        selection = { slot };
+        masterView = false;
+        selectedSlot = slot;
+        cache = juce::Image();
+        repaint();
+        chooseFile (slot);
+    }
 }
 
 void NektarEditor::selectSlot (int slot)
@@ -1228,96 +1218,89 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setGradientFill (ColourGradient (Colour (0xff181716), kCx - 40, kCy - 60, Colour (0xff201f1d), kCx + 60, kCy + 70, false));
     g.fillEllipse (kCx - 122, kCy - 122, 244, 244);
 
-    const auto sel = proc.getSample (selectedSlot);
-    g.setColour (kMuted);
-    g.setFont (font (reg, 20));
-    g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot ")) + juce::String (selectedSlot + 1), juce::Rectangle<float> (kCx - 112, kCy - 116, 224, 28), juce::Justification::centred);
-    {
-        const auto pk = peaksOf (sel.get());
-        if (pk.size() > 0)
-            realWave (g, kCx, kCy - 68, 150, 13.0f, pk);
-    }
-    const char* rows[] = { "Noise floor", "Hum", "Clipping" };
-    juce::String vals[3] = { "-", "-", "-" };
-    bool good[3] = { false, false, false };
-    if (sel != nullptr && ! sel->analysis.valid)
-        vals[0] = "analysing...";
-    else if (sel != nullptr)
-    {
-        const auto& an = sel->analysis;
-        vals[0] = juce::String (juce::roundToInt (an.noiseFloorDb)) + " dB";
-        good[0] = an.noiseFloorDb <= -45.0f;
-        if (an.humHz > 0) vals[1] = juce::String (an.humHz) + " Hz, " + juce::String (an.humHarmonics) + " harm.";
-        else              { vals[1] = "none"; good[1] = true; }
-        if (an.clippedSpots > 0) vals[2] = juce::String (an.clippedSpots) + " spots";
-        else                     { vals[2] = "none"; good[2] = true; }
-    }
-    for (int i = 0; i < 3; ++i)
-    {
-        const float y = kCy - 22 + (float) i * 34.0f;
-        g.setColour (kAcc);
-        if (good[i]) g.fillEllipse (kCx - 104, y - 6, 12, 12);
-        else         g.drawEllipse (kCx - 103.5f, y - 5.5f, 11, 11, 1.5f);
-        g.setColour (kLight);
-        g.setFont (font (reg, 21));
-        g.drawText (rows[i], juce::Rectangle<float> (kCx - 84, y - 14, 118, 28), juce::Justification::centredLeft);
-        g.setColour (kMuted);
-        g.setFont (font (reg, 18));
-        g.drawText (vals[i], juce::Rectangle<float> (kCx - 8, y - 14, 118, 28), juce::Justification::centredRight);
-    }
-    g.setColour (kMuted.withAlpha (0.8f));
-    g.setFont (font (reg, 16));
-    g.drawText (proc.hasRoomTone() ? "room tone: recorded" : "room tone: automatic", juce::Rectangle<float> (kCx - 100, kCy + 80, 200, 24), juce::Justification::centred);
-
     g.restoreState();
 
-    // ---- four slots: each one holds its own sound
-    const float p3[] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f };
+    // ---- v2: four small slot circles (two each side of the ring)
     for (int slot = 0; slot < 4; ++slot)
     {
         const auto smp = proc.getSample (slot);
-        const auto peaks = peaksOf (smp.get());
-        g.saveState();
-        g.addTransform (juce::AffineTransform::scale (kSlotScale, kSlotScale, kSlotCx[slot], kSlotCy[slot]));
-        slotDisc (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String ("Empty"),
-                  smp == nullptr, "load WAV", &peaks, 0, slot == selectedSlot);
-        g.restoreState();
+        const auto peaks = peaksOf (smp.get(), 30);
+        slotDot (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String(),
+                 smp == nullptr, peaks, selection.count (slot) > 0 && ! masterView);
     }
-    (void) p3;
 
-    // ---- backdrop of the module area: a darker rounded plate, so the lower circles read as one separate zone
+    // ---- v2: one panel from edge to edge
     {
-        const juce::Rectangle<float> plate (8.0f, 400.0f, kDW - 16.0f, 252.0f);
+        const juce::Rectangle<float> plate (8.0f, 404.0f, kDW - 16.0f, 250.0f);
         g.setGradientFill (ColourGradient (Colour (0xff6b6454).withAlpha (0.55f), 0, plate.getY(),
                                            Colour (0xff4d4739).withAlpha (0.55f), 0, plate.getBottom(), false));
-        g.fillRoundedRectangle (plate, 34.0f);
+        g.fillRoundedRectangle (plate, 24.0f);
         g.setColour (juce::Colours::black.withAlpha (0.35f));
-        g.drawRoundedRectangle (plate.reduced (0.5f), 34.0f, 1.2f);
-        g.setColour (juce::Colours::white.withAlpha (0.06f));
-        g.drawRoundedRectangle (plate.translated (0, 1.2f).reduced (1.5f), 33.0f, 1.0f);
-    }
+        g.drawRoundedRectangle (plate.reduced (0.5f), 24.0f, 1.2f);
 
-    // ---- nine modules: round, in three pyramids of three
-    for (int m = 0; m < kNumModules; ++m)
-    {
-        const auto c = moduleCentre (m);
-        const Colour col (kModules[m].colour);
-        if (kModPlace[m][0] == 4)
+        juce::String title = "Master (all four together)";
+        if (! masterView)
         {
-            g.setColour (col);
-            g.setFont (font (bld, 11.5f));
-            g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 38, 100, 16), juce::Justification::centred);
-            continue;
+            title = "Sample ";
+            bool first = true;
+            for (int i : selection) { title << (first ? "" : " + ") << juce::String (i + 1); first = false; }
         }
-        shadowCircle (g, c.x, c.y, kModR, 0.5f, 22, { 8, 12 });
-        g.setGradientFill (ColourGradient (Colour (0xff3d3b39), c.x - kModR * 0.6f, c.y - kModR * 0.7f,
-                                           Colour (0xff222120), c.x + kModR * 0.7f, c.y + kModR, false));
-        g.fillEllipse (c.x - kModR, c.y - kModR, 2 * kModR, 2 * kModR);
-        g.setColour (col.withAlpha (0.85f));
-        g.drawEllipse (c.x - kModR + 1.5f, c.y - kModR + 1.5f, 2 * kModR - 3.0f, 2 * kModR - 3.0f, 2.0f);
-        g.setColour (col);
-        g.setFont (font (bld, 11.5f));
-        if (m != kJoyModule)
-            g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 4, 100, 16), juce::Justification::centred);
+        g.setColour (kAcc);
+        g.setFont (font (bld, 20));
+        g.drawText (title, juce::Rectangle<float> (28, 412, 360, 30), juce::Justification::centredLeft);
+        if (message.isNotEmpty())
+        {
+            g.setColour (kMuted);
+            g.setFont (font (reg, 15));
+            g.drawText (message, juce::Rectangle<float> (390, 412, 700, 30), juce::Justification::centredLeft);
+        }
+        const bool allOn = ! masterView && selection.size() == 4;
+        for (int k = 0; k < 2; ++k)
+        {
+            const juce::Rectangle<float> r = k == 0 ? kAllBtn : kMasterBtn;
+            const bool on = k == 0 ? allOn : masterView;
+            g.setColour (on ? kAcc : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 14);
+            g.setColour (on ? kDark : kLight);
+            g.setFont (font (reg, 16));
+            g.drawText (k == 0 ? "All" : "Master", r, juce::Justification::centred);
+        }
+
+        // screen: the sound of the first selected sample (grains, rhythm and selection will be drawn here)
+        const juce::Rectangle<float> screen (24.0f, 450.0f, kDW - 48.0f, 62.0f);
+        insetBox (g, screen, 10);
+        if (masterView)
+        {
+            g.setColour (kMuted);
+            g.setFont (font (reg, 16));
+            g.drawText ("The four sounds together", screen, juce::Justification::centred);
+        }
+        else if (! selection.empty())
+        {
+            const auto smp = proc.getSample (*selection.begin());
+            const auto pk = peaksOf (smp.get(), 220);
+            if (pk.size() > 0)
+                realWave (g, screen.getCentreX(), screen.getCentreY(), screen.getWidth() - 40.0f, 24.0f, pk);
+            else
+            {
+                g.setColour (kMuted);
+                g.setFont (font (reg, 16));
+                g.drawText ("Empty: double-click the circle or drop a WAV", screen, juce::Justification::centred);
+            }
+        }
+
+        // columns (controls come next)
+        const char* names[2][5] = { { "Position", "Time", "Granular", "Colour", "Filter" },
+                                    { "Space", "Width", "Filter", "Reverb \xc2\xb7 Delay", "Crush \xc2\xb7 Out" } };
+        const float cw = (kDW - 48.0f - 4 * 12.0f) / 5.0f;
+        for (int c = 0; c < 5; ++c)
+        {
+            const juce::Rectangle<float> col (24.0f + (float) c * (cw + 12.0f), 524.0f, cw, 120.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.fillRoundedRectangle (col, 10);
+            g.setColour (kWada[c % 5]);
+            g.setFont (font (bld, 15));
+            g.drawText (juce::String (juce::CharPointer_UTF8 (names[masterView ? 1 : 0][c])), col.withHeight (26.0f).translated (0, 4), juce::Justification::centred);
+        }
     }
 }

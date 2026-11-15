@@ -97,6 +97,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     bool keyPressed (const juce::KeyPress&) override;
     bool keyStateChanged (bool isKeyDown) override;
 
@@ -136,6 +137,8 @@ private:
     std::set<int> heldNotes;
     int octaveShift = 0;
     int selectedSlot = 0;
+    std::set<int> selection { 0 };
+    bool masterView = false;
     int resampleArmedSlot = -1;  // Resample asks once before it replaces a sound
     int resampleArmTicks = 0;
     bool hudWasRecording = false;
