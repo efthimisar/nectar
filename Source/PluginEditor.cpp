@@ -325,27 +325,25 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
                      names[i], false, fixedVals[s][i], id);
         }
 
-    // module panel: 4 modules x 3 knobs (only Loop is wired for now)
-    const char* modKnobs[4][3] = { { "Keep length", "Stretch", "Loop" }, { "Tone", "Focus", "Size" },
-                                   { "Bright", "Blur", "Freeze" }, { "Tune", "Decay", "Material" } };
-    const float modVals[4][3] = { { 0.45f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f },
-                                  { 0.50f, 0.0f, 0.0f }, { 0.62f, 0.85f, 0.42f } };
-    for (int m = 0; m < 4; ++m)
-        for (int k = 0; k < 3 && m != 2 && m != 3; ++k)
-            addKnob (130.0f + (float) m * 185.0f + 34.0f + (float) k * 58.0f, 772.0f + 100.0f, 22.0f,
-                     modKnobs[m][k], false, modVals[m][k], (m == 0 && k == 2) ? "loop" : ((m == 0 && k == 0) ? "keeplength" : ((m == 0 && k == 1) ? "stretch" : ((m == 1 && k == 0) ? "bodytone" : ((m == 1 && k == 1) ? "bodyfocus" : ((m == 1 && k == 2) ? "bodysize" : nullptr))))), m == 0 && k == 2);
-
-    // Spectral module: four smaller knobs (Bright, Morph, Blur, Freeze)
+    // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
     {
-        const char* names4[2][4] = { { "Bright", "Morph", "Blur", "Freeze" }, { "Tune", "Decay", "Material", "Mix" } };
-        const char* ids4[2][4] = { { "bright", "morph", "blur", "freeze" }, { "restune", "resdecay", "resmat", "resmix" } };
-        const float vals4[2][4] = { { 0.50f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
-        for (int q = 0; q < 2; ++q)
+        const char* modNames[4][4] = { { "Keep length", "Stretch", "Loop", "Freeze" }, { "Tone", "Focus", "Size", "Morph" },
+                                    { "Harmonic", "Rough", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
+        const char* ids[4][4] = { { "keeplength", "stretch", "loop", "freeze" }, { "bodytone", "bodyfocus", "bodysize", "morph" },
+                                  { nullptr, nullptr, "blur", nullptr }, { "restune", "resdecay", "resmat", "resmix" } };
+        const float vals[4][4] = { { 0.45f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f },
+                                   { 0.50f, 0.30f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
+        for (int m = 0; m < 4; ++m)
             for (int k = 0; k < 4; ++k)
-                addKnob (130.0f + (float) (2 + q) * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f, names4[q][k], false, vals4[q][k], ids4[q][k]);
+            {
+                if (m == 2 && k == 3) continue;
+                const bool dim = (m == 2 && k < 2); // Source: Harmonic/Rough arrive in step 10B
+                addKnob (130.0f + (float) m * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f,
+                         modNames[m][k], dim, vals[m][k], ids[m][k], m == 0 && k == 2);
+            }
     }
 
-    addKnob (740, 30, 13, "", false, 0.6f); // Out (not wired yet)
+    addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
     constrainer.setFixedAspectRatio (1.0);
     constrainer.setMinimumSize (500, 500);
@@ -663,7 +661,7 @@ void NektarEditor::renderDesign (Graphics& g)
 
     g.setColour (kMuted);
     g.setFont (font (reg, 13));
-    g.drawText ("Out  -6.0 dB", juce::Rectangle<float> (760, 18, 90, 24), juce::Justification::centredLeft);
+    g.drawText ("Tilt", juce::Rectangle<float> (760, 18, 90, 24), juce::Justification::centredLeft);
     g.setColour (kLight);
     g.setFont (font (reg, 32));
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xce\xbd\xce\xad\xce\xba\xcf\x84\xce\xb1\xcf\x81")),
@@ -790,9 +788,9 @@ void NektarEditor::renderDesign (Graphics& g)
 
     struct Mod { const char* name; juce::String value; const char* k[3]; float p[3]; };
     const Mod mods[] = {
-        { "Time",      juce::CharPointer_UTF8 ("length \xc2\xb7 stretch"), { "Keep length", "Stretch", "Loop" },  { 0.45f, 0.0f, 0.90f } },
-        { "Body",      juce::CharPointer_UTF8 ("tone \xc2\xb7 focus \xc2\xb7 size"), { "Tone", "Focus", "Size" },     { 0.50f, 0.50f, 0.50f } },
-        { "Spectral",  juce::CharPointer_UTF8 ("colour \xc2\xb7 morph"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
+        { "Time",      juce::CharPointer_UTF8 ("length \xc2\xb7 freeze"), { "Keep length", "Stretch", "Loop" },  { 0.45f, 0.0f, 0.90f } },
+        { "Body",      juce::CharPointer_UTF8 ("tone \xc2\xb7 morph"), { "Tone", "Focus", "Size" },     { 0.50f, 0.50f, 0.50f } },
+        { "Source",    juce::CharPointer_UTF8 ("spread"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
         { "Resonator", "follows key",                                              { "Tune", "Decay", "Material" },  { 0.62f, 0.85f, 0.42f } },
     };
     for (int m = 0; m < 4; ++m)
