@@ -5,6 +5,7 @@
 #include <atomic>
 #include "SamplePlayer.h"
 #include "TiltFilter.h"
+#include "SlotMixer.h"
 #include "Resonator.h"
 
 class NektarProcessor : public juce::AudioProcessor,
@@ -74,6 +75,9 @@ private:
 
     std::array<SamplePlayer, kSlots> players;
     TiltFilter tilt;
+    SlotMixer mixer;
+    std::array<std::atomic<float>*, kSlots> panP {};
+    std::array<std::atomic<float>*, 2> imorphP {};
     Resonator resonator;
     std::atomic<float>* resTuneP = nullptr;
     std::atomic<float>* resDecayP = nullptr;

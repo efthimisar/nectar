@@ -72,6 +72,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail" + sfx, 1 }, "Tail" + nm,
                                                              NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("s")));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pan" + sfx, 1 }, "Pan" + nm,
+                                                             NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
@@ -99,6 +101,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "model", 1 }, "Model (sine waves)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "modelnoise", 1 }, "Model noise (residual)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "srcrough", 1 }, "Source rough",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
@@ -135,6 +141,7 @@ NektarProcessor::NektarProcessor()
         levelP[(size_t) slot] = apvts.getRawParameterValue ("level" + sfx);
         pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
         tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
+        panP[(size_t) slot] = apvts.getRawParameterValue ("pan" + sfx);
         noiseP[(size_t) slot] = apvts.getRawParameterValue ("noise" + sfx);
         humP[(size_t) slot] = apvts.getRawParameterValue ("hum" + sfx);
         lowCutP[(size_t) slot] = apvts.getRawParameterValue ("lowcut" + sfx);
@@ -153,6 +160,8 @@ NektarProcessor::NektarProcessor()
     bodyFocusP = apvts.getRawParameterValue ("bodyfocus");
     bodySizeP = apvts.getRawParameterValue ("bodysize");
     srcRoughP = apvts.getRawParameterValue ("srcrough");
+    imorphP[0] = apvts.getRawParameterValue ("imorph12");
+    imorphP[1] = apvts.getRawParameterValue ("imorph34");
     modelP = apvts.getRawParameterValue ("model");
     modelNoiseP = apvts.getRawParameterValue ("modelnoise");
     resTuneP = apvts.getRawParameterValue ("restune");
@@ -253,8 +262,9 @@ bool NektarProcessor::hasRoomTone() const
     return roomProfile.valid;
 }
 
-void NektarProcessor::prepareToPlay (double sampleRate, int)
+void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    mixer.prepare (sampleRate, samplesPerBlock);
     for (auto& pl : players)
         pl.prepare (sampleRate);
     tilt.prepare (sampleRate);
@@ -361,6 +371,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     const int limit = juce::jmax (8, 32 / juce::jmax (1, loaded));
 
     buffer.clear();
+    std::array<bool, kSlots> loadedNow {};
+    std::array<float, kSlots> pans {};
     for (int slot = 0; slot < kSlots; ++slot)
     {
         auto& pl = players[(size_t) slot];
@@ -370,8 +382,12 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         p.pitchSemis = pitchP[(size_t) slot]->load();
         p.releaseSec = tailP[(size_t) slot]->load();
         pl.setVoiceLimit (limit);
-        pl.process (buffer, midi, p, false);
+        auto view = mixer.scratchFor (slot, buffer.getNumSamples());
+        pl.process (view, midi, p, false);
+        loadedNow[(size_t) slot] = true;
+        pans[(size_t) slot] = panP[(size_t) slot]->load();
     }
+    mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { imorphP[0]->load(), imorphP[1]->load() });
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
     resonator.process (buffer, midi, resTuneP->load(), 0.1f * std::pow (80.0f, resDecayP->load()), resMatP->load(), resMixP->load());

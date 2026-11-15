@@ -45,3 +45,8 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Own design (not published): one f0 per sound (harmonic sum with presence check, median over frames), track labelling within 3% / max 0.3 of a harmonic spacing, "pairable" if both sounds have harmonicity >= 0.5. Otherwise the two sounds are cross-faded (not morphed). Chords and noise stay cross-faded.
 - Tests: synthetic harmonic tones (220 Hz / 1/h against 330 Hz odd harmonics) give exactly the expected partial amplitudes at m = 0, 0.5, 1. On real pads only the analysis numbers and CPU (about 2-3% per voice, Linux release) were checked, not the sound.
 - Known limits: f0 can be wrong for dense or noisy sounds (a door recording got f0 = 44 Hz with harmonicity 0.77); no listening test yet.
+
+## Step 12 (DSP, UI knobs pending) - Pan and Intermorph
+- Each slot is rendered into its own buffer and mixed by SlotMixer. Params: pan, pan2, pan3, pan4 (-1..1, equal power, 1.0 in the middle) and imorph12 / imorph34 (0 = off; above 0 it sets the crossover, 100 Hz to 8 kHz, log).
+- Intermorph: low band of slot 1 (3) + high band of slot 2 (4) through a Linkwitz-Riley crossover. In this mode slot 2 (4) is heard only above the crossover and slot 1 (3) only below it. Needs both slots loaded.
+- Test (Linux): identical sound in both slots gives exactly the single sound (flat sum), pan gains as designed. Not yet heard. The knobs are not on the panel yet: the places are to be chosen by the author.
