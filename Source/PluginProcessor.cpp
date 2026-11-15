@@ -216,6 +216,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfodelay", 1 }, "LFO fade-in time (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfofade", 1 }, "LFO fade-out time (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ramptime", 1 }, "Ramp time (0.05 .. 20 s)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
@@ -284,6 +288,8 @@ NektarProcessor::NektarProcessor()
     chromoP[0] = apvts.getRawParameterValue ("chromo12");
     chromoP[1] = apvts.getRawParameterValue ("chromo34");
     chromoMoveP = apvts.getRawParameterValue ("chromomove");
+    lfoDelayP = apvts.getRawParameterValue ("lfodelay");
+    lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
     chromoDullP = apvts.getRawParameterValue ("chromodull");
     resMixBP = apvts.getRawParameterValue ("resmixb");
@@ -1093,7 +1099,18 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     modVal[(size_t) kModEnv] = envLevel;
     modShown[(size_t) kModEnv].store (envLevel);
     // Ramp (the Neuron's dynamic crossmorph time, up to 20 s): restarts with the first key of a phrase, then stays at 1
-    if (retrigger && heldBefore == 0) rampLevel = 0.0f;
+    if (retrigger && heldBefore == 0) { rampLevel = 0.0f; lfoAge = 0.0; } else lfoAge += blockSec;
+    {   // LFO delay: the LFOs fade in over the fade-in time after the first key of a phrase, and (if set) fade out again over the fade-out time
+        const auto secs = [] (float k) { return k < 0.01f ? 0.0 : 0.05 * std::pow (200.0, (double) k); }; // up to 10 s
+        const double tin = secs (lfoDelayP->load()), tout = secs (lfoFadeP->load());
+        double g = tin > 0.0 ? juce::jmin (1.0, lfoAge / tin) : 1.0;
+        if (tout > 0.0) g *= juce::jmax (0.0, 1.0 - juce::jmax (0.0, lfoAge - tin) / tout);
+        for (int i = 0; i < 2; ++i)
+        {
+            modVal[(size_t) (kModLfo1 + i)] *= (float) g;
+            modShown[(size_t) (kModLfo1 + i)].store (modVal[(size_t) (kModLfo1 + i)]);
+        }
+    }
     rampLevel = juce::jmin (1.0f, rampLevel + (float) blockSec / (0.05f * std::pow (400.0f, rampTimeP->load())));
     modVal[(size_t) kModRamp] = rampLevel;
     modShown[(size_t) kModRamp].store (rampLevel);

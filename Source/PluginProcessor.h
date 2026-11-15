@@ -131,6 +131,9 @@ private:
     float lfoPrev[2] { 0.0f, 0.0f }, lfoNext[2] { 0.0f, 0.0f };
     // envelope (ADSR) driven by the held keys
     std::array<juce::ValueTree, 2> snapshots;
+    double lfoAge = 1.0e9;                 // seconds since the first key of a phrase (LFO delay / fade)
+    std::atomic<float>* lfoDelayP = nullptr;
+    std::atomic<float>* lfoFadeP = nullptr;
     float rampLevel = 1.0f;                // 0 -> 1 over the Ramp time after a note starts with no key held
     std::atomic<float>* rampTimeP = nullptr;
     std::array<std::atomic<float>*, 2> chromoP {};
