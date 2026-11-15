@@ -218,6 +218,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfospiral", 1 }, "LFO spiral (rate sweeps slow to fast over the Ramp time, 0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfodelay", 1 }, "LFO fade-in time (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfofade", 1 }, "LFO fade-out time (0 = off)",
@@ -291,6 +293,7 @@ NektarProcessor::NektarProcessor()
     chromoP[1] = apvts.getRawParameterValue ("chromo34");
     chromoMoveP = apvts.getRawParameterValue ("chromomove");
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
+    lfoSpiralP = apvts.getRawParameterValue ("lfospiral");
     lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
     chromoSpeedP = apvts.getRawParameterValue ("chromospeed");
@@ -1058,7 +1061,12 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     for (int i = 0; i < 2; ++i)
     {
         const double prev = lfoPhase[i];
-        double ph = prev + (double) lfoRateP[i]->load() * blockSec;
+        // Spiral: the rate sweeps from far below the Rate knob to far above it (up to +-7 octaves) while the Ramp rises
+        const float spiral = lfoSpiralP->load();
+        double rate = (double) lfoRateP[i]->load();
+        if (spiral > 0.001f)
+            rate = juce::jlimit (0.01, 40.0, rate * std::pow (2.0, 7.0 * (double) spiral * (2.0 * (double) rampLevel - 1.0)));
+        double ph = prev + rate * blockSec;
         const bool wrapped = ph >= 1.0;
         ph -= std::floor (ph);
         lfoPhase[i] = ph;

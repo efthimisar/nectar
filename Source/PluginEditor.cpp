@@ -672,8 +672,9 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     }
     {   // LFO fade-in / fade-out time, just under the LFO circle
         const auto lc = moduleCentre (7);
-        addKnob (lc.x - 21.0f, lc.y + 76.0f, 7.5f, "Fade in", false, 0.0f, "lfodelay");
-        addKnob (lc.x + 21.0f, lc.y + 76.0f, 7.5f, "Fade out", false, 0.0f, "lfofade");
+        addKnob (lc.x - 34.0f, lc.y + 76.0f, 7.5f, "Fade in", false, 0.0f, "lfodelay");
+        addKnob (lc.x, lc.y + 76.0f, 7.5f, "Fade out", false, 0.0f, "lfofade");
+        addKnob (lc.x + 34.0f, lc.y + 76.0f, 7.5f, "Spiral", false, 0.0f, "lfospiral");
     }
     {   // Ramp time, just under the ENV circle
         const auto ec = moduleCentre (10);

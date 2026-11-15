@@ -134,6 +134,7 @@ private:
     double lfoAge = 1.0e9;                 // seconds since the first key of a phrase (LFO delay / fade)
     std::atomic<float>* lfoDelayP = nullptr;
     std::atomic<float>* lfoFadeP = nullptr;
+    std::atomic<float>* lfoSpiralP = nullptr;
     float rampLevel = 1.0f;                // 0 -> 1 over the Ramp time after a note starts with no key held
     std::atomic<float>* rampTimeP = nullptr;
     std::array<std::atomic<float>*, 2> chromoP {};
