@@ -23,6 +23,9 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
+    // Lets the knob follow a modulation source (right mouse button: choose the source; drag with it: amount).
+    void setModulation (NektarProcessor* p) { modProc = p; }
+
     static constexpr float kWidth = 90.0f; // design units
     float height() const { return 2.0f * radius + 20.0f; }
 
@@ -35,6 +38,9 @@ private:
     juce::RangedAudioParameter* parameter;
     bool toggle;
     float dragStart = 0.0f;
+    NektarProcessor* modProc = nullptr;
+    bool rightDrag = false;
+    float amountStart = 0.0f;
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 

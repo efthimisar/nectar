@@ -62,3 +62,8 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Test (headless, Linux): save, change two knobs, load: values restored; resampled slot restored from the library.
 - Not yet: rename/delete, folders, preset browser in the main window, factory presets.
 - Next in step 14: modulation (LFO, slicer, filter) and effects: to be specified with the author.
+
+## Step 14B – Modulation and single-panel UI
+- Every knob can take a modulation source: right-click the knob (None / LFO 1 / LFO 2 / Slicer), Shift+drag edits the amount (orange ring).
+- LFO 1 / LFO 2: rate + shape (sine, triangle, saw, square, sample-and-hold). Routes are saved with the state and presets.
+- The editor is now one panel: four slots, library ring, and a 3x3 grid of modules (Filter, Reverb, Delay and Slicer are placeholders until the next steps).

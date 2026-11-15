@@ -102,6 +102,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "modelnoise", 1 }, "Model noise (residual)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    for (int i = 0; i < 2; ++i)
+    {
+        const juce::String n (i + 1);
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "rate", 1 }, "LFO " + n + " rate",
+                                                             NormalisableRange<float> (0.02f, 20.0f, 0.001f, 0.35f), i == 0 ? 0.5f : 0.2f,
+                                                             juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "shape", 1 }, "LFO " + n + " shape",
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    }
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
@@ -162,6 +171,12 @@ NektarProcessor::NektarProcessor()
     srcRoughP = apvts.getRawParameterValue ("srcrough");
     imorphP[0] = apvts.getRawParameterValue ("imorph12");
     imorphP[1] = apvts.getRawParameterValue ("imorph34");
+    for (int i = 0; i < 2; ++i)
+    {
+        lfoRateP[i] = apvts.getRawParameterValue ("lfo" + juce::String (i + 1) + "rate");
+        lfoShapeP[i] = apvts.getRawParameterValue ("lfo" + juce::String (i + 1) + "shape");
+    }
+    buildModTable();
     modelP = apvts.getRawParameterValue ("model");
     modelNoiseP = apvts.getRawParameterValue ("modelnoise");
     resTuneP = apvts.getRawParameterValue ("restune");
@@ -347,19 +362,20 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
 
+    updateMods (buffer.getNumSamples());
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
-    p.keepLength = apvts.getRawParameterValue ("keeplength")->load();
-    p.stretch = apvts.getRawParameterValue ("stretch")->load();
-    p.blur = blurP->load();
-    p.freeze = freezeP->load();
-    p.morph = morphP->load();
-    p.body.tone = bodyToneP->load();
-    p.body.focus = bodyFocusP->load();
-    p.body.size = bodySizeP->load();
-    p.body.rough = srcRoughP->load();
-    p.model = modelP->load();
-    p.modelNoise = modelNoiseP->load();
+    p.keepLength = modded (apvts.getRawParameterValue ("keeplength"));
+    p.stretch = modded (apvts.getRawParameterValue ("stretch"));
+    p.blur = modded (blurP);
+    p.freeze = modded (freezeP);
+    p.morph = modded (morphP);
+    p.body.tone = modded (bodyToneP);
+    p.body.focus = modded (bodyFocusP);
+    p.body.size = modded (bodySizeP);
+    p.body.rough = modded (srcRoughP);
+    p.model = modded (modelP);
+    p.modelNoise = modded (modelNoiseP);
     // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());
@@ -378,22 +394,22 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         auto& pl = players[(size_t) slot];
         if (! pl.hasSample())
             continue;
-        p.level = levelP[(size_t) slot]->load();
-        p.pitchSemis = pitchP[(size_t) slot]->load();
-        p.releaseSec = tailP[(size_t) slot]->load();
+        p.level = modded (levelP[(size_t) slot]);
+        p.pitchSemis = modded (pitchP[(size_t) slot]);
+        p.releaseSec = modded (tailP[(size_t) slot]);
         pl.setVoiceLimit (limit);
         auto view = mixer.scratchFor (slot, buffer.getNumSamples());
         pl.process (view, midi, p, false);
         loadedNow[(size_t) slot] = true;
-        pans[(size_t) slot] = panP[(size_t) slot]->load();
+        pans[(size_t) slot] = modded (panP[(size_t) slot]);
     }
-    mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { imorphP[0]->load(), imorphP[1]->load() });
+    mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) });
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
-    resonator.process (buffer, midi, resTuneP->load(), 0.1f * std::pow (80.0f, resDecayP->load()), resMatP->load(), resMixP->load());
+    resonator.process (buffer, midi, modded (resTuneP), 0.1f * std::pow (80.0f, modded (resDecayP)), modded (resMatP), modded (resMixP));
 
     // Bright: tilt of the whole sound (0.5 = off)
-    tilt.setTilt ((brightP->load() - 0.5f) * 2.0f * 9.0f);
+    tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
 
     // Resample: copy what is about to be heard
@@ -578,6 +594,7 @@ juce::String NektarProcessor::savePreset (const juce::String& name)
         }
         state.setProperty (key, path, nullptr);
     }
+    addModToState (state);
     if (! getPresetFolder().createDirectory())
         return "Could not create the presets folder.";
     const auto file = getPresetFolder().getChildFile (clean + ".nektarpreset");
@@ -603,6 +620,7 @@ juce::String NektarProcessor::loadPreset (const juce::File& file)
             missing += (missing.isEmpty() ? "" : ", ") + juce::String (slot + 1);
     }
     apvts.replaceState (state);
+    readModFromState (state);
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
@@ -626,6 +644,7 @@ void NektarProcessor::getStateInformation (juce::MemoryBlock& dest)
     for (int slot = 0; slot < kSlots; ++slot)
         if (auto s = getSample (slot))
             state.setProperty ("samplePath" + juce::String (slot + 1), s->path, nullptr);
+    addModToState (state);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -638,6 +657,7 @@ void NektarProcessor::setStateInformation (const void* data, int size)
         if (state.isValid())
         {
             apvts.replaceState (state);
+            readModFromState (state);
             for (int slot = 0; slot < kSlots; ++slot)
             {
                 auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
@@ -658,4 +678,113 @@ juce::AudioProcessorEditor* NektarProcessor::createEditor()
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new NektarProcessor();
+}
+
+// ---- modulation
+void NektarProcessor::buildModTable()
+{
+    modIds.clear();
+    modRanges.clear();
+    for (auto* par : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (par))
+            if (auto* raw = apvts.getRawParameterValue (rp->paramID))
+            {
+                modIdxByRaw[raw] = (int) modIds.size();
+                modIdxById[rp->paramID.toStdString()] = (int) modIds.size();
+                modIds.push_back (rp->paramID);
+                modRanges.push_back (rp->getNormalisableRange());
+            }
+    routeSrc = std::vector<std::atomic<int>> (modIds.size());
+    routeAmt = std::vector<std::atomic<float>> (modIds.size());
+    for (auto& a : routeSrc) a.store (0);
+    for (auto& a : routeAmt) a.store (0.0f);
+    for (auto& a : modShown) a.store (0.0f);
+}
+
+NektarProcessor::ModRoute NektarProcessor::getModRoute (const juce::String& id) const
+{
+    const auto it = modIdxById.find (id.toStdString());
+    if (it == modIdxById.end())
+        return {};
+    return { routeSrc[(size_t) it->second].load(), routeAmt[(size_t) it->second].load() };
+}
+
+void NektarProcessor::setModRoute (const juce::String& id, ModRoute r)
+{
+    const auto it = modIdxById.find (id.toStdString());
+    if (it == modIdxById.end())
+        return;
+    routeAmt[(size_t) it->second].store (juce::jlimit (-1.0f, 1.0f, r.amount));
+    routeSrc[(size_t) it->second].store (juce::jlimit (0, (int) kModCount - 1, r.src));
+}
+
+float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
+{
+    const float v = raw->load();
+    const auto it = modIdxByRaw.find (raw);
+    if (it == modIdxByRaw.end())
+        return v;
+    const int src = routeSrc[(size_t) it->second].load();
+    if (src <= 0)
+        return v;
+    const auto& r = modRanges[(size_t) it->second];
+    const float n = juce::jlimit (0.0f, 1.0f, r.convertTo0to1 (v) + routeAmt[(size_t) it->second].load() * modVal[(size_t) src]);
+    return r.convertFrom0to1 (n);
+}
+
+// Sources are updated once per block (-1..1). LFO shape knob: sine, triangle, saw, square, sample and hold.
+void NektarProcessor::updateMods (int numSamples)
+{
+    const double sr = hostRate.load() > 0.0 ? hostRate.load() : 44100.0;
+    for (int i = 0; i < 2; ++i)
+    {
+        const double prev = lfoPhase[i];
+        double ph = prev + (double) lfoRateP[i]->load() * (double) numSamples / sr;
+        const bool wrapped = ph >= 1.0;
+        ph -= std::floor (ph);
+        lfoPhase[i] = ph;
+        if (wrapped)
+            lfoHold[i] = lfoRng.nextFloat() * 2.0f - 1.0f;
+        const float sh = lfoShapeP[i]->load();
+        const float t = (float) ph;
+        float v;
+        if (sh < 0.2f)      v = std::sin (juce::MathConstants<float>::twoPi * t);
+        else if (sh < 0.4f) v = 1.0f - 4.0f * std::abs (t - 0.5f);
+        else if (sh < 0.6f) v = 2.0f * t - 1.0f;
+        else if (sh < 0.8f) v = t < 0.5f ? 1.0f : -1.0f;
+        else                v = lfoHold[i];
+        modVal[(size_t) (kModLfo1 + i)] = v;
+        modShown[(size_t) (kModLfo1 + i)].store (v);
+    }
+}
+
+void NektarProcessor::addModToState (juce::ValueTree& state)
+{
+    for (int i = state.getNumChildren(); --i >= 0;)
+        if (state.getChild (i).hasType ("MOD"))
+            state.removeChild (i, nullptr);
+    for (size_t i = 0; i < modIds.size(); ++i)
+        if (routeSrc[i].load() > 0)
+        {
+            juce::ValueTree m ("MOD");
+            m.setProperty ("id", modIds[i], nullptr);
+            m.setProperty ("src", routeSrc[i].load(), nullptr);
+            m.setProperty ("amount", (double) routeAmt[i].load(), nullptr);
+            state.appendChild (m, nullptr);
+        }
+}
+
+void NektarProcessor::readModFromState (const juce::ValueTree& state)
+{
+    for (size_t i = 0; i < modIds.size(); ++i)
+    {
+        routeSrc[i].store (0);
+        routeAmt[i].store (0.0f);
+    }
+    for (int i = 0; i < state.getNumChildren(); ++i)
+    {
+        const auto c = state.getChild (i);
+        if (c.hasType ("MOD"))
+            setModRoute (c.getProperty ("id").toString(), { (int) c.getProperty ("src"), (float) (double) c.getProperty ("amount") });
+    }
 }

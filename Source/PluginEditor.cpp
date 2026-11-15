@@ -11,8 +11,36 @@ const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark 
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f;
-constexpr float kSlotCx[4] = { 205.0f, 795.0f, 205.0f, 795.0f };
-constexpr float kSlotCy[4] = { 262.0f, 262.0f, 590.0f, 590.0f };
+constexpr float kSlotScale = 0.8f;   // the slot discs and the centre are drawn at 80 % so that the module grid fits below
+constexpr float kSlotCx[4] = { 186.0f, 814.0f, 186.0f, 814.0f };
+constexpr float kSlotCy[4] = { 220.0f, 220.0f, 450.0f, 450.0f };
+constexpr float kCentreY = 335.0f;   // centre of the ring and the check screen after scaling
+
+// The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
+struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
+const ModuleDef kModules[] = {
+    { "TIME",      "length \xc2\xb7 freeze",       0xfffdc57e, { "Keep length", "Stretch", "Loop", "Freeze" },  { "keeplength", "stretch", "loop", "freeze" } },
+    { "BODY",      "tone \xc2\xb7 morph",          0xffb5b1d8, { "Tone", "Focus", "Size", "Morph" },            { "bodytone", "bodyfocus", "bodysize", "morph" } },
+    { "SOURCE",    "model \xc2\xb7 grit \xc2\xb7 spread", 0xff78cdd0, { "Model", "Grit", "Spread", "Noise" }, { "model", "srcrough", "blur", "modelnoise" } },
+    { "RESONATOR", "follows key",                     0xffc1c494, { "Tune", "Decay", "Material", "Mix" },          { "restune", "resdecay", "resmat", "resmix" } },
+    { "FILTER",    "ladder \xc2\xb7 formant \xc2\xb7 comb", 0xffe07a5f, { "Type", "Cutoff", "Reso", "Drive" }, { nullptr, nullptr, nullptr, nullptr } },
+    { "REVERB",    "shimmer \xc2\xb7 tuned",       0xff8fb8de, { "Size", "Decay", "Shimmer", "Mix" },           { nullptr, nullptr, nullptr, nullptr } },
+    { "DELAY",     "pitch per repeat",               0xfff2cc8f, { "Time", "Feedback", "Pitch", "Mix" },          { nullptr, nullptr, nullptr, nullptr } },
+    { "LFO",       "1 \xc2\xb7 2",                 0xfff4a6c0, { "Rate 1", "Shape 1", "Rate 2", "Shape 2" },    { "lfo1rate", "lfo1shape", "lfo2rate", "lfo2shape" } },
+    { "SLICER",    "rhythmic gate",                  0xff9bc89b, { "Rate", "Pattern", "Smooth", "Depth" },        { nullptr, nullptr, nullptr, nullptr } },
+};
+constexpr int kNumModules = 9;
+constexpr float kGridX = 30.0f, kGridY = 566.0f, kGridW = 940.0f, kGridH = 418.0f, kGridPad = 12.0f, kGridGap = 10.0f;
+juce::Rectangle<float> moduleRect (int m)
+{
+    const float w = (kGridW - 2 * kGridPad - 2 * kGridGap) / 3.0f, h = (kGridH - 2 * kGridPad - 2 * kGridGap) / 3.0f;
+    return { kGridX + kGridPad + (float) (m % 3) * (w + kGridGap), kGridY + kGridPad + (float) (m / 3) * (h + kGridGap), w, h };
+}
+juce::Point<float> moduleKnobCentre (int m, int k)
+{
+    const auto r = moduleRect (m);
+    return { r.getX() + 10.0f + ((float) k + 0.5f) * ((r.getWidth() - 20.0f) / 4.0f), r.getY() + 52.0f };
+}
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -190,12 +218,66 @@ void KnobComponent::paint (Graphics& g)
     g.addTransform (juce::AffineTransform::scale (s));
     const float p = parameter != nullptr ? parameter->getValue() : fixed;
     nektar::drawKnob (g, typeface, kWidth / 2.0f, radius, radius, p, text, dimmed);
+    if (modProc != nullptr && parameter != nullptr && ! toggle)
+    {
+        const auto r = modProc->getModRoute (parameter->paramID);
+        if (r.src > 0)
+        {
+            // ring around the knob: the dark track is the whole range, the bright part is how far the modulation reaches
+            const float cx = kWidth / 2.0f, cy = radius, rr = radius + 5.0f;
+            const float a0 = juce::degreesToRadians (-135.0f), span = juce::degreesToRadians (270.0f);
+            juce::Path track, reach;
+            track.addCentredArc (cx, cy, rr, rr, 0.0f, a0, a0 + span, true);
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.strokePath (track, juce::PathStrokeType (2.0f));
+            const float from = a0 + span * p, to = a0 + span * juce::jlimit (0.0f, 1.0f, p + r.amount);
+            reach.addCentredArc (cx, cy, rr, rr, 0.0f, juce::jmin (from, to), juce::jmax (from, to) + 0.001f, true);
+            g.setColour (juce::Colour (0xffe8a23a));
+            g.strokePath (reach, juce::PathStrokeType (2.6f));
+        }
+    }
 }
 
-void KnobComponent::mouseDown (const juce::MouseEvent&)
+void KnobComponent::mouseDown (const juce::MouseEvent& e)
 {
     if (parameter == nullptr)
         return;
+    if (e.mods.isPopupMenu())
+    {
+        if (modProc == nullptr || toggle)
+            return;
+        auto r = modProc->getModRoute (parameter->paramID);
+        {
+            // first click: choose the source
+            juce::PopupMenu menu;
+            menu.addSectionHeader ("Modulate with");
+            menu.addItem (1, "None", true, r.src == 0);
+            menu.addItem (2, "LFO 1", true, r.src == NektarProcessor::kModLfo1);
+            menu.addItem (3, "LFO 2", true, r.src == NektarProcessor::kModLfo2);
+            menu.addItem (4, "Slicer", true, r.src == NektarProcessor::kModSlicer);
+            menu.addSeparator();
+            menu.addItem (100, "Amount: hold Shift and drag the knob", false);
+            juce::Component::SafePointer<KnobComponent> safe (this);
+            menu.showMenuAsync (juce::PopupMenu::Options(), [safe, r] (int choice)
+            {
+                if (safe == nullptr || choice < 1 || choice > 4)
+                    return;
+                auto n = r;
+                n.src = choice - 1;
+                if (n.src > 0 && std::abs (n.amount) < 0.01f)
+                    n.amount = 0.5f;
+                safe->modProc->setModRoute (safe->parameter->paramID, n);
+                safe->repaint();
+            });
+        }
+        return;
+    }
+    if (e.mods.isShiftDown() && modProc != nullptr && ! toggle && modProc->getModRoute (parameter->paramID).src > 0)
+    {
+        rightDrag = true; // Shift + drag: how far the modulation reaches
+        amountStart = modProc->getModRoute (parameter->paramID).amount;
+        return;
+    }
     parameter->beginChangeGesture();
     if (toggle)
         parameter->setValueNotifyingHost (parameter->getValue() > 0.5f ? 0.0f : 1.0f);
@@ -206,13 +288,32 @@ void KnobComponent::mouseDrag (const juce::MouseEvent& e)
 {
     if (parameter == nullptr || toggle)
         return;
+    if (rightDrag)
+    {
+        if (modProc != nullptr)
+        {
+            auto r = modProc->getModRoute (parameter->paramID);
+            const float s = (float) getWidth() / kWidth;
+            r.amount = juce::jlimit (-1.0f, 1.0f, amountStart - (float) e.getDistanceFromDragStartY() / (150.0f * s));
+            modProc->setModRoute (parameter->paramID, r);
+            repaint();
+        }
+        return;
+    }
+    if (e.mods.isPopupMenu())
+        return;
     const float s = (float) getWidth() / kWidth;
     const float delta = -(float) e.getDistanceFromDragStartY() / (150.0f * s);
     parameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, dragStart + delta));
 }
 
-void KnobComponent::mouseUp (const juce::MouseEvent&)
+void KnobComponent::mouseUp (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() || rightDrag)
+    {
+        rightDrag = false;
+        return;
+    }
     if (parameter != nullptr)
         parameter->endChangeGesture();
 }
@@ -311,8 +412,8 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     bold    = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoBold_ttf, BinaryData::CarlitoBold_ttfSize);
 
     // slots: 6 knobs each
-    const float slotX[] = { 205, 795, 205, 795 };
-    const float slotY[] = { 262, 262, 590, 590 };
+    const float slotX[] = { kSlotCx[0], kSlotCx[1], kSlotCx[2], kSlotCx[3] };
+    const float slotY[] = { kSlotCy[0], kSlotCy[1], kSlotCy[2], kSlotCy[3] };
     const char* names[] = { "Level", "Pitch", "Noise", "Hum", "Low cut", "Tail" };
     const float fixedVals[4][6] = { { 0.8f, 0.5f, 0.50f, 0.95f, 0.18f, 0.25f },
                                     { 0.40f, 0.70f, 0.55f, 0.92f, 0.45f, 0.80f },
@@ -334,33 +435,25 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         if (s == 2) row1.push_back ({ "Inter", "imorph34", 0.0f });
         const std::vector<K> row2 { { "Noise", noiseIds[s], fixedVals[s][2] }, { "Hum", humIds[s], fixedVals[s][3] },
                                     { "Low cut", lowCutIds[s], fixedVals[s][4] }, { "Tail", tailIds[s], fixedVals[s][5] } };
-        const float spacing = 40.0f;
+        const float spacing = 33.0f;
         for (int r = 0; r < 2; ++r)
         {
             const auto& row = r == 0 ? row1 : row2;
             for (size_t i = 0; i < row.size(); ++i)
-                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + 21.0f + (float) r * 53.0f, 14.0f,
+                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + (r == 0 ? 8.0f : 52.0f), 11.5f,
                          row[i].label, false, row[i].fixed, row[i].id);
         }
     }
     (void) names;
 
-    // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
-    {
-        const char* modNames[4][4] = { { "Keep length", "Stretch", "Loop", "Freeze" }, { "Tone", "Focus", "Size", "Morph" },
-                                    { "Model", "Grit", "Spread", "Noise" }, { "Tune", "Decay", "Material", "Mix" } };
-        const char* ids[4][4] = { { "keeplength", "stretch", "loop", "freeze" }, { "bodytone", "bodyfocus", "bodysize", "morph" },
-                                  { "model", "srcrough", "blur", "modelnoise" }, { "restune", "resdecay", "resmat", "resmix" } };
-        const float vals[4][4] = { { 0.45f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f },
-                                   { 0.50f, 0.30f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
-        for (int m = 0; m < 4; ++m)
-            for (int k = 0; k < 4; ++k)
-            {
-                const bool dim = false;
-                addKnob (130.0f + (float) m * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f,
-                         modNames[m][k], dim, vals[m][k], ids[m][k], m == 0 && k == 2);
-            }
-    }
+    // module grid (one panel, 3 x 3): see kModules
+    for (int m = 0; m < kNumModules; ++m)
+        for (int k = 0; k < 4; ++k)
+        {
+            const auto& d = kModules[m];
+            const auto c = moduleKnobCentre (m, k);
+            addKnob (c.x, c.y, 17.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k], d.id[k] != nullptr && juce::String (d.id[k]) == "loop");
+        }
 
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
@@ -390,6 +483,8 @@ void NektarEditor::addKnob (float cx, float cy, float r, const juce::String& lab
 {
     juce::RangedAudioParameter* param = paramId != nullptr ? proc.apvts.getParameter (paramId) : nullptr;
     auto* k = knobs.add (new KnobComponent (regular, r, label, dim, fixed, param, toggle));
+    if (param != nullptr && ! toggle)
+        k->setModulation (&proc);
     knobPos.add ({ cx, cy });
     addAndMakeVisible (k);
 }
@@ -452,7 +547,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / 1000.0f);
     const int slot = slotAt (p);
-    if (slot >= 0 && juce::Rectangle<float> (kSlotCx[slot] - 80, kSlotCy[slot] - 68, 160, 46).contains (p))
+    if (slot >= 0 && juce::Rectangle<float> (kSlotCx[slot] - 80 * kSlotScale, kSlotCy[slot] - 68 * kSlotScale, 160 * kSlotScale, 46 * kSlotScale).contains (p))
     {
         selectSlot (slot);
         chooseFile (slot);
@@ -467,6 +562,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         toggleResample();
     else if (juce::Rectangle<float> (316, 15, 56, 30).contains (p))
         showPresetMenu();
+
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
         say (proc.saveToLibrary (selectedSlot));
 }
@@ -474,7 +570,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 int NektarEditor::slotAt (juce::Point<float> p) const
 {
     for (int i = 0; i < 4; ++i)
-        if (p.getDistanceFrom ({ kSlotCx[i], kSlotCy[i] }) <= kSlotR)
+        if (p.getDistanceFrom ({ kSlotCx[i], kSlotCy[i] }) <= kSlotR * kSlotScale)
             return i;
     return -1;
 }
@@ -775,7 +871,9 @@ void NektarEditor::renderDesign (Graphics& g)
         }
     }
 
-    // ---- ring (library map): recessed bowl
+    // ---- ring (library map): recessed bowl; the ring and the check screen are drawn at 80 % (kSlotScale)
+    g.saveState();
+    g.addTransform (juce::AffineTransform::scale (kSlotScale, kSlotScale, kCx, kCy).translated (0.0f, kCentreY - kCy));
     g.setColour (juce::Colours::white.withAlpha (0.16f));
     g.fillEllipse (kCx - kRingR + 4, kCy - kRingR + 5, 2 * kRingR, 2 * kRingR);
     g.setGradientFill (ColourGradient (Colour (0xff141312), kCx - 120, kCy - 150, Colour (0xff2a2826), kCx + 200, kCy + 230, true));
@@ -847,46 +945,41 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setFont (font (reg, 11));
     g.drawText (proc.hasRoomTone() ? "room tone: recorded" : "room tone: automatic", juce::Rectangle<float> (kCx - 70, kCy + 58, 140, 16), juce::Justification::centred);
 
+    g.restoreState();
+
     // ---- four slots: each one holds its own sound
     const float p3[] = { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f };
     for (int slot = 0; slot < 4; ++slot)
     {
         const auto smp = proc.getSample (slot);
         const auto peaks = peaksOf (smp.get());
+        g.saveState();
+        g.addTransform (juce::AffineTransform::scale (kSlotScale, kSlotScale, kSlotCx[slot], kSlotCy[slot]));
         slotDisc (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String ("Empty"),
                   smp == nullptr, "load WAV", &peaks, 0, slot == selectedSlot);
+        g.restoreState();
     }
     (void) p3;
 
-    // ---- module panel
-    const float PX = 130, PY = 772, PW = 740, PH = 192;
-    shadowRect (g, { PX, PY, PW, PH }, 14, 0.55f, 26, { 10, 14 });
-    g.setGradientFill (ColourGradient (Colour (0xff393735), PX, PY, Colour (0xff242220), PX + PW, PY + PH, false));
-    g.fillRoundedRectangle (PX, PY, PW, PH, 14);
+    // ---- module panel: nine modules in one panel (3 x 3)
+    shadowRect (g, { kGridX, kGridY, kGridW, kGridH }, 16, 0.55f, 26, { 10, 14 });
+    g.setGradientFill (ColourGradient (Colour (0xff393735), kGridX, kGridY, Colour (0xff242220), kGridX + kGridW, kGridY + kGridH, false));
+    g.fillRoundedRectangle (kGridX, kGridY, kGridW, kGridH, 16);
     g.setColour (juce::Colours::white.withAlpha (0.06f));
-    g.drawRoundedRectangle (PX + 0.5f, PY + 0.5f, PW - 1, PH - 1, 14, 1.2f);
-
-    struct Mod { const char* name; juce::String value; const char* k[3]; float p[3]; };
-    const Mod mods[] = {
-        { "Time",      juce::CharPointer_UTF8 ("length \xc2\xb7 freeze"), { "Keep length", "Stretch", "Loop" },  { 0.45f, 0.0f, 0.90f } },
-        { "Body",      juce::CharPointer_UTF8 ("tone \xc2\xb7 morph"), { "Tone", "Focus", "Size" },     { 0.50f, 0.50f, 0.50f } },
-        { "Source",    juce::CharPointer_UTF8 ("model · grit · spread"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
-        { "Resonator", "follows key",                                              { "Tune", "Decay", "Material" },  { 0.62f, 0.85f, 0.42f } },
-    };
-    for (int m = 0; m < 4; ++m)
+    g.drawRoundedRectangle (kGridX + 0.5f, kGridY + 0.5f, kGridW - 1, kGridH - 1, 16, 1.2f);
+    for (int m = 0; m < kNumModules; ++m)
     {
-        const float mx = PX + (float) m * (PW / 4.0f);
-        if (m > 0)
-        {
-            g.setColour (juce::Colours::black.withAlpha (0.3f));
-            g.drawLine (mx, PY + 14, mx, PY + PH - 14, 1.0f);
-        }
-        insetBox (g, { mx + 10, PY + 12, PW / 4.0f - 20, 28 }, 7);
-        g.setColour (kLight);
-        g.setFont (font (bld, 15));
-        g.drawText (mods[m].name, juce::Rectangle<float> (mx + 18, PY + 12, 80, 28), juce::Justification::centredLeft);
+        const auto r = moduleRect (m);
+        const Colour col (kModules[m].colour);
+        g.setColour (Colour (0xff2b2927));
+        g.fillRoundedRectangle (r, 12);
+        g.setColour (col);
+        g.fillRoundedRectangle (r.getX() + 12, r.getY(), r.getWidth() - 24, 2.0f, 1.0f);
+        g.setFont (font (bld, 14));
+        g.drawText (kModules[m].title, juce::Rectangle<float> (r.getX() + 12, r.getY() + 6, 110, 20), juce::Justification::centredLeft);
         g.setColour (kMuted);
-        g.setFont (font (reg, 12));
-        g.drawText (mods[m].value, juce::Rectangle<float> (mx + 70, PY + 12, PW / 4.0f - 88, 28), juce::Justification::centredRight);
+        g.setFont (font (reg, 11));
+        g.drawText (juce::String (juce::CharPointer_UTF8 (kModules[m].sub)), juce::Rectangle<float> (r.getX() + 100, r.getY() + 6, r.getWidth() - 112, 20),
+                    juce::Justification::centredRight);
     }
 }

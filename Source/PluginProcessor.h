@@ -6,6 +6,8 @@
 #include "SamplePlayer.h"
 #include "TiltFilter.h"
 #include "SlotMixer.h"
+#include <unordered_map>
+#include <string>
 #include "Resonator.h"
 
 class NektarProcessor : public juce::AudioProcessor,
@@ -62,6 +64,13 @@ public:
     juce::String saveToLibrary (int slot); // writes the slot as a WAV into the library folder; returns a message
     static juce::File getLibraryFolder();
 
+    // Modulation: every knob can follow a source (LFO 1, LFO 2, Slicer) by an amount (-1..1 of the knob's range).
+    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModCount };
+    struct ModRoute { int src = 0; float amount = 0.0f; };
+    ModRoute getModRoute (const juce::String& paramId) const;
+    void setModRoute (const juce::String& paramId, ModRoute r);
+    float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
+
     // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
     // A sound that has no file of its own (a recording, a resample) is written into the library first.
     static juce::File getPresetFolder() { return getLibraryFolder().getChildFile ("Presets"); }
@@ -85,6 +94,26 @@ private:
 
     std::array<SamplePlayer, kSlots> players;
     TiltFilter tilt;
+
+    // modulation (audio thread reads the routes; the message thread writes them)
+    float modded (const std::atomic<float>* raw) const noexcept; // value of a knob including its modulation
+    void updateMods (int numSamples);
+    void buildModTable();
+    void addModToState (juce::ValueTree& state);
+    void readModFromState (const juce::ValueTree& state);
+    std::vector<std::atomic<int>> routeSrc;
+    std::vector<std::atomic<float>> routeAmt;
+    std::vector<juce::NormalisableRange<float>> modRanges;
+    std::unordered_map<const void*, int> modIdxByRaw;
+    std::unordered_map<std::string, int> modIdxById;
+    std::vector<juce::String> modIds;
+    std::array<float, kModCount> modVal {};
+    std::array<std::atomic<float>, kModCount> modShown {};
+    std::atomic<float>* lfoRateP[2] {};
+    std::atomic<float>* lfoShapeP[2] {};
+    double lfoPhase[2] { 0.0, 0.0 };
+    float lfoHold[2] { 0.0f, 0.0f };
+    juce::Random lfoRng;
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, 2> imorphP {};
