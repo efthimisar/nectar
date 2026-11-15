@@ -1061,11 +1061,11 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     for (int i = 0; i < 2; ++i)
     {
         const double prev = lfoPhase[i];
-        // Spiral: the rate sweeps from far below the Rate knob to far above it (up to +-7 octaves) while the Ramp rises
+        // Spiral: the rate sweeps from far below the Rate knob to far above it (up to +-10 octaves) while the Ramp rises
         const float spiral = lfoSpiralP->load();
         double rate = (double) lfoRateP[i]->load();
         if (spiral > 0.001f)
-            rate = juce::jlimit (0.01, 40.0, rate * std::pow (2.0, 7.0 * (double) spiral * (2.0 * (double) rampLevel - 1.0)));
+            rate = juce::jlimit (0.01, 400.0, rate * std::pow (2.0, 10.0 * (double) spiral * (2.0 * (double) rampLevel - 1.0)));
         double ph = prev + rate * blockSec;
         const bool wrapped = ph >= 1.0;
         ph -= std::floor (ph);
