@@ -46,7 +46,7 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Tests: synthetic harmonic tones (220 Hz / 1/h against 330 Hz odd harmonics) give exactly the expected partial amplitudes at m = 0, 0.5, 1. On real pads only the analysis numbers and CPU (about 2-3% per voice, Linux release) were checked, not the sound.
 - Known limits: f0 can be wrong for dense or noisy sounds (a door recording got f0 = 44 Hz with harmonicity 0.77); no listening test yet.
 
-## Step 12 (DSP, UI knobs pending) - Pan and Intermorph
+## Step 12 - Pan and Intermorph
 - Each slot is rendered into its own buffer and mixed by SlotMixer. Params: pan, pan2, pan3, pan4 (-1..1, equal power, 1.0 in the middle) and imorph12 / imorph34 (0 = off; above 0 it sets the crossover, 100 Hz to 8 kHz, log).
 - Intermorph: low band of slot 1 (3) + high band of slot 2 (4) through a Linkwitz-Riley crossover. In this mode slot 2 (4) is heard only above the crossover and slot 1 (3) only below it. Needs both slots loaded.
-- Test (Linux): identical sound in both slots gives exactly the single sound (flat sum), pan gains as designed. Not yet heard. The knobs are not on the panel yet: the places are to be chosen by the author.
+- Test (Linux): identical sound in both slots gives exactly the single sound (flat sum), pan gains as designed. Not yet heard. Knobs on the slots (chosen by the author): row 1 = Level, Pitch, Pan (+ Inter on slots 1 and 3), row 2 = Noise, Hum, Low cut, Tail; knob radius 14 and spacing 40 so that four fit in a row. Layout not yet seen on screen.

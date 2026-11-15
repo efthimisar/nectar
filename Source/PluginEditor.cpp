@@ -305,25 +305,32 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
                                     { 0.40f, 0.70f, 0.55f, 0.92f, 0.45f, 0.80f },
                                     { 0.5f, 0.5f, 0.5f, 0.5f, 0.2f, 0.7f },
                                     { 0.55f, 0.38f, 0.30f, 0.10f, 0.22f, 0.72f } };
+    // row 1: Level, Pitch, Pan (+ Intermorph on slots 1 and 3); row 2: Noise, Hum, Low cut, Tail
     for (int s = 0; s < 4; ++s)
-        for (int i = 0; i < 6; ++i)
+    {
+        static const char* const levelIds[] = { "level", "level2", "level3", "level4" };
+        static const char* const pitchIds[] = { "pitch", "pitch2", "pitch3", "pitch4" };
+        static const char* const tailIds[] = { "tail", "tail2", "tail3", "tail4" };
+        static const char* const noiseIds[] = { "noise", "noise2", "noise3", "noise4" };
+        static const char* const humIds[] = { "hum", "hum2", "hum3", "hum4" };
+        static const char* const lowCutIds[] = { "lowcut", "lowcut2", "lowcut3", "lowcut4" };
+        static const char* const panIds[] = { "pan", "pan2", "pan3", "pan4" };
+        struct K { const char* label; const char* id; float fixed; };
+        std::vector<K> row1 { { "Level", levelIds[s], fixedVals[s][0] }, { "Pitch", pitchIds[s], fixedVals[s][1] }, { "Pan", panIds[s], 0.5f } };
+        if (s == 0) row1.push_back ({ "Inter", "imorph12", 0.0f });
+        if (s == 2) row1.push_back ({ "Inter", "imorph34", 0.0f });
+        const std::vector<K> row2 { { "Noise", noiseIds[s], fixedVals[s][2] }, { "Hum", humIds[s], fixedVals[s][3] },
+                                    { "Low cut", lowCutIds[s], fixedVals[s][4] }, { "Tail", tailIds[s], fixedVals[s][5] } };
+        const float spacing = 40.0f;
+        for (int r = 0; r < 2; ++r)
         {
-            const char* id = nullptr;
-            static const char* const levelIds[] = { "level", "level2", "level3", "level4" };
-            static const char* const pitchIds[] = { "pitch", "pitch2", "pitch3", "pitch4" };
-            static const char* const tailIds[] = { "tail", "tail2", "tail3", "tail4" };
-            static const char* const noiseIds[] = { "noise", "noise2", "noise3", "noise4" };
-            static const char* const humIds[] = { "hum", "hum2", "hum3", "hum4" };
-            static const char* const lowCutIds[] = { "lowcut", "lowcut2", "lowcut3", "lowcut4" };
-            if (i == 0) id = levelIds[s];
-            if (i == 1) id = pitchIds[s];
-            if (i == 2) id = noiseIds[s];
-            if (i == 3) id = humIds[s];
-            if (i == 4) id = lowCutIds[s];
-            if (i == 5) id = tailIds[s];
-            addKnob (slotX[s] + ((float) (i % 3) - 1.0f) * 52.0f, slotY[s] + 21.0f + (float) (i / 3) * 53.0f, 15.5f,
-                     names[i], false, fixedVals[s][i], id);
+            const auto& row = r == 0 ? row1 : row2;
+            for (size_t i = 0; i < row.size(); ++i)
+                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + 21.0f + (float) r * 53.0f, 14.0f,
+                         row[i].label, false, row[i].fixed, row[i].id);
         }
+    }
+    (void) names;
 
     // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
     {
