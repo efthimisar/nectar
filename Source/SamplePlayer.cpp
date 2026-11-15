@@ -183,6 +183,10 @@ void SamplePlayer::prepare (double sampleRate)
         sp.prepare (sr);
     specL.assign ((size_t) kChunk, 0.0f);
     specR.assign ((size_t) kChunk, 0.0f);
+    addL.assign ((size_t) kChunk, 0.0f);
+    addR.assign ((size_t) kChunk, 0.0f);
+    for (auto& a : additives)
+        a.prepare();
     for (auto& v : voices)
     {
         v.active = false;
@@ -253,12 +257,17 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.inAccum = 0.0;
     v.velocity = velocity;
     v.startedAt = ++counter;
-    v.spectral = index < kSpectralVoices && (spectralOn (p) || partnerBuffer (p) != nullptr);
+    v.additive = modelUsable (index, p);
+    v.modelMix = p.model;
+    // with the model at full strength and nothing else asked of the spectral engine, only the model plays
+    v.spectral = index < kSpectralVoices && (spectralOn (p) || partnerBuffer (p) != nullptr || (v.additive && p.model < 0.99f));
     v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
     v.adsr.noteOn();
 
+    if (v.additive)
+        additives[(size_t) index].start ((juce::uint32) (v.startedAt * 2654435761u + (juce::uint32) note));
     if (v.spectral)
     {
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
@@ -370,6 +379,50 @@ const juce::AudioBuffer<float>* SamplePlayer::partnerBuffer (const Params& p) co
     return &partner->play;
 }
 
+bool SamplePlayer::modelUsable (int index, const Params& p) const noexcept
+{
+    return index < kSpectralVoices && p.model > 0.01f && sample != nullptr && sample->model != nullptr
+           && std::abs (sample->modelRate - sr) < 0.5 && ! sample->model->ch.empty() && sample->model->ch[0].numFrames >= 2;
+}
+
+void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
+{
+    const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
+    const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
+    const double advance = (1.0 - (double) p.freeze) / factor;
+    const float gain = p.level * p.level * v.velocity;
+    const float mix = v.modelMix;
+    float* oL = out.getWritePointer (0);
+    float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
+
+    int done = 0;
+    while (done < num)
+    {
+        const int chunk = juce::jmin (kChunk, num - done);
+        std::fill (addL.begin(), addL.begin() + chunk, 0.0f);
+        std::fill (addR.begin(), addR.begin() + chunk, 0.0f);
+        additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk);
+        if (v.spectral)
+            spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
+                                               partnerBuffer (p), p.morph, p.body);
+        for (int i = 0; i < chunk; ++i)
+        {
+            const float env = v.adsr.getNextSample() * gain;
+            const float l = v.spectral ? specL[(size_t) i] * (1.0f - mix) + addL[(size_t) i] * mix : addL[(size_t) i];
+            const float r = v.spectral ? specR[(size_t) i] * (1.0f - mix) + addR[(size_t) i] * mix : addR[(size_t) i];
+            oL[start + done + i] += l * env;
+            if (oR != nullptr)
+                oR[start + done + i] += r * env;
+        }
+        done += chunk;
+        if (! v.adsr.isActive())
+        {
+            v.active = false;
+            return;
+        }
+    }
+}
+
 void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
@@ -420,7 +473,9 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
             auto& v = voices[(size_t) i];
             if (! v.active)
                 continue;
-            if (v.spectral)
+            if (v.additive)
+                renderAdditive (i, v, out, done, num, p);
+            else if (v.spectral)
                 renderSpectral (i, v, out, done, num, p);
             else if (v.stretched)
                 renderStretch (i, v, out, done, num, p);

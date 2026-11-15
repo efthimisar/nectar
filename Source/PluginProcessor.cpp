@@ -30,6 +30,15 @@ public:
         if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
             return jobHasFinished;
         SamplePlayer::makePlayable (*s, hostRate);
+        // the sine-wave description of what is played (kept when the sound itself did not change)
+        if (! (! params.any() && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5 && base->cleaned.getNumSamples() == 0))
+        {
+            auto model = SineModel::analyse (s->play, hostRate);
+            if (model == nullptr || shouldExit() || generation != owner.latestJob[(size_t) slot].load())
+                return jobHasFinished;
+            s->model = std::move (model);
+            s->modelRate = hostRate;
+        }
         const juce::ScopedLock sl (owner.resultLock);
         owner.results[(size_t) slot] = s;
         return jobHasFinished;
@@ -87,6 +96,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bodysize", 1 }, "Body size",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "model", 1 }, "Model (sine waves)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "srcrough", 1 }, "Source rough",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restune", 1 }, "Resonator tune",
@@ -140,6 +151,7 @@ NektarProcessor::NektarProcessor()
     bodyFocusP = apvts.getRawParameterValue ("bodyfocus");
     bodySizeP = apvts.getRawParameterValue ("bodysize");
     srcRoughP = apvts.getRawParameterValue ("srcrough");
+    modelP = apvts.getRawParameterValue ("model");
     resTuneP = apvts.getRawParameterValue ("restune");
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
@@ -333,6 +345,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.body.focus = bodyFocusP->load();
     p.body.size = bodySizeP->load();
     p.body.rough = srcRoughP->load();
+    p.model = modelP->load();
     // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());

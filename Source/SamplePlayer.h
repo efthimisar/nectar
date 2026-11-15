@@ -6,6 +6,8 @@
 #include <vector>
 #include "SpectralStretch.h"
 #include "SampleCleaner.h"
+#include "SineModel.h"
+#include "AdditiveVoice.h"
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
 struct Sample
@@ -23,6 +25,9 @@ struct Sample
     juce::AudioBuffer<float> playLoop; // same, with a smooth cross-fade baked in at the loop seam
     double playRate = 0.0;             // host rate that play/playLoop were made for
     int loopStart = 0, loopEnd = 0;    // sustain loop (in play/playLoop samples)
+
+    std::shared_ptr<const SineModel> model; // sine-wave description of `play` (made in the background; may be missing)
+    double modelRate = 0.0;                  // host rate the model was made for
 };
 
 namespace signalsmith { namespace stretch { template<typename, class> struct SignalsmithStretch; } }
@@ -45,6 +50,7 @@ public:
         float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)
         float morph = 0.0f;      // 0..1 moves the colour (spectral envelope) towards the partner sound
         SpectralBody body;       // Tone / Focus / Size of the spectral envelope (0.5 = untouched)
+        float model = 0.0f;      // 0..1 blend from the normal engine to the sine-wave (additive) model
     };
 
     SamplePlayer();
@@ -84,6 +90,8 @@ private:
         bool active = false;
         bool stretched = false;
         bool spectral = false;
+        bool additive = false; // plays the sine model (alone or blended with the spectral engine)
+        float modelMix = 0.0f;
         int note = -1;
         double pos = 0.0;      // read position (tape style)
         double inAccum = 0.0;  // fractional input samples (stretch style)
@@ -98,12 +106,15 @@ private:
     void renderTape (Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     void renderStretch (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     void renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
+    void renderAdditive (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
+    bool modelUsable (int index, const Params& p) const noexcept;
     void fillInput (Voice& v, int count, const Params& p, float* l, float* r);
 
     std::array<Voice, kVoices> voices;
     std::array<std::unique_ptr<Stretch>, kStretchVoices> stretchers;
     std::array<SpectralStretch, kSpectralVoices> spectrals;
-    std::vector<float> inL, inR, outL, outR, specL, specR;
+    std::array<AdditiveVoice, kSpectralVoices> additives;
+    std::vector<float> inL, inR, outL, outR, specL, specR, addL, addR;
     std::shared_ptr<const Sample> sample, partner;
     double sr = 44100.0;
     int voiceLimit = 32;

@@ -328,16 +328,16 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
     {
         const char* modNames[4][4] = { { "Keep length", "Stretch", "Loop", "Freeze" }, { "Tone", "Focus", "Size", "Morph" },
-                                    { "Harmonic", "Grit", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
+                                    { "Model", "Grit", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
         const char* ids[4][4] = { { "keeplength", "stretch", "loop", "freeze" }, { "bodytone", "bodyfocus", "bodysize", "morph" },
-                                  { nullptr, "srcrough", "blur", nullptr }, { "restune", "resdecay", "resmat", "resmix" } };
+                                  { "model", "srcrough", "blur", nullptr }, { "restune", "resdecay", "resmat", "resmix" } };
         const float vals[4][4] = { { 0.45f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f },
                                    { 0.50f, 0.30f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
         for (int m = 0; m < 4; ++m)
             for (int k = 0; k < 4; ++k)
             {
                 if (m == 2 && k == 3) continue;
-                const bool dim = (m == 2 && k == 0); // Source: Harmonic arrives with the sinusoidal model (step 11)
+                const bool dim = false;
                 addKnob (130.0f + (float) m * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f,
                          modNames[m][k], dim, vals[m][k], ids[m][k], m == 0 && k == 2);
             }
