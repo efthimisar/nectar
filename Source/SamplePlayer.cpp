@@ -262,7 +262,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     if (v.spectral)
     {
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
-        spectrals[(size_t) index].start (sample->play, 0.0, R, partnerBuffer (p), p.morph);
+        spectrals[(size_t) index].start (sample->play, 0.0, R, partnerBuffer (p), p.morph, p.body);
     }
     else if (v.stretched)
     {
@@ -383,7 +383,7 @@ void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>
     {
         const int chunk = juce::jmin (kChunk, num - done);
         spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
-                                           partnerBuffer (p), p.morph);
+                                           partnerBuffer (p), p.morph, p.body);
         for (int i = 0; i < chunk; ++i)
         {
             const float env = v.adsr.getNextSample() * gain;

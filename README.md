@@ -8,4 +8,4 @@ GitHub → Actions → "Build Nektar (macOS, Apple Silicon)" → Run workflow.
 The result is `Nektar-macOS-arm64.zip` under the run's Artifacts (contains `Nektar.vst3` and `Nektar.app`).
 
 ## Status
-Step 9: Resonator tuned to the held keys (Tune, Decay, Material, Mix). Morph between slots (1<-2, 3<-4), Bright, Blur, Freeze. Cleaning per slot, four slots, mic recording.
+Step 10A: Body (Tone, Focus, Size) reshapes the spectral envelope while the pitch stays. Resonator tuned to the held keys, Morph between slots, Bright, Blur, Freeze. Cleaning per slot, four slots, mic recording.

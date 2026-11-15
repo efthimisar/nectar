@@ -21,6 +21,7 @@ void SpectralStretch::prepare (double sampleRate)
     envA.assign ((size_t) N / 2 + 1, 0.0f);
     envB.assign ((size_t) N / 2 + 1, 0.0f);
     envTmp.assign ((size_t) N / 2 + 1, 0.0f);
+    srcSpec.assign ((size_t) N / 2 + 1, 0.0f);
     for (int c = 0; c < 2; ++c)
     {
         tail[c].assign ((size_t) hop, 0.0f);
@@ -30,7 +31,7 @@ void SpectralStretch::prepare (double sampleRate)
 }
 
 void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPos, double ratio,
-                             const juce::AudioBuffer<float>* partner, float morph)
+                             const juce::AudioBuffer<float>* partner, float morph, Body body)
 {
     const int n = src.getNumSamples();
     pos = n > 0 ? std::fmod (juce::jmax (0.0, startPos), (double) n) : 0.0;
@@ -41,7 +42,7 @@ void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPo
         std::fill (hopOut[c].begin(), hopOut[c].end(), 0.0f);
     }
     // One frame in advance, so that the very first output is already at full level (no slow fade-in).
-    makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false, partner, morph);
+    makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false, partner, morph, body);
     readIdx = hop; // the next call to process() makes the second frame
 }
 
@@ -62,6 +63,52 @@ void SpectralStretch::envelope (const float* in, float* out)
         }
         std::copy (out, out + bins + 1, envTmp.begin());
     }
+}
+
+void SpectralStretch::applyBody (const Body& body)
+{
+    const int bins = N / 2;
+    envelope (shifted.data(), envA.data());
+    float maxE = 0.0f;
+    double before = 0.0;
+    for (int k = 0; k <= bins; ++k)
+    {
+        maxE = juce::jmax (maxE, envA[(size_t) k]);
+        before += (double) shifted[(size_t) k] * shifted[(size_t) k];
+    }
+    if (maxE < 1.0e-12f)
+        return;
+    const float fl = 1.0e-3f * maxE;
+    // source = the fine structure with the envelope taken out
+    for (int k = 0; k <= bins; ++k)
+        srcSpec[(size_t) k] = shifted[(size_t) k] / (envA[(size_t) k] + fl);
+
+    // body: Size moves the envelope along the frequency axis (+-0.75 octave), Focus changes its contrast, Tone tilts it
+    const double sh = std::pow (2.0, (double) (body.size - 0.5f) * 1.5); // size 0 -> 0.6 (envelope moves up), size 1 -> 1.7 (moves down)
+    const float expo = std::pow (2.0f, (body.focus - 0.5f) * 2.0f);     // 0.5 .. 2
+    const float tiltDbPerOct = (body.tone - 0.5f) * 2.0f * 4.0f;          // +-4 dB per octave, only between 150 Hz and 8 kHz (no boost of rumble or hiss)
+    const double binHz = rate / (double) N;
+    double after = 0.0;
+    for (int k = 0; k <= bins; ++k)
+    {
+        // envelope moved: new envelope at k = old envelope at k * sh (size small -> sh < 1 -> envelope moves up)
+        const double q = (double) k * sh;
+        float e;
+        if (q >= (double) bins) e = envA[(size_t) bins];
+        else
+        {
+            const int i0 = (int) q;
+            const float f = (float) (q - (double) i0);
+            e = envA[(size_t) i0] * (1.0f - f) + envA[(size_t) juce::jmin (bins, i0 + 1)] * f;
+        }
+        e = maxE * std::pow ((e + fl) / (maxE + fl), expo);
+        const double hz = juce::jlimit (150.0, 8000.0, (double) k * binHz);
+        e *= std::pow (10.0f, tiltDbPerOct * (float) std::log2 (hz / 1000.0) / 20.0f);
+        shifted[(size_t) k] = srcSpec[(size_t) k] * e;
+        after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+    }
+    const float fix = (float) std::sqrt (before / juce::jmax (1.0e-20, after)); // loudness stays
+    for (int k = 0; k <= bins; ++k) shifted[(size_t) k] *= fix;
 }
 
 void SpectralStretch::applyMorph (const juce::AudioBuffer<float>& partner, int channel, float morph)
@@ -108,7 +155,7 @@ void SpectralStretch::applyMorph (const juce::AudioBuffer<float>& partner, int c
 }
 
 void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze, bool advance,
-                                 const juce::AudioBuffer<float>* partner, float morph)
+                                 const juce::AudioBuffer<float>* partner, float morph, const Body& body)
 {
     const int n = src.getNumSamples();
     const int chs = src.getNumChannels();
@@ -145,6 +192,9 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
 
         if (partner != nullptr && morph > 0.01f && partner->getNumSamples() >= 2)
             applyMorph (*partner, c, morph);
+
+        if (body.active())
+            applyBody (body);
 
         if (blur > 0.01f)
         {
@@ -200,13 +250,13 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
 
 void SpectralStretch::process (const juce::AudioBuffer<float>& src, double stretch, double ratio, float blur, float freeze,
                                float* outL, float* outR, int num,
-                               const juce::AudioBuffer<float>* partner, float morph)
+                               const juce::AudioBuffer<float>* partner, float morph, Body body)
 {
     for (int i = 0; i < num; ++i)
     {
         if (readIdx >= hop)
         {
-            makeFrame (src, stretch, ratio, blur, freeze, true, partner, morph);
+            makeFrame (src, stretch, ratio, blur, freeze, true, partner, morph, body);
             readIdx = 0;
         }
         outL[i] = hopOut[0][(size_t) readIdx];

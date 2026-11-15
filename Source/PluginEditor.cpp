@@ -326,14 +326,14 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         }
 
     // module panel: 4 modules x 3 knobs (only Loop is wired for now)
-    const char* modKnobs[4][3] = { { "Keep length", "Stretch", "Loop" }, { "Size", "Density", "Scatter" },
+    const char* modKnobs[4][3] = { { "Keep length", "Stretch", "Loop" }, { "Tone", "Focus", "Size" },
                                    { "Bright", "Blur", "Freeze" }, { "Tune", "Decay", "Material" } };
-    const float modVals[4][3] = { { 0.45f, 0.0f, 0.0f }, { 0.55f, 0.68f, 0.30f },
+    const float modVals[4][3] = { { 0.45f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f },
                                   { 0.50f, 0.0f, 0.0f }, { 0.62f, 0.85f, 0.42f } };
     for (int m = 0; m < 4; ++m)
         for (int k = 0; k < 3 && m != 2 && m != 3; ++k)
             addKnob (130.0f + (float) m * 185.0f + 34.0f + (float) k * 58.0f, 772.0f + 100.0f, 22.0f,
-                     modKnobs[m][k], false, modVals[m][k], (m == 0 && k == 2) ? "loop" : ((m == 0 && k == 0) ? "keeplength" : ((m == 0 && k == 1) ? "stretch" : ((m == 2 && k == 0) ? "bright" : ((m == 2 && k == 1) ? "blur" : ((m == 2 && k == 2) ? "freeze" : nullptr))))), m == 0 && k == 2);
+                     modKnobs[m][k], false, modVals[m][k], (m == 0 && k == 2) ? "loop" : ((m == 0 && k == 0) ? "keeplength" : ((m == 0 && k == 1) ? "stretch" : ((m == 1 && k == 0) ? "bodytone" : ((m == 1 && k == 1) ? "bodyfocus" : ((m == 1 && k == 2) ? "bodysize" : nullptr))))), m == 0 && k == 2);
 
     // Spectral module: four smaller knobs (Bright, Morph, Blur, Freeze)
     {
@@ -791,7 +791,7 @@ void NektarEditor::renderDesign (Graphics& g)
     struct Mod { const char* name; juce::String value; const char* k[3]; float p[3]; };
     const Mod mods[] = {
         { "Time",      juce::CharPointer_UTF8 ("length \xc2\xb7 stretch"), { "Keep length", "Stretch", "Loop" },  { 0.45f, 0.0f, 0.90f } },
-        { "Grain",     juce::CharPointer_UTF8 ("90 ms \xc2\xb7 soft"),             { "Size", "Density", "Scatter" }, { 0.55f, 0.68f, 0.30f } },
+        { "Body",      juce::CharPointer_UTF8 ("tone \xc2\xb7 focus \xc2\xb7 size"), { "Tone", "Focus", "Size" },     { 0.50f, 0.50f, 0.50f } },
         { "Spectral",  juce::CharPointer_UTF8 ("colour \xc2\xb7 morph"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
         { "Resonator", "follows key",                                              { "Tune", "Decay", "Material" },  { 0.62f, 0.85f, 0.42f } },
     };

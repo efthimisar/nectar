@@ -44,6 +44,7 @@ public:
         float blur = 0.0f;       // 0..1 smooths the spectrum (spectral voices)
         float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)
         float morph = 0.0f;      // 0..1 moves the colour (spectral envelope) towards the partner sound
+        SpectralBody body;       // Tone / Focus / Size of the spectral envelope (0.5 = untouched)
     };
 
     SamplePlayer();
@@ -56,7 +57,7 @@ public:
     static double stretchFactor (float knob) noexcept;
     static bool stretchOn (float knob) noexcept { return knob > 0.01f; }
     // the spectral (random-phase) voices are used when stretch, blur or freeze is up
-    static bool spectralOn (const Params& p) noexcept { return p.stretch > 0.01f || p.blur > 0.01f || p.freeze > 0.01f; }
+    static bool spectralOn (const Params& p) noexcept { return p.stretch > 0.01f || p.blur > 0.01f || p.freeze > 0.01f || p.body.active(); }
 
     void prepare (double sampleRate);
     void setSample (std::shared_ptr<const Sample> s);
