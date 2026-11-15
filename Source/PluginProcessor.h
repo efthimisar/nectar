@@ -181,6 +181,7 @@ private:
     juce::AudioBuffer<float> recBuffer;      // pre-allocated, filled by the audio thread
     std::atomic<int> recState { 0 };         // 0 idle, 1 recording, 2 full (waiting to be collected)
     std::atomic<int> recPos { 0 };
+    std::atomic<int> rsSilent { -1 };         // resample: samples of silence since the sound ended (-1 = no sound heard yet)
     std::atomic<int> recSource { 0 };        // 0 microphone, 1 output of the synth (resample)
     std::atomic<int> recChannels { 1 };
     std::atomic<float> inputLevel { 0.0f };

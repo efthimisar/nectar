@@ -103,6 +103,8 @@ private:
     std::set<int> heldNotes;
     int octaveShift = 0;
     int selectedSlot = 0;
+    int resampleArmedSlot = -1;  // Resample asks once before it replaces a sound
+    int resampleArmTicks = 0;
     bool hudWasRecording = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NektarEditor)

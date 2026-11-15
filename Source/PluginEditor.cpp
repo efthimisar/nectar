@@ -669,6 +669,14 @@ void NektarEditor::toggleResample()
     }
     if (proc.isRecording())
         return; // a microphone recording is running
+    if (proc.getSample (selectedSlot) != nullptr && resampleArmedSlot != selectedSlot)
+    {
+        resampleArmedSlot = selectedSlot;
+        resampleArmTicks = 100; // 5 s
+        say ("Slot " + juce::String (selectedSlot + 1) + " has a sound. Click Resample again to replace it.");
+        return;
+    }
+    resampleArmedSlot = -1;
     say ("Resampling the output into slot " + juce::String (selectedSlot + 1) + ". Play, then click again.");
     proc.startResample (selectedSlot);
 }
@@ -693,6 +701,11 @@ void NektarEditor::toggleRoomTone()
 
 void NektarEditor::timerCallback()
 {
+    if (resampleArmTicks > 0 && --resampleArmTicks == 0)
+    {
+        resampleArmedSlot = -1;
+        say ({});
+    }
     if (proc.recordingFinishedByLimit())
         say (proc.stopRecording());
     if (proc.isRecording() || hudWasRecording)

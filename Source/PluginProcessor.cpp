@@ -519,6 +519,21 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         recPos.store (pos + juce::jmax (0, m));
         if (m < n)
             recState.store (2); // full
+
+        // auto-stop: once the sound has been heard and 2.5 s of silence follow, the take ends (0.4 s of the silence is kept as the tail)
+        const float pk = juce::jmax (buffer.getMagnitude (0, 0, n), buffer.getNumChannels() > 1 ? buffer.getMagnitude (1, 0, n) : 0.0f);
+        int sil = rsSilent.load();
+        if (pk > 0.0005f)
+            sil = 0;
+        else if (sil >= 0)
+            sil += n;
+        rsSilent.store (sil);
+        const int sr = (int) hostRate.load();
+        if (sil > (int) (2.5 * sr) && recState.load() == 1)
+        {
+            recPos.store (juce::jmax (1, recPos.load() - (sil - (int) (0.4 * sr))));
+            recState.store (2);
+        }
     }
     midi.clear();
 }
@@ -577,6 +592,7 @@ void NektarProcessor::startResample (int slot)
     if (recState.load() == 1 || recBuffer.getNumSamples() < 2)
         return;
     recSource.store (1);
+    rsSilent.store (-1);
     recSlot.store (juce::jlimit (0, kSlots - 1, slot));
     recChannels.store (2);
     recBuffer.clear();

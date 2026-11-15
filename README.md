@@ -95,3 +95,7 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 
 ## Output safety
 - A soft knee limiter at the end of the chain (identity below 0.9, never above 1.0) keeps reverb, delay and shimmer peaks from clipping. It sits before Resample, so resampled sounds are limited too.
+
+## Resample safety
+- Resample asks once before it replaces a slot that already has a sound (click again within 5 s).
+- Auto-stop: after the sound has been heard and 2.5 s of silence follow, the take ends and keeps 0.4 s of tail.
