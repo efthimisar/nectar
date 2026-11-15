@@ -231,15 +231,16 @@ void RecordHud::paint (Graphics& g)
 {
     g.addTransform (juce::AffineTransform::scale ((float) getWidth() / 1000.0f));
     const bool rt = proc.isRecordingRoomTone();
-    const bool rec = proc.isRecording() && ! rt;
+    const bool rs = proc.isResampling();
+    const bool rec = proc.isRecording() && ! rt && ! rs;
     const bool can = proc.canRecord();
     const float a = can ? 1.0f : 0.35f;
 
     // timer
-    const double secs = (rec || rt) ? proc.getRecordedSeconds() : 0.0;
+    const double secs = (rec || rt || rs) ? proc.getRecordedSeconds() : 0.0;
     const int m = (int) (secs / 60.0);
     const double s = secs - 60.0 * m;
-    g.setColour (kLight.withMultipliedAlpha ((rec || rt) ? 1.0f : 0.6f));
+    g.setColour (kLight.withMultipliedAlpha ((rec || rt || rs) ? 1.0f : 0.6f));
     g.setFont (font (typeface, 19));
     g.drawText (juce::String::formatted ("%02d:%04.1f", m, s), juce::Rectangle<float> (100, 14, 90, 32), juce::Justification::centredLeft);
 
@@ -266,6 +267,18 @@ void RecordHud::paint (Graphics& g)
             const float hh = 4.0f + (float) (3 - std::abs (k)) * 3.0f;
             g.drawLine (447 + (float) k * 4.5f, 30 - hh, 447 + (float) k * 4.5f, 30 + hh, 2.0f);
         }
+    }
+
+    // resample button: the ring glows and a stop square shows while the output is being recorded
+    if (rs)
+    {
+        g.setColour (kAcc.withAlpha (0.35f));
+        g.fillEllipse (497 - 27, 30 - 27, 54, 54);
+        g.setColour (Colour (0xff1e1d1b));
+        g.fillEllipse (497 - 21, 30 - 21, 42, 42);
+        g.setColour (kAcc);
+        g.drawEllipse (497 - 21, 30 - 21, 42, 42, 2.0f);
+        g.fillRoundedRectangle (497 - 8, 30 - 8, 16, 16, 3.0f);
     }
 
     // record button: ring glows with the microphone level while recording
@@ -450,6 +463,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         toggleRecording();
     else if (p.getDistanceFrom ({ 447.0f, 30.0f }) <= 22.0f)
         toggleRoomTone();
+    else if (p.getDistanceFrom ({ 497.0f, 30.0f }) <= 22.0f)
+        toggleResample();
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
         say (proc.saveToLibrary (selectedSlot));
 }
@@ -493,6 +508,19 @@ void NektarEditor::toggleRecording()
     if (message.isNotEmpty())
         say ({});
     proc.startRecording (selectedSlot);
+}
+
+void NektarEditor::toggleResample()
+{
+    if (proc.isResampling())
+    {
+        say (proc.stopRecording());
+        return;
+    }
+    if (proc.isRecording())
+        return; // a microphone recording is running
+    say ("Resampling the output into slot " + juce::String (selectedSlot + 1) + ". Play, then click again.");
+    proc.startResample (selectedSlot);
 }
 
 void NektarEditor::toggleRoomTone()

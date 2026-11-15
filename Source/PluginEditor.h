@@ -72,6 +72,7 @@ private:
     void timerCallback() override;
     void toggleRecording();
     void toggleRoomTone();
+    void toggleResample();
     void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);

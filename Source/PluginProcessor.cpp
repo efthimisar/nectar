@@ -270,7 +270,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     keyboardState.reset();
-    if (recordingAllowed && recState.load() == 0)
+    if (recState.load() == 0) // the buffer also serves Resample, which works in the plugin too
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
 
     // the sound must be converted to the new host rate
@@ -331,7 +331,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 pk = juce::jmax (pk, buffer.getMagnitude (ch, 0, n));
             inputLevel.store (juce::jmax (pk, inputLevel.load() * 0.9f));
 
-            if (recState.load() == 1)
+            if (recState.load() == 1 && recSource.load() == 0)
             {
                 const int pos = recPos.load();
                 const int room = recBuffer.getNumSamples() - pos;
@@ -395,6 +395,20 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((brightP->load() - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
+
+    // Resample: copy what is about to be heard
+    if (recState.load() == 1 && recSource.load() == 1)
+    {
+        const int n = buffer.getNumSamples();
+        const int pos = recPos.load();
+        const int m = juce::jmin (n, recBuffer.getNumSamples() - pos);
+        for (int ch = 0; ch < 2; ++ch)
+            if (m > 0)
+                recBuffer.copyFrom (ch, pos, buffer, juce::jmin (ch, buffer.getNumChannels() - 1), 0, m);
+        recPos.store (pos + juce::jmax (0, m));
+        if (m < n)
+            recState.store (2); // full
+    }
     midi.clear();
 }
 
@@ -439,8 +453,21 @@ void NektarProcessor::startRecording (int slot)
 {
     if (! recordingAllowed || recState.load() == 1)
         return;
+    recSource.store (0);
     recSlot.store (juce::jlimit (-1, kSlots - 1, slot));
     recChannels.store (juce::jlimit (1, 2, getTotalNumInputChannels()));
+    recBuffer.clear();
+    recPos.store (0);
+    recState.store (1);
+}
+
+void NektarProcessor::startResample (int slot)
+{
+    if (recState.load() == 1 || recBuffer.getNumSamples() < 2)
+        return;
+    recSource.store (1);
+    recSlot.store (juce::jlimit (0, kSlots - 1, slot));
+    recChannels.store (2);
     recBuffer.clear();
     recPos.store (0);
     recState.store (1);
@@ -479,7 +506,7 @@ juce::String NektarProcessor::stopRecording()
 
     auto s = std::make_shared<Sample>();
     s->rate = hostRate.load();
-    s->name = "Rec " + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+    s->name = juce::String (recSource.load() == 1 ? "Resample " : "Rec ") + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
     s->path = {};
     s->data.setSize (ch, n);
     for (int c = 0; c < ch; ++c)

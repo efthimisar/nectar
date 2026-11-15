@@ -52,6 +52,9 @@ public:
     bool isRecordingRoomTone() const { return recState.load() == 1 && recSlot.load() < 0; }
     bool hasRoomTone() const;
     bool isRecording() const { return recState.load() == 1; }
+    // Resample: records the output of the synth itself (all slots, resonator, tilt) into a slot. Works in the plugin too.
+    void startResample (int slot);
+    bool isResampling() const { return recState.load() == 1 && recSource.load() == 1; }
     void recleanAll();               // runs the cleaning again for every slot (e.g. after a new room tone)
     bool recordingFinishedByLimit() const { return recState.load() == 2; }
     double getRecordedSeconds() const;
@@ -118,6 +121,7 @@ private:
     juce::AudioBuffer<float> recBuffer;      // pre-allocated, filled by the audio thread
     std::atomic<int> recState { 0 };         // 0 idle, 1 recording, 2 full (waiting to be collected)
     std::atomic<int> recPos { 0 };
+    std::atomic<int> recSource { 0 };        // 0 microphone, 1 output of the synth (resample)
     std::atomic<int> recChannels { 1 };
     std::atomic<float> inputLevel { 0.0f };
 
