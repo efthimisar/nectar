@@ -247,7 +247,9 @@ void KnobComponent::paint (Graphics& g)
     const float s = (float) getWidth() / kWidth;
     g.addTransform (juce::AffineTransform::scale (s));
     const float p = parameter != nullptr ? parameter->getValue() : fixed;
-    nektar::drawKnob (g, typeface, kWidth / 2.0f, radius, radius, p, text, dimmed, juce::jlimit (9.0f, 12.0f, radius * 0.95f));
+    const bool multi = toggle && parameter != nullptr && parameter->getNumSteps() > 2;
+    nektar::drawKnob (g, typeface, kWidth / 2.0f, radius, radius, p, multi ? parameter->getCurrentValueAsText() : text, dimmed,
+                      juce::jlimit (9.0f, 12.0f, radius * 0.95f));
     if (modProc != nullptr && parameter != nullptr && ! toggle)
     {
         const auto r = modProc->getModRoute (parameter->paramID);
@@ -315,7 +317,13 @@ void KnobComponent::mouseDown (const juce::MouseEvent& e)
     }
     parameter->beginChangeGesture();
     if (toggle)
-        parameter->setValueNotifyingHost (parameter->getValue() > 0.5f ? 0.0f : 1.0f);
+    {
+        const int n = parameter->getNumSteps();
+        if (n > 2) // a button that cycles through its choices (Joystick Play: Off, 1shot, Repeat, Free)
+            parameter->setValueNotifyingHost ((float) ((juce::roundToInt (parameter->getValue() * (float) (n - 1)) + 1) % n) / (float) (n - 1));
+        else
+            parameter->setValueNotifyingHost (parameter->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
     dragStart = parameter->getValue();
 }
 
@@ -446,6 +454,7 @@ void JoyPad::paint (Graphics& g)
 {
     const float w = (float) getWidth(), c = w * 0.5f, r = c - 1.5f;
     const bool rec = proc.joyIsRecording();
+    const bool armed = proc.joyIsArmed() && (juce::Time::getMillisecondCounter() / 350) % 2 == 0; // blinks while waiting for the trigger
     g.setColour (Colour (0xff1e1d1b));
     g.fillEllipse (c - r, c - r, 2 * r, 2 * r);
     g.setColour (Colour (0xff8fd8b0).withAlpha (rec ? 1.0f : 0.7f));
@@ -456,7 +465,7 @@ void JoyPad::paint (Graphics& g)
     const float x = (proc.modSourceNow (NektarProcessor::kModJoyX) + 1.0f) * 0.5f;
     const float y = (proc.modSourceNow (NektarProcessor::kModJoyY) + 1.0f) * 0.5f;
     const float px = c + (x * 2.0f - 1.0f) * r * 0.86f, py = c - (y * 2.0f - 1.0f) * r * 0.86f;
-    g.setColour (rec ? Colour (0xffe05a4f) : Colour (0xfffbe6a0));
+    g.setColour (rec ? Colour (0xffe05a4f) : armed ? Colour (0xffe8a24a) : Colour (0xfffbe6a0));
     g.fillEllipse (px - 4.5f, py - 4.5f, 9.0f, 9.0f);
 }
 

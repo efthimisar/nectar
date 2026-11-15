@@ -102,8 +102,8 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 
 ## Modulation sources and Bitcrusher (build 15)
 - **ENV**: ADSR driven by the held keys (global, one envelope; a new key restarts the attack). Unipolar 0..1. Times: attack/decay 1 ms–5 s, release 10 ms–8 s.
-- **JOY**: round XY pad (Joystick X / Y as sources). Rec stores the movement (200 points/s, up to 30 s), Play loops it; right-click on the pad clears the path. The path is not yet saved in presets.
-- **LFO**: the shape knob now selects 12 shapes: sine, triangle, saw up, saw down, square, pulse 25 %, sample and hold, smooth random, stairs, half sine, exponential decay, double sine. Old presets that used the shape knob will sound different.
+- **JOY**: round XY pad (Joystick X / Y as sources). See build 17 for the current behaviour.
+- **LFO**: the shape knob selects 17 shapes (see build 17); the first 12 are: sine, triangle, saw up, saw down, square, pulse 25 %, sample and hold, smooth random, stairs, half sine, exponential decay, double sine. Old presets that used the shape knob will sound different.
 - **Slicer 2 / 3**: extra sources on the Slicer's step clock - a 16-step staircase and a fixed 16-step level sequence (our own tables).
 - **CRUSH**: bits 3–16, sample-rate reduction 1–32x, TPDF dither, mix; sits after the Filter, before the Reverb.
 - Right-click a knob to choose any of the sources (LFO 1/2, Slicer, Slicer 2/3, Envelope, Joystick X/Y).
@@ -114,3 +114,11 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Speakers mode: plain pan from the direction plus distance and back darkening, no time or head-shadow cues (they would only colour the sound on speakers).
 - Measured: ITD at 90 deg = 32 samples at 48 kHz (0.67 ms); the slot's stereo width is reduced to mono when placed.
 - The editor is now 1360 wide (the SPACE pad and module sit on the right).
+
+## JOY like the Hartmann Neuron, 17 LFO shapes (build 17)
+Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and basic setting StkRec start p. 41.
+- **Rec = standby**: the button arms the recording; it starts when the stick moves or a key is pressed (the manual offers Key or Stick as the trigger; we accept either). The pad dot blinks orange while waiting, red while recording. Arming and stopping without a trigger keeps the old path. A new recording replaces the path without a question (as in the manual).
+- **Play** (button cycles Off, 1shot, Repeat, Free): 1shot = the first key (with no key held) starts the path once; later keys do nothing while it runs and the value stays where it ends. Repeat = it cycles while keys stay held, stops when all are released and stays there. Free = the old always-looping behaviour (no key needed).
+- The path (200 points/s, up to 30 s) and the stick position are saved in presets and in the host state. Loading a preset never starts a recording.
+- The manual describes the Neuron stick as four cross-x parameters with opposite pairs; our pad gives X and Y as modulation sources, so opposite pairs come from a positive and a negative amount.
+- **LFO shapes**: five shapes added after the Neuron manual p. 118 (positive triangle, positive sine, positive square, stepped triangle, stepped saw down), 17 in total. The positive ones run 0..1. The number of steps in the stepped shapes is read off the picture, not specified. Old presets that use the shape knob change sound again (none exist yet).

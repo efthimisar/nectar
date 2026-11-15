@@ -148,7 +148,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "joyy", 1 }, "Joystick Y",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyrec", 1 }, "Joystick record", false));
-    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyplay", 1 }, "Joystick play path", false));
+    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "joyplay", 1 }, "Joystick play path",
+                                                          juce::StringArray { "Off", "1shot", "Repeat", "Free" }, 0));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crbits", 1 }, "Crusher bits",
                                                          NormalisableRange<float> (3.0f, 16.0f, 0.01f), 16.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crrate", 1 }, "Crusher rate reduction",
@@ -923,8 +924,10 @@ float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
 }
 
 // Sources are updated once per block (-1..1, the envelope 0..1).
-// LFO shape knob: 12 zones - sine, triangle, saw up, saw down, square, pulse 25%, sample and hold, smooth random,
-// stairs (4 steps), half sine, exponential decay, double sine.
+// LFO shape knob: 17 zones - sine, triangle, saw up, saw down, square, pulse 25%, sample and hold, smooth random,
+// stairs (4 steps), half sine, exponential decay, double sine, then five shapes after the Hartmann Neuron manual p. 118
+// (the steps in the stepped shapes are drawn from the picture, not specified): positive triangle, positive sine,
+// positive square (these three run 0..1), stepped triangle, stepped saw down.
 static float lfoShapeValue (int shape, float t, float hold, float prev, float next)
 {
     constexpr float twoPi = juce::MathConstants<float>::twoPi;
@@ -941,7 +944,12 @@ static float lfoShapeValue (int shape, float t, float hold, float prev, float ne
         case 8:  return std::floor (t * 4.0f) / 1.5f - 1.0f;
         case 9:  return std::sin (juce::MathConstants<float>::pi * t) * 2.0f - 1.0f;
         case 10: return 2.0f * std::exp (-5.0f * t) - 1.0f;
-        default: return 0.5f * std::sin (twoPi * t) + 0.5f * std::sin (2.0f * twoPi * t);
+        case 11: return 0.5f * std::sin (twoPi * t) + 0.5f * std::sin (2.0f * twoPi * t);
+        case 12: return 1.0f - 2.0f * std::abs (t - 0.5f);
+        case 13: return 0.5f + 0.5f * std::sin (twoPi * t);
+        case 14: return t < 0.5f ? 1.0f : 0.0f;
+        case 15: { const float u = 1.0f - 4.0f * std::abs (t - 0.5f); return std::round (u * 3.0f) / 3.0f; }
+        default: return 1.0f - std::floor (t * 8.0f) / 3.5f;
     }
 }
 
@@ -962,7 +970,7 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
             lfoPrev[i] = lfoNext[i];
             lfoNext[i] = lfoHold[i];
         }
-        const int shape = juce::jlimit (0, 11, (int) (lfoShapeP[i]->load() * 11.999f));
+        const int shape = juce::jlimit (0, 16, (int) (lfoShapeP[i]->load() * 16.999f));
         const float v = lfoShapeValue (shape, (float) ph, lfoHold[i], lfoPrev[i], lfoNext[i]);
         modVal[(size_t) (kModLfo1 + i)] = v;
         modShown[(size_t) (kModLfo1 + i)].store (v);
@@ -970,6 +978,7 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
 
     // Envelope: gate = at least one key held; a new key restarts the attack from the current level
     bool retrigger = false;
+    const int heldBefore = heldNotes;
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
@@ -996,40 +1005,91 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     modVal[(size_t) kModEnv] = envLevel;
     modShown[(size_t) kModEnv].store (envLevel);
 
-    // Joystick: while Rec is on the position is stored 200 times a second (up to 30 s); while Play is on that path loops
+    // Joystick (after the Hartmann Neuron manual p. 89-92 and 41):
+    // Rec = standby, the recording starts when the stick moves or a key is pressed (200 points a second, up to 30 s).
+    // Play: 1shot = a note starts the path once, Repeat = it cycles while keys stay held, Free = loops all the time.
+    // After a 1shot or after the keys are released the value stays where the path stopped.
     {
-        const bool rec = joyRecP->load() > 0.5f, play = joyPlayP->load() > 0.5f;
-        float x = joyXP->load(), y = joyYP->load();
+        const bool firstNote = retrigger && heldBefore == 0;
+        if (joyResetReq.exchange (false))
+        {
+            joyRunning = false;
+            joyHaveHold = false;
+            joyWasRec = false;
+            joyRecState.store (0);
+        }
+        const bool rec = joyRecP->load() > 0.5f;
+        const int mode = juce::jlimit (0, 3, (int) std::lround (joyPlayP->load()));
+        const float liveX = joyXP->load(), liveY = joyYP->load();
+        float x = liveX, y = liveY;
         if (rec && ! joyWasRec)
         {
-            joyLen.store (0);
-            joyAcc = 0.0;
+            joyRecState.store (2); // standby
+            joyArmX = liveX; joyArmY = liveY;
+            joyRunning = false; joyHaveHold = false;
         }
         if (rec)
         {
-            joyAcc += blockSec * 200.0;
-            int len = joyLen.load();
-            while (joyAcc >= 1.0 && len < kJoyMax)
+            if (joyRecState.load() == 2 && (retrigger || std::abs (liveX - joyArmX) + std::abs (liveY - joyArmY) > 0.002f))
             {
-                joyPathX[(size_t) len] = x;
-                joyPathY[(size_t) len] = y;
-                ++len;
-                joyAcc -= 1.0;
+                joyLen.store (0);
+                joyAcc = 1.0; // store the first point at once
+                joyRecState.store (1);
             }
-            joyLen.store (len);
-            joyRecState.store (1);
-            joyPlayPos = 0.0;
+            if (joyRecState.load() == 1)
+            {
+                joyAcc += blockSec * 200.0;
+                int len = joyLen.load();
+                while (joyAcc >= 1.0 && len < kJoyMax)
+                {
+                    joyPathX[(size_t) len] = liveX;
+                    joyPathY[(size_t) len] = liveY;
+                    ++len;
+                    joyAcc -= 1.0;
+                }
+                joyLen.store (len);
+            }
         }
         else
         {
             joyRecState.store (0);
             const int len = joyLen.load();
-            if (play && len > 1)
+            if (mode == 0 || len < 2)
             {
+                joyRunning = false;
+                joyHaveHold = false;
+            }
+            else if (mode == 3)
+            {
+                joyRunning = true;
+                joyHaveHold = false;
                 joyPlayPos += blockSec * 200.0;
                 if (joyPlayPos >= (double) len) joyPlayPos = std::fmod (joyPlayPos, (double) len);
-                const int i0 = (int) joyPlayPos, i1 = (i0 + 1) % len;
-                const float f = (float) (joyPlayPos - i0);
+            }
+            else
+            {
+                if (firstNote && ! joyRunning)
+                {
+                    joyRunning = true;
+                    joyHaveHold = true;
+                    joyPlayPos = 0.0;
+                }
+                else if (joyRunning)
+                {
+                    joyPlayPos += blockSec * 200.0;
+                    if (joyPlayPos >= (double) (len - 1))
+                    {
+                        if (mode == 2 && heldNotes > 0) joyPlayPos = std::fmod (joyPlayPos, (double) (len - 1));
+                        else { joyPlayPos = (double) (len - 1); joyRunning = false; }
+                    }
+                    else if (mode == 2 && heldNotes == 0)
+                        joyRunning = false;
+                }
+            }
+            if (len >= 2 && (joyRunning || joyHaveHold))
+            {
+                const int i0 = juce::jmin ((int) joyPlayPos, len - 1), i1 = juce::jmin (i0 + 1, len - 1);
+                const float f = (float) (joyPlayPos - (double) i0);
                 x = joyPathX[(size_t) i0] + f * (joyPathX[(size_t) i1] - joyPathX[(size_t) i0]);
                 y = joyPathY[(size_t) i0] + f * (joyPathY[(size_t) i1] - joyPathY[(size_t) i0]);
             }
@@ -1045,7 +1105,7 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
 void NektarProcessor::addModToState (juce::ValueTree& state)
 {
     for (int i = state.getNumChildren(); --i >= 0;)
-        if (state.getChild (i).hasType ("MOD"))
+        if (state.getChild (i).hasType ("MOD") || state.getChild (i).hasType ("JOYPATH"))
             state.removeChild (i, nullptr);
     for (size_t i = 0; i < modIds.size(); ++i)
         if (routeSrc[i].load() > 0)
@@ -1056,6 +1116,24 @@ void NektarProcessor::addModToState (juce::ValueTree& state)
             m.setProperty ("amount", (double) routeAmt[i].load(), nullptr);
             state.appendChild (m, nullptr);
         }
+    // the recorded joystick path (16-bit values, base64)
+    const int len = joyLen.load();
+    if (len > 1)
+    {
+        juce::MemoryBlock bx ((size_t) len * 2), by ((size_t) len * 2);
+        for (int i = 0; i < len; ++i)
+        {
+            const auto qx = (uint16_t) juce::roundToInt (juce::jlimit (0.0f, 1.0f, joyPathX[(size_t) i]) * 65535.0f);
+            const auto qy = (uint16_t) juce::roundToInt (juce::jlimit (0.0f, 1.0f, joyPathY[(size_t) i]) * 65535.0f);
+            bx[(size_t) i * 2] = (char) (qx & 0xff); bx[(size_t) i * 2 + 1] = (char) (qx >> 8);
+            by[(size_t) i * 2] = (char) (qy & 0xff); by[(size_t) i * 2 + 1] = (char) (qy >> 8);
+        }
+        juce::ValueTree j ("JOYPATH");
+        j.setProperty ("len", len, nullptr);
+        j.setProperty ("x", bx.toBase64Encoding(), nullptr);
+        j.setProperty ("y", by.toBase64Encoding(), nullptr);
+        state.appendChild (j, nullptr);
+    }
 }
 
 void NektarProcessor::readModFromState (const juce::ValueTree& state)
@@ -1071,4 +1149,27 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
         if (c.hasType ("MOD"))
             setModRoute (c.getProperty ("id").toString(), { (int) c.getProperty ("src"), (float) (double) c.getProperty ("amount") });
     }
+    // joystick path: a preset without one clears the path; recording never starts by itself after loading
+    joyLen.store (0);
+    for (int i = 0; i < state.getNumChildren(); ++i)
+    {
+        const auto c = state.getChild (i);
+        if (! c.hasType ("JOYPATH"))
+            continue;
+        juce::MemoryBlock bx, by;
+        const int len = juce::jlimit (0, kJoyMax, (int) c.getProperty ("len"));
+        if (bx.fromBase64Encoding (c.getProperty ("x").toString()) && by.fromBase64Encoding (c.getProperty ("y").toString())
+            && bx.getSize() >= (size_t) len * 2 && by.getSize() >= (size_t) len * 2)
+        {
+            for (int k = 0; k < len; ++k)
+            {
+                joyPathX[(size_t) k] = (float) ((uint8_t) bx[(size_t) k * 2] | ((uint8_t) bx[(size_t) k * 2 + 1] << 8)) / 65535.0f;
+                joyPathY[(size_t) k] = (float) ((uint8_t) by[(size_t) k * 2] | ((uint8_t) by[(size_t) k * 2 + 1] << 8)) / 65535.0f;
+            }
+            joyLen.store (len);
+        }
+    }
+    if (auto* r = apvts.getParameter ("joyrec"))
+        r->setValueNotifyingHost (0.0f);
+    joyResetReq.store (true);
 }

@@ -75,6 +75,7 @@ public:
     ModRoute getModRoute (const juce::String& paramId) const;
     void setModRoute (const juce::String& paramId, ModRoute r);
     bool joyIsRecording() const { return joyRecState.load() == 1; }
+    bool joyIsArmed() const { return joyRecState.load() == 2; }
     bool joyHasPath() const { return joyLen.load() > 0; }
     void joyClearPath() { joyLen.store (0); }
     float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
@@ -134,6 +135,10 @@ private:
     std::atomic<int> joyLen { 0 }, joyRecState { 0 };
     double joyAcc = 0.0, joyPlayPos = 0.0;
     bool joyWasRec = false;
+    // armed recording / note-triggered playback (audio thread only; joyResetReq is set from the message thread)
+    bool joyRunning = false, joyHaveHold = false;
+    float joyArmX = 0.5f, joyArmY = 0.5f;
+    std::atomic<bool> joyResetReq { false };
     std::atomic<float>* joyXP = nullptr; std::atomic<float>* joyYP = nullptr;
     std::atomic<float>* joyRecP = nullptr; std::atomic<float>* joyPlayP = nullptr;
     Bitcrusher crusher;
