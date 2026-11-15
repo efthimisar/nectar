@@ -9,7 +9,7 @@
 //     approximation is supported by Duda & Martens (1998, JASA, "Range dependence of the response of a spherical head model")
 //   - head shadow: one pole / one zero filter per ear, H(s) = (1 + alpha(phi) s/(2 w0)) / (1 + s/(2 w0)), w0 = c/a,
 //     alpha(phi) = 1 + amin/2 + (1 - amin/2) cos(phi/phimin * 180 deg), amin = 0.1, phimin = 150 deg, ears at +-100 deg.
-//     [ΧΡΕΙΑΖΕΤΑΙ ΕΛΕΓΧΟΣ: these coefficients are from memory, to be checked against the paper]
+//     (Eqs. 2-5 and alpha_min = 0.1, phimin = 150 deg checked against the paper's text, 15 Nov 2026)
 // Our own additions (no published source): darker sound behind the listener, distance = level + high-frequency loss,
 // and the speaker mode (plain pan from the azimuth, no time or head-shadow cues, which would only colour the sound on speakers).
 class Spatializer
