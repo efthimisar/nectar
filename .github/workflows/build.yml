@@ -1,7 +1,9 @@
 name: Build Nektar (macOS, Apple Silicon)
 
-# Runs only when you press "Run workflow" - saves free macOS minutes.
+# Builds on every push to main (the repository is public, so the minutes are free) and can also be started by hand.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
