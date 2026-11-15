@@ -72,3 +72,8 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Rhythmic gate after the resonator: Rate (1, 2, 4, 8 steps per beat), Pattern (8 own-design 16-step patterns), Smooth (0.3–25 ms edges), Depth (0 = off).
 - Follows the host tempo and position; free-runs at 120 bpm (or the host tempo) when the host is stopped or absent (standalone).
 - The gate is also a modulation source: right-click any knob, choose Slicer.
+
+## Step 14D – Filter with character
+- Type knob in four zones: Ladder (JUCE `dsp::LadderFilter`, 24 dB/oct LP; position in the zone = drive), SVF (LP -> BP -> HP morph, TPT form after Zavalishin), Comb (Cutoff = pitch, Reso = feedback), Formant (three band-pass filters, Cutoff sweeps vowels i-e-a-o-u).
+- Formant frequencies: average adult male American English F1/F2/F3 from Peterson & Barney (1952), J. Acoust. Soc. Am. 24, 175-184 (values read from the Princeton COS 325 reprint and MIT 6.541J table 6.2). Relative formant levels are our own choice.
+- Mix = 0 switches the filter off. Position: after the resonator, before the slicer.

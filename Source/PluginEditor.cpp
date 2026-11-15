@@ -23,7 +23,7 @@ const ModuleDef kModules[] = {
     { "BODY",      "tone \xc2\xb7 morph",          0xffb5b1d8, { "Tone", "Focus", "Size", "Morph" },            { "bodytone", "bodyfocus", "bodysize", "morph" } },
     { "SOURCE",    "model \xc2\xb7 grit \xc2\xb7 spread", 0xff78cdd0, { "Model", "Grit", "Spread", "Noise" }, { "model", "srcrough", "blur", "modelnoise" } },
     { "RESONATOR", "follows key",                     0xffc1c494, { "Tune", "Decay", "Material", "Mix" },          { "restune", "resdecay", "resmat", "resmix" } },
-    { "FILTER",    "ladder \xc2\xb7 formant \xc2\xb7 comb", 0xffe07a5f, { "Type", "Cutoff", "Reso", "Drive" }, { nullptr, nullptr, nullptr, nullptr } },
+    { "FILTER",    "ladder \xc2\xb7 svf \xc2\xb7 comb \xc2\xb7 formant", 0xffe07a5f, { "Type", "Cutoff", "Reso", "Mix" }, { "filtype", "filcut", "filres", "filmix" } },
     { "REVERB",    "shimmer \xc2\xb7 tuned",       0xff8fb8de, { "Size", "Decay", "Shimmer", "Mix" },           { nullptr, nullptr, nullptr, nullptr } },
     { "DELAY",     "pitch per repeat",               0xfff2cc8f, { "Time", "Feedback", "Pitch", "Mix" },          { nullptr, nullptr, nullptr, nullptr } },
     { "LFO",       "1 \xc2\xb7 2",                 0xfff4a6c0, { "Rate 1", "Shape 1", "Rate 2", "Shape 2" },    { "lfo1rate", "lfo1shape", "lfo2rate", "lfo2shape" } },
