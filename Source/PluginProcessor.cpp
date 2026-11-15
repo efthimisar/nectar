@@ -218,6 +218,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
+                                                         NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfospiral", 1 }, "LFO spiral (rate sweeps slow to fast over the Ramp time, 0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfodelay", 1 }, "LFO fade-in time (0 = off)",
@@ -293,6 +295,7 @@ NektarProcessor::NektarProcessor()
     chromoP[1] = apvts.getRawParameterValue ("chromo34");
     chromoMoveP = apvts.getRawParameterValue ("chromomove");
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
+    masterP = apvts.getRawParameterValue ("master");
     lfoSpiralP = apvts.getRawParameterValue ("lfospiral");
     lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
@@ -657,6 +660,16 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
+
+    // Master out: the last gain, before the safety knee (smoothed over the block)
+    {
+        const float g = std::pow (10.0f, masterP->load() / 20.0f);
+        if (std::abs (g - 1.0f) > 1.0e-4f || std::abs (lastMaster - 1.0f) > 1.0e-4f)
+        {
+            buffer.applyGainRamp (0, buffer.getNumSamples(), lastMaster, g);
+            lastMaster = g;
+        }
+    }
 
     // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps reverb/delay/shimmer peaks below 1.0; identical below 0.9
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
