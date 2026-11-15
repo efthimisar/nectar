@@ -837,6 +837,7 @@ void NektarEditor::showPresetMenu()
     juce::PopupMenu menu;
     menu.addItem (1, "Save preset...");
     menu.addSeparator();
+    menu.addItem (7, "Auto level (equal loudness of the sounds)", true, proc.apvts.getRawParameterValue ("autolevel")->load() > 0.5f);
     menu.addItem (3, "Store snapshot A");
     menu.addItem (4, "Store snapshot B");
     menu.addItem (5, "Recall A", proc.hasSnapshot (0));
@@ -857,6 +858,14 @@ void NektarEditor::showPresetMenu()
         if (result >= 100 && result - 100 < presets.size())
         {
             safe->say (safe->proc.loadPreset (presets[result - 100]));
+            return;
+        }
+        if (result == 7)
+        {
+            auto* a = safe->proc.apvts.getParameter ("autolevel");
+            const bool on = a->getValue() < 0.5f;
+            a->setValueNotifyingHost (on ? 1.0f : 0.0f);
+            safe->say (on ? "Auto level on." : "Auto level off.");
             return;
         }
         if (result == 3 || result == 4)

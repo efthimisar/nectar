@@ -1,6 +1,7 @@
 #include "SamplePlayer.h"
 #include <signalsmith-stretch/signalsmith-stretch.h>
 #include <cmath>
+#include <juce_dsp/juce_dsp.h>
 #include <array>
 
 namespace
@@ -61,6 +62,49 @@ SamplePlayer::SamplePlayer() = default;
 SamplePlayer::~SamplePlayer() = default;
 
 // ---------------------------------------------------------------- preparing a sound for playback
+// How loud the sound is to the ear, over the parts where it actually sounds: the 2048-sample blocks within 30 dB of the
+// loudest block are averaged, each weighted by the A-weighting curve (IEC 61672 formula). Returns the gain that brings
+// that level to the common target (limited to +-24 dB; the target is set so that a typical sample stays about as it was).
+static float measureAutoGain (const juce::AudioBuffer<float>& x, double rate)
+{
+    constexpr int N = 2048;
+    const int len = x.getNumSamples();
+    if (len < N * 2) return 1.0f;
+    juce::dsp::FFT fft (11);
+    std::vector<float> buf ((size_t) N * 2), w ((size_t) N);
+    for (int i = 0; i < N; ++i) w[(size_t) i] = 0.5f - 0.5f * std::cos (6.2831853f * (float) i / (float) N);
+    std::vector<float> aw ((size_t) N / 2);
+    for (int k = 1; k < N / 2; ++k)
+    {
+        const double f = (double) k * rate / N, f2 = f * f;
+        const double ra = (12194.0 * 12194.0 * f2 * f2) / ((f2 + 20.6 * 20.6) * std::sqrt ((f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9)) * (f2 + 12194.0 * 12194.0));
+        aw[(size_t) k] = (float) ra;
+    }
+    std::vector<double> blocks;
+    for (int s = 0; s + N <= juce::jmin (len, (int) (60.0 * rate)); s += N)
+    {
+        std::fill (buf.begin(), buf.end(), 0.0f);
+        for (int c = 0; c < x.getNumChannels(); ++c)
+            for (int i = 0; i < N; ++i) buf[(size_t) i] += x.getSample (c, s + i) * w[(size_t) i] / (float) x.getNumChannels();
+        fft.performRealOnlyForwardTransform (buf.data());
+        double e = 0.0;
+        for (int k = 1; k < N / 2; ++k)
+        {
+            const double re = buf[(size_t) 2 * k], im = buf[(size_t) 2 * k + 1];
+            e += (re * re + im * im) * (double) aw[(size_t) k] * (double) aw[(size_t) k];
+        }
+        blocks.push_back (e / ((double) N * (double) N * 0.375));
+    }
+    if (blocks.empty()) return 1.0f;
+    double mx = 0.0;
+    for (double b : blocks) mx = std::max (mx, b);
+    if (mx <= 1.0e-14) return 1.0f;
+    double sum = 0.0; int cnt = 0;
+    for (double b : blocks) if (b >= mx * 1.0e-3) { sum += b; ++cnt; }
+    const double db = 10.0 * std::log10 (sum / (double) cnt) ;
+    return std::pow (10.0f, (float) juce::jlimit (-24.0, 24.0, -41.0 - db) / 20.0f);
+}
+
 void SamplePlayer::makePlayable (Sample& s, double hostRate)
 {
     const auto& src0 = s.cleaned.getNumSamples() > 0 ? s.cleaned : s.data; // the cleaned sound, if there is one
@@ -167,6 +211,7 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
                  + std::pow (std::sin (w * juce::MathConstants<float>::halfPi), e) * d[p - Lr];
         }
     }
+    s.autoGain = measureAutoGain (s.play, hostRate);
 }
 
 // ---------------------------------------------------------------- player
@@ -313,7 +358,7 @@ void SamplePlayer::renderTape (Voice& v, juce::AudioBuffer<float>& out, int star
     const int ls = p.loop ? sample->loopStart : 0, le = p.loop ? sample->loopEnd : 0;
     const double ratio = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
     const float cut = juce::jlimit (0.25f, 1.0f, (float) (1.0 / ratio));
-    const float gain = p.level * p.level * v.velocity;
+    const float gain = p.level * p.level * p.autoGain * v.velocity;
     const float* srcL = d.getReadPointer (0);
     const float* srcR = d.getNumChannels() > 1 ? d.getReadPointer (1) : srcL;
     float* oL = out.getWritePointer (0);
@@ -349,7 +394,7 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
     const double speed = std::pow (R, 1.0 - (double) p.keepLength);
     st.setTransposeFactor ((float) R); // the pitch always follows the key; "keep length" only sets how fast we read
-    const float gain = p.level * p.level * v.velocity;
+    const float gain = p.level * p.level * p.autoGain * v.velocity;
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
 
@@ -405,7 +450,7 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
     const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
     const double advance = (1.0 - (double) p.freeze) / factor;
-    const float gain = p.level * p.level * v.velocity;
+    const float gain = p.level * p.level * p.autoGain * v.velocity;
     const float mix = v.modelMix;
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
@@ -453,7 +498,7 @@ void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
     const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
-    const float gain = p.level * p.level * v.velocity;
+    const float gain = p.level * p.level * p.autoGain * v.velocity;
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
 

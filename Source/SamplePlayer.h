@@ -23,6 +23,7 @@ struct Sample
     juce::String path;
 
     juce::AudioBuffer<float> play;     // data converted to the host sample rate
+    float autoGain = 1.0f;             // gain that brings the loud parts of this sound to a common A-weighted level (Auto level)
     juce::AudioBuffer<float> playLoop; // same, with a smooth cross-fade baked in at the loop seam
     double playRate = 0.0;             // host rate that play/playLoop were made for
     int loopStart = 0, loopEnd = 0;    // sustain loop (in play/playLoop samples)
@@ -41,6 +42,7 @@ class SamplePlayer
 public:
     struct Params
     {
+        float autoGain = 1.0f;   // from the sample (Auto level), 1 = off
         float level = 0.8f;      // 0..1
         float pitchSemis = 0.0f; // -12..+12
         float releaseSec = 0.25f;

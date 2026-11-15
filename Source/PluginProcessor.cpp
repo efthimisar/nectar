@@ -90,6 +90,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     }
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
+    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "autolevel", 1 }, "Auto level", true));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "stretch", 1 }, "Stretch",
@@ -546,6 +547,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         auto& pl = players[(size_t) slot];
         if (! pl.hasSample())
             continue;
+        p.autoGain = apvts.getRawParameterValue ("autolevel")->load() > 0.5f ? pl.getSample()->autoGain : 1.0f;
         p.chromo = modded (chromoP[(size_t) (slot / 2)]);
         p.chromoMove = modded (chromoMoveP);
         p.chromoBack = modded (chromoBackP);
