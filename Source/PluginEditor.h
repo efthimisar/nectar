@@ -45,6 +45,21 @@ private:
 };
 
 // Live parts of the top bar: timer, progress bar and the Record button (they change while recording).
+// Round XY pad for the joystick modulation source; right-click clears the recorded path.
+class JoyPad : public juce::Component
+{
+public:
+    static constexpr float kR = 27.0f; // radius in design units
+    explicit JoyPad (NektarProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::CrosshairCursor); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void setFromMouse (const juce::MouseEvent&);
+    NektarProcessor& proc;
+};
+
 class RecordHud : public juce::Component
 {
 public:
@@ -99,6 +114,8 @@ private:
     juce::Array<juce::Point<float>> knobPos; // centre of each knob in design units
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<RecordHud> hud;
+    std::unique_ptr<JoyPad> joyPad;
+    juce::Point<float> joyPadCentre;
     juce::String message;
     std::set<int> heldNotes;
     int octaveShift = 0;

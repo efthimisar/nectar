@@ -127,6 +127,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filmix", 1 }, "Filter mix (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envatk", 1 }, "Envelope attack",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.1f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envdec", 1 }, "Envelope decay",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envsus", 1 }, "Envelope sustain",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envrel", 1 }, "Envelope release",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "joyx", 1 }, "Joystick X",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "joyy", 1 }, "Joystick Y",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyrec", 1 }, "Joystick record", false));
+    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyplay", 1 }, "Joystick play path", false));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crbits", 1 }, "Crusher bits",
+                                                         NormalisableRange<float> (3.0f, 16.0f, 0.01f), 16.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crrate", 1 }, "Crusher rate reduction",
+                                                         NormalisableRange<float> (1.0f, 32.0f, 0.01f, 0.4f), 1.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crdither", 1 }, "Crusher dither",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crmix", 1 }, "Crusher mix (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revsize", 1 }, "Reverb note (root pitch)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revdecay", 1 }, "Reverb decay",
@@ -231,6 +253,20 @@ NektarProcessor::NektarProcessor()
     slPatP = apvts.getRawParameterValue ("slpattern");
     slSmoothP = apvts.getRawParameterValue ("slsmooth");
     slDepthP = apvts.getRawParameterValue ("sldepth");
+    envP[0] = apvts.getRawParameterValue ("envatk");
+    envP[1] = apvts.getRawParameterValue ("envdec");
+    envP[2] = apvts.getRawParameterValue ("envsus");
+    envP[3] = apvts.getRawParameterValue ("envrel");
+    joyXP = apvts.getRawParameterValue ("joyx");
+    joyYP = apvts.getRawParameterValue ("joyy");
+    joyRecP = apvts.getRawParameterValue ("joyrec");
+    joyPlayP = apvts.getRawParameterValue ("joyplay");
+    crBitsP = apvts.getRawParameterValue ("crbits");
+    crRateP = apvts.getRawParameterValue ("crrate");
+    crDitherP = apvts.getRawParameterValue ("crdither");
+    crMixP = apvts.getRawParameterValue ("crmix");
+    joyPathX.assign ((size_t) kJoyMax, 0.5f);
+    joyPathY.assign ((size_t) kJoyMax, 0.5f);
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -333,6 +369,8 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     slicer.prepare (sampleRate);
+    crusher.prepare (sampleRate);
+    envStage = 0; envLevel = 0.0f; heldNotes = 0;
     delay.prepare (sampleRate);
     reverb.prepare (sampleRate);
     charFilter.prepare (sampleRate, samplesPerBlock);
@@ -414,7 +452,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
 
-    updateMods (buffer.getNumSamples());
+    updateMods (buffer.getNumSamples(), midi);
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
     p.keepLength = modded (apvts.getRawParameterValue ("keeplength"));
@@ -463,6 +501,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Filter with character (ladder, SVF, comb, formant)
     charFilter.process (buffer, buffer.getNumSamples(), modded (filTypeP), modded (filCutP), modded (filResP), modded (filMixP));
 
+    // Bitcrusher (bit depth, sample-rate reduction)
+    crusher.process (buffer, buffer.getNumSamples(), modded (crBitsP), modded (crRateP), modded (crDitherP), modded (crMixP));
+
     // Reverb (pitched FDN with shimmer)
     reverb.process (buffer, buffer.getNumSamples(), modded (revSizeP), modded (revDecayP), modded (revShimP), modded (revMixP));
 
@@ -489,6 +530,13 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                                         modded (slDepthP), bpm, ppq);
         modVal[(size_t) kModSlicer] = g * 2.0f - 1.0f; // used by the next block
         modShown[(size_t) kModSlicer].store (g * 2.0f - 1.0f);
+        // Slicer 2 and 3: stepped level sequences on the same clock (our own tables, not taken from any product)
+        static const float seq3[16] = { 0.9f, -0.4f, 0.3f, -0.9f, 0.6f, 0.0f, -0.6f, 1.0f, -0.2f, 0.5f, -1.0f, 0.1f, 0.8f, -0.7f, 0.2f, -0.3f };
+        const int st = slicer.currentStep();
+        modVal[(size_t) kModSlicer2] = (float) st / 15.0f * 2.0f - 1.0f; // staircase over one bar of 16 steps
+        modVal[(size_t) kModSlicer3] = seq3[st];
+        modShown[(size_t) kModSlicer2].store (modVal[(size_t) kModSlicer2]);
+        modShown[(size_t) kModSlicer3].store (modVal[(size_t) kModSlicer3]);
     }
 
     // Bright: tilt of the whole sound (0.5 = off)
@@ -843,29 +891,123 @@ float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
     return r.convertFrom0to1 (n);
 }
 
-// Sources are updated once per block (-1..1). LFO shape knob: sine, triangle, saw, square, sample and hold.
-void NektarProcessor::updateMods (int numSamples)
+// Sources are updated once per block (-1..1, the envelope 0..1).
+// LFO shape knob: 12 zones - sine, triangle, saw up, saw down, square, pulse 25%, sample and hold, smooth random,
+// stairs (4 steps), half sine, exponential decay, double sine.
+static float lfoShapeValue (int shape, float t, float hold, float prev, float next)
+{
+    constexpr float twoPi = juce::MathConstants<float>::twoPi;
+    switch (shape)
+    {
+        case 0:  return std::sin (twoPi * t);
+        case 1:  return 1.0f - 4.0f * std::abs (t - 0.5f);
+        case 2:  return 2.0f * t - 1.0f;
+        case 3:  return 1.0f - 2.0f * t;
+        case 4:  return t < 0.5f ? 1.0f : -1.0f;
+        case 5:  return t < 0.25f ? 1.0f : -1.0f;
+        case 6:  return hold;
+        case 7:  { const float c = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * t); return prev + (next - prev) * c; }
+        case 8:  return std::floor (t * 4.0f) / 1.5f - 1.0f;
+        case 9:  return std::sin (juce::MathConstants<float>::pi * t) * 2.0f - 1.0f;
+        case 10: return 2.0f * std::exp (-5.0f * t) - 1.0f;
+        default: return 0.5f * std::sin (twoPi * t) + 0.5f * std::sin (2.0f * twoPi * t);
+    }
+}
+
+void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
 {
     const double sr = hostRate.load() > 0.0 ? hostRate.load() : 44100.0;
+    const double blockSec = (double) numSamples / sr;
     for (int i = 0; i < 2; ++i)
     {
         const double prev = lfoPhase[i];
-        double ph = prev + (double) lfoRateP[i]->load() * (double) numSamples / sr;
+        double ph = prev + (double) lfoRateP[i]->load() * blockSec;
         const bool wrapped = ph >= 1.0;
         ph -= std::floor (ph);
         lfoPhase[i] = ph;
         if (wrapped)
+        {
             lfoHold[i] = lfoRng.nextFloat() * 2.0f - 1.0f;
-        const float sh = lfoShapeP[i]->load();
-        const float t = (float) ph;
-        float v;
-        if (sh < 0.2f)      v = std::sin (juce::MathConstants<float>::twoPi * t);
-        else if (sh < 0.4f) v = 1.0f - 4.0f * std::abs (t - 0.5f);
-        else if (sh < 0.6f) v = 2.0f * t - 1.0f;
-        else if (sh < 0.8f) v = t < 0.5f ? 1.0f : -1.0f;
-        else                v = lfoHold[i];
+            lfoPrev[i] = lfoNext[i];
+            lfoNext[i] = lfoHold[i];
+        }
+        const int shape = juce::jlimit (0, 11, (int) (lfoShapeP[i]->load() * 11.999f));
+        const float v = lfoShapeValue (shape, (float) ph, lfoHold[i], lfoPrev[i], lfoNext[i]);
         modVal[(size_t) (kModLfo1 + i)] = v;
         modShown[(size_t) (kModLfo1 + i)].store (v);
+    }
+
+    // Envelope: gate = at least one key held; a new key restarts the attack from the current level
+    bool retrigger = false;
+    for (const auto meta : midi)
+    {
+        const auto m = meta.getMessage();
+        if (m.isNoteOn())       { ++heldNotes; retrigger = true; }
+        else if (m.isNoteOff()) heldNotes = juce::jmax (0, heldNotes - 1);
+        else if (m.isAllNotesOff() || m.isAllSoundOff()) heldNotes = 0;
+    }
+    if (retrigger) envStage = 1;
+    else if (heldNotes == 0 && envStage >= 1 && envStage <= 3) envStage = 4;
+    // times: 0..1 -> 1 ms .. 5 s (attack, decay), 10 ms .. 8 s (release); exponential knob law
+    const float atk = 0.001f * std::pow (5000.0f, envP[0]->load());
+    const float dec = 0.001f * std::pow (5000.0f, envP[1]->load());
+    const float sus = envP[2]->load();
+    const float rel = 0.01f * std::pow (800.0f, envP[3]->load());
+    const float bs = (float) blockSec;
+    switch (envStage)
+    {
+        case 1: envLevel += bs / atk; if (envLevel >= 1.0f) { envLevel = 1.0f; envStage = 2; } break;
+        case 2: envLevel -= (1.0f - sus) * bs / dec; if (envLevel <= sus) { envLevel = sus; envStage = 3; } break;
+        case 3: envLevel = sus; break;
+        case 4: envLevel -= bs / rel; if (envLevel <= 0.0f) { envLevel = 0.0f; envStage = 0; } break;
+        default: break;
+    }
+    modVal[(size_t) kModEnv] = envLevel;
+    modShown[(size_t) kModEnv].store (envLevel);
+
+    // Joystick: while Rec is on the position is stored 200 times a second (up to 30 s); while Play is on that path loops
+    {
+        const bool rec = joyRecP->load() > 0.5f, play = joyPlayP->load() > 0.5f;
+        float x = joyXP->load(), y = joyYP->load();
+        if (rec && ! joyWasRec)
+        {
+            joyLen.store (0);
+            joyAcc = 0.0;
+        }
+        if (rec)
+        {
+            joyAcc += blockSec * 200.0;
+            int len = joyLen.load();
+            while (joyAcc >= 1.0 && len < kJoyMax)
+            {
+                joyPathX[(size_t) len] = x;
+                joyPathY[(size_t) len] = y;
+                ++len;
+                joyAcc -= 1.0;
+            }
+            joyLen.store (len);
+            joyRecState.store (1);
+            joyPlayPos = 0.0;
+        }
+        else
+        {
+            joyRecState.store (0);
+            const int len = joyLen.load();
+            if (play && len > 1)
+            {
+                joyPlayPos += blockSec * 200.0;
+                if (joyPlayPos >= (double) len) joyPlayPos = std::fmod (joyPlayPos, (double) len);
+                const int i0 = (int) joyPlayPos, i1 = (i0 + 1) % len;
+                const float f = (float) (joyPlayPos - i0);
+                x = joyPathX[(size_t) i0] + f * (joyPathX[(size_t) i1] - joyPathX[(size_t) i0]);
+                y = joyPathY[(size_t) i0] + f * (joyPathY[(size_t) i1] - joyPathY[(size_t) i0]);
+            }
+        }
+        joyWasRec = rec;
+        modVal[(size_t) kModJoyX] = x * 2.0f - 1.0f;
+        modVal[(size_t) kModJoyY] = y * 2.0f - 1.0f;
+        modShown[(size_t) kModJoyX].store (x * 2.0f - 1.0f);
+        modShown[(size_t) kModJoyY].store (y * 2.0f - 1.0f);
     }
 }
 

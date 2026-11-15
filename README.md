@@ -99,3 +99,11 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 ## Resample safety
 - Resample asks once before it replaces a slot that already has a sound (click again within 5 s).
 - Auto-stop: after the sound has been heard and 2.5 s of silence follow, the take ends and keeps 0.4 s of tail.
+
+## Modulation sources and Bitcrusher (build 15)
+- **ENV**: ADSR driven by the held keys (global, one envelope; a new key restarts the attack). Unipolar 0..1. Times: attack/decay 1 ms–5 s, release 10 ms–8 s.
+- **JOY**: round XY pad (Joystick X / Y as sources). Rec stores the movement (200 points/s, up to 30 s), Play loops it; right-click on the pad clears the path. The path is not yet saved in presets.
+- **LFO**: the shape knob now selects 12 shapes: sine, triangle, saw up, saw down, square, pulse 25 %, sample and hold, smooth random, stairs, half sine, exponential decay, double sine. Old presets that used the shape knob will sound different.
+- **Slicer 2 / 3**: extra sources on the Slicer's step clock - a 16-step staircase and a fixed 16-step level sequence (our own tables).
+- **CRUSH**: bits 3–16, sample-rate reduction 1–32x, TPDF dither, mix; sits after the Filter, before the Reverb.
+- Right-click a knob to choose any of the sources (LFO 1/2, Slicer, Slicer 2/3, Envelope, Joystick X/Y).

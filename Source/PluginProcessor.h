@@ -9,6 +9,7 @@
 #include "Slicer.h"
 #include "MelodicDelay.h"
 #include "MelodicReverb.h"
+#include "Bitcrusher.h"
 #include "CharacterFilter.h"
 #include <unordered_map>
 #include <string>
@@ -69,10 +70,13 @@ public:
     static juce::File getLibraryFolder();
 
     // Modulation: every knob can follow a source (LFO 1, LFO 2, Slicer) by an amount (-1..1 of the knob's range).
-    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModCount };
+    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModSlicer2, kModSlicer3, kModEnv, kModJoyX, kModJoyY, kModCount };
     struct ModRoute { int src = 0; float amount = 0.0f; };
     ModRoute getModRoute (const juce::String& paramId) const;
     void setModRoute (const juce::String& paramId, ModRoute r);
+    bool joyIsRecording() const { return joyRecState.load() == 1; }
+    bool joyHasPath() const { return joyLen.load() > 0; }
+    void joyClearPath() { joyLen.store (0); }
     float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
 
     // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
@@ -101,7 +105,7 @@ private:
 
     // modulation (audio thread reads the routes; the message thread writes them)
     float modded (const std::atomic<float>* raw) const noexcept; // value of a knob including its modulation
-    void updateMods (int numSamples);
+    void updateMods (int numSamples, const juce::MidiBuffer& midi);
     void buildModTable();
     void addModToState (juce::ValueTree& state);
     void readModFromState (const juce::ValueTree& state);
@@ -118,6 +122,23 @@ private:
     double lfoPhase[2] { 0.0, 0.0 };
     float lfoHold[2] { 0.0f, 0.0f };
     juce::Random lfoRng;
+    float lfoPrev[2] { 0.0f, 0.0f }, lfoNext[2] { 0.0f, 0.0f };
+    // envelope (ADSR) driven by the held keys
+    int heldNotes = 0;
+    int envStage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
+    float envLevel = 0.0f;
+    std::atomic<float>* envP[4] {};
+    // joystick: a path of (x, y) samples at 200 Hz, recorded while Rec is on and looped while Play is on
+    static constexpr int kJoyMax = 200 * 30;
+    std::vector<float> joyPathX, joyPathY;
+    std::atomic<int> joyLen { 0 }, joyRecState { 0 };
+    double joyAcc = 0.0, joyPlayPos = 0.0;
+    bool joyWasRec = false;
+    std::atomic<float>* joyXP = nullptr; std::atomic<float>* joyYP = nullptr;
+    std::atomic<float>* joyRecP = nullptr; std::atomic<float>* joyPlayP = nullptr;
+    Bitcrusher crusher;
+    std::atomic<float>* crBitsP = nullptr; std::atomic<float>* crRateP = nullptr;
+    std::atomic<float>* crDitherP = nullptr; std::atomic<float>* crMixP = nullptr;
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, 2> imorphP {};

@@ -17,7 +17,7 @@ constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
 constexpr float kLibX = 550.0f, kLibY = 250.0f;
 constexpr float kSlotCx[4] = { 110.0f, 300.0f, 800.0f, 990.0f };
 constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
-constexpr float kModR = 66.0f;                   // module radius
+constexpr float kModR = 60.0f;                   // module radius
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -31,30 +31,37 @@ const ModuleDef kModules[] = {
     { "DELAY",     "pitch per repeat",               0xfff2cc8f, { "Time", "Feedback", "Pitch", "Mix" },          { "deltime", "delfb", "delpitch", "delmix" } },
     { "LFO",       "1 \xc2\xb7 2",                 0xfff4a6c0, { "Rate 1", "Shape 1", "Rate 2", "Shape 2" },    { "lfo1rate", "lfo1shape", "lfo2rate", "lfo2shape" } },
     { "SLICER",    "rhythmic gate",                  0xff9bc89b, { "Rate", "Pattern", "Smooth", "Depth" },        { "slrate", "slpattern", "slsmooth", "sldepth" } },
+    { "CRUSH",     "bits \xc2\xb7 rate",              0xffd9a066, { "Bits", "Rate", "Dither", "Mix" },             { "crbits", "crrate", "crdither", "crmix" } },
+    { "ENV",       "ADSR from keys",                 0xffb08fd8, { "Attack", "Decay", "Sustain", "Release" },     { "envatk", "envdec", "envsus", "envrel" } },
+    { "JOY",       "x \xc2\xb7 y \xc2\xb7 path",       0xff8fd8b0, { "Rec", "Play", "", "" },                        { "joyrec", "joyplay", nullptr, nullptr } },
 };
-constexpr int kNumModules = 9;
-// three pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
+constexpr int kNumModules = 12;
+constexpr int kJoyModule = 11;
+// four pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
 // (place 0 = top, 1 = bottom left, 2 = bottom right)
-constexpr int kModPlace[9][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
-                                  { 1, 1 }, { 1, 0 }, { 2, 0 },   // Resonator, Filter, Reverb
-                                  { 2, 1 }, { 2, 2 }, { 1, 2 } }; // Delay, LFO, Slicer
+constexpr int kModPlace[12][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
+                                   { 1, 1 }, { 1, 0 }, { 2, 0 },   // Resonator, Filter, Reverb
+                                   { 2, 1 }, { 3, 0 }, { 2, 2 },   // Delay, LFO, Slicer
+                                   { 1, 2 }, { 3, 1 }, { 3, 2 } }; // Crush, Env, Joy
 juce::Point<float> moduleCentre (int m)
 {
-    const float gx[3] = { 225.0f, 550.0f, 875.0f };
-    const float x = gx[kModPlace[m][0]];
+    const float x = 137.5f + 275.0f * (float) kModPlace[m][0];
     switch (kModPlace[m][1])
     {
-        case 0:  return { x, 462.0f };
-        case 1:  return { x - 74.0f, 576.0f };
-        default: return { x + 74.0f, 576.0f };
+        case 0:  return { x, 455.0f };
+        case 1:  return { x - 64.0f, 570.0f };
+        default: return { x + 64.0f, 570.0f };
     }
 }
 juce::Point<float> moduleKnobCentre (int m, int k)
 {
-    static const float dx[4] = { -25.0f, 25.0f, -25.0f, 25.0f }, dy[4] = { -30.0f, -30.0f, 27.0f, 27.0f };
+    static const float dx[4] = { -23.0f, 23.0f, -23.0f, 23.0f }, dy[4] = { -28.0f, -28.0f, 25.0f, 25.0f };
     const auto c = moduleCentre (m);
+    if (m == kJoyModule) // Rec and Play sit side by side below the pad
+        return { c.x + (k == 0 ? -26.0f : 26.0f), c.y + 26.0f };
     return { c.x + dx[k], c.y + dy[k] };
 }
+bool isToggleId (const juce::String& id) { return id == "loop" || id == "joyrec" || id == "joyplay"; }
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -269,12 +276,17 @@ void KnobComponent::mouseDown (const juce::MouseEvent& e)
             menu.addItem (2, "LFO 1", true, r.src == NektarProcessor::kModLfo1);
             menu.addItem (3, "LFO 2", true, r.src == NektarProcessor::kModLfo2);
             menu.addItem (4, "Slicer", true, r.src == NektarProcessor::kModSlicer);
+            menu.addItem (5, "Slicer 2 (staircase)", true, r.src == NektarProcessor::kModSlicer2);
+            menu.addItem (6, "Slicer 3 (step sequence)", true, r.src == NektarProcessor::kModSlicer3);
+            menu.addItem (7, "Envelope", true, r.src == NektarProcessor::kModEnv);
+            menu.addItem (8, "Joystick X", true, r.src == NektarProcessor::kModJoyX);
+            menu.addItem (9, "Joystick Y", true, r.src == NektarProcessor::kModJoyY);
             menu.addSeparator();
             menu.addItem (100, "Amount: hold Shift and drag the knob", false);
             juce::Component::SafePointer<KnobComponent> safe (this);
             menu.showMenuAsync (juce::PopupMenu::Options(), [safe, r] (int choice)
             {
-                if (safe == nullptr || choice < 1 || choice > 4)
+                if (safe == nullptr || choice < 1 || choice > 9)
                     return;
                 auto n = r;
                 n.src = choice - 1;
@@ -420,6 +432,53 @@ namespace
 const char* kKeys = "awsedftgyhujkolp;"; // computer keyboard = one chromatic octave and a bit, from C
 }
 
+// ------------------------------------------------------------------ JoyPad
+void JoyPad::paint (Graphics& g)
+{
+    const float w = (float) getWidth(), c = w * 0.5f, r = c - 1.5f;
+    const bool rec = proc.joyIsRecording();
+    g.setColour (Colour (0xff1e1d1b));
+    g.fillEllipse (c - r, c - r, 2 * r, 2 * r);
+    g.setColour (Colour (0xff8fd8b0).withAlpha (rec ? 1.0f : 0.7f));
+    g.drawEllipse (c - r, c - r, 2 * r, 2 * r, 1.4f);
+    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.drawLine (c - r, c, c + r, c, 1.0f);
+    g.drawLine (c, c - r, c, c + r, 1.0f);
+    const float x = (proc.modSourceNow (NektarProcessor::kModJoyX) + 1.0f) * 0.5f;
+    const float y = (proc.modSourceNow (NektarProcessor::kModJoyY) + 1.0f) * 0.5f;
+    const float px = c + (x * 2.0f - 1.0f) * r * 0.86f, py = c - (y * 2.0f - 1.0f) * r * 0.86f;
+    g.setColour (rec ? Colour (0xffe05a4f) : Colour (0xfffbe6a0));
+    g.fillEllipse (px - 4.5f, py - 4.5f, 9.0f, 9.0f);
+}
+
+void JoyPad::setFromMouse (const juce::MouseEvent& e)
+{
+    const float w = (float) getWidth(), c = w * 0.5f, r = c * 0.86f;
+    float dx = (e.position.x - c) / r, dy = -(e.position.y - c) / r;
+    const float len = std::sqrt (dx * dx + dy * dy);
+    if (len > 1.0f) { dx /= len; dy /= len; }
+    if (auto* px = proc.apvts.getParameter ("joyx")) px->setValueNotifyingHost ((dx + 1.0f) * 0.5f);
+    if (auto* py = proc.apvts.getParameter ("joyy")) py->setValueNotifyingHost ((dy + 1.0f) * 0.5f);
+}
+
+void JoyPad::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        proc.joyClearPath();
+        return;
+    }
+    if (auto* px = proc.apvts.getParameter ("joyx")) px->beginChangeGesture();
+    if (auto* py = proc.apvts.getParameter ("joyy")) py->beginChangeGesture();
+    setFromMouse (e);
+}
+void JoyPad::mouseDrag (const juce::MouseEvent& e) { setFromMouse (e); }
+void JoyPad::mouseUp (const juce::MouseEvent&)
+{
+    if (auto* px = proc.apvts.getParameter ("joyx")) px->endChangeGesture();
+    if (auto* py = proc.apvts.getParameter ("joyy")) py->endChangeGesture();
+}
+
 NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p), proc (p)
 {
     regular = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoRegular_ttf, BinaryData::CarlitoRegular_ttfSize);
@@ -465,9 +524,18 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         for (int k = 0; k < 4; ++k)
         {
             const auto& d = kModules[m];
+            if (m == kJoyModule && k >= 2)
+                continue;
             const auto c = moduleKnobCentre (m, k);
-            addKnob (c.x, c.y, 10.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k], d.id[k] != nullptr && juce::String (d.id[k]) == "loop");
+            addKnob (c.x, c.y, m == kJoyModule ? 8.0f : 10.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k],
+                     d.id[k] != nullptr && isToggleId (d.id[k]));
         }
+    {
+        const auto c = moduleCentre (kJoyModule);
+        joyPad = std::make_unique<JoyPad> (proc);
+        joyPadCentre = { c.x, c.y - 14.0f };
+        addAndMakeVisible (*joyPad);
+    }
 
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
@@ -515,6 +583,9 @@ void NektarEditor::resized()
         k->setBounds (juce::Rectangle<float> ((c.x - KnobComponent::kWidth / 2.0f) * s, (c.y - r) * s,
                                               KnobComponent::kWidth * s, k->height() * s).toNearestInt());
     }
+    if (joyPad != nullptr)
+        joyPad->setBounds (juce::Rectangle<float> ((joyPadCentre.x - JoyPad::kR) * s, (joyPadCentre.y - JoyPad::kR) * s,
+                                                   2 * JoyPad::kR * s, 2 * JoyPad::kR * s).toNearestInt());
 }
 
 void NektarEditor::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -711,6 +782,8 @@ void NektarEditor::timerCallback()
     if (proc.isRecording() || hudWasRecording)
         hud->repaint();
     hudWasRecording = proc.isRecording();
+    if (joyPad != nullptr)
+        joyPad->repaint();
 }
 
 void NektarEditor::chooseFile (int slot)
@@ -1001,6 +1074,7 @@ void NektarEditor::renderDesign (Graphics& g)
         g.drawEllipse (c.x - kModR + 1.5f, c.y - kModR + 1.5f, 2 * kModR - 3.0f, 2 * kModR - 3.0f, 2.0f);
         g.setColour (col);
         g.setFont (font (bld, 11.5f));
-        g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 4, 100, 16), juce::Justification::centred);
+        if (m != kJoyModule)
+            g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 4, 100, 16), juce::Justification::centred);
     }
 }

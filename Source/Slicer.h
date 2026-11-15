@@ -24,6 +24,7 @@ public:
         const float a = (float) (1.0 - std::exp (-1.0 / (0.001 * ms * sr)));
         double pos = ppq >= 0.0 ? ppq * spb : counter;
         const float first = gateAt (pat, pos);
+        { const int st = (int) std::floor (std::fmod (pos, (double) kSteps)); lastStep = st < 0 ? st + kSteps : st; }
         if (depth <= 0.0005f && gain > 0.9999f)
         {
             if (ppq < 0.0) counter += stepsPerSample * n;
@@ -40,6 +41,8 @@ public:
         if (ppq < 0.0) counter = std::fmod (pos, 1024.0);
         return first;
     }
+
+    int currentStep() const { return lastStep; } // 0..15, at the start of the last block
 
 private:
     static float gateAt (int pat, double pos)
@@ -60,5 +63,6 @@ private:
     }
 
     double sr = 44100.0, counter = 0.0;
+    int lastStep = 0;
     float gain = 1.0f;
 };
