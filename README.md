@@ -126,3 +126,7 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 ## Velocity and Key sources (build 18)
 - Two new modulation sources in the right-click menu: **Velocity** (last note-on velocity, 0..1, held after release) and **Key** (last note relative to C3 = MIDI 60, -1..1 over +-3 octaves, clamped). Both are block-rate like the other sources. The +-3 octave span is our choice, not the manual's.
 - SPACE position (azimuth, distance) already follows any source through the generic route; the pad still draws the unmodulated dot.
+
+## Crossmorph inside a slot pair (build 19)
+- New **Cross** knob on slots 2 and 4 (one per pair 1+2 and 3+4). Centre = both slots at full level; towards 0 only the first slot sounds, towards 1 only the second. Equal-power law, each side capped at 1, so the centre position leaves the sound unchanged.
+- It is a normal knob, so the Neuron's two crossmorphs are made by routing: **Velocity** to Cross = velocity crossmorph (soft keys one slot, hard keys the other; set the knob at 0 and amount +1 for a full swing). **Envelope** to Cross = dynamic crossmorph (the balance moves with the note's ADSR). This is our reading of the two names, not a copy of the manual.

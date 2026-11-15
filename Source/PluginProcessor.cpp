@@ -185,6 +185,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "xmorph12", 1 }, "Crossmorph 1<>2 (centre = both; route Velocity or Envelope here)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "xmorph34", 1 }, "Crossmorph 3<>4 (centre = both; route Velocity or Envelope here)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "srcrough", 1 }, "Source rough",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restune", 1 }, "Resonator tune",
@@ -243,6 +247,8 @@ NektarProcessor::NektarProcessor()
     srcRoughP = apvts.getRawParameterValue ("srcrough");
     imorphP[0] = apvts.getRawParameterValue ("imorph12");
     imorphP[1] = apvts.getRawParameterValue ("imorph34");
+    xmorphP[0] = apvts.getRawParameterValue ("xmorph12");
+    xmorphP[1] = apvts.getRawParameterValue ("xmorph34");
     for (int i = 0; i < 2; ++i)
     {
         lfoRateP[i] = apvts.getRawParameterValue ("lfo" + juce::String (i + 1) + "rate");
@@ -525,6 +531,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         space.azDeg[(size_t) slot] = modded (spAzP[(size_t) slot]);
         space.dist[(size_t) slot] = modded (spDistP[(size_t) slot]);
     }
+    mixer.setCross ({ modded (xmorphP[0]), modded (xmorphP[1]) });
     mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) }, space);
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s

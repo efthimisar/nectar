@@ -63,6 +63,10 @@ public:
         std::array<float, kSlots> dist { 0.3f, 0.3f, 0.3f, 0.3f };
     };
 
+    // Cross-fade inside a pair (0..1, 0 = only the first slot, 0.5 = both at full level, 1 = only the second).
+    // Equal-power law, each side capped at 1. Meant to be driven by Velocity (velocity crossmorph) or Envelope (dynamic one).
+    void setCross (const std::array<float, 2>& c) { cross = c; }
+
     // without placement (plain pan only)
     void mix (juce::AudioBuffer<float>& out, int numSamples, const std::array<bool, kSlots>& loaded,
               const std::array<float, kSlots>& pan, const std::array<float, 2>& imorph)
@@ -125,6 +129,18 @@ public:
         for (int pr = 0; pr < 2; ++pr)
         {
             const int a = 2 * pr, b = a + 1;
+            {
+                const float th = juce::jlimit (0.0f, 1.0f, cross[(size_t) pr]) * juce::MathConstants<float>::halfPi;
+                const float g[2] = { juce::jmin (1.0f, 1.41421356f * std::cos (th)), juce::jmin (1.0f, 1.41421356f * std::sin (th)) };
+                for (int k = 0; k < 2; ++k)
+                {
+                    const int sl = k == 0 ? a : b;
+                    const float gk = g[k];
+                    if (loaded[(size_t) sl])
+                        scratch[(size_t) sl].applyGainRamp (0, numSamples, lastCross[(size_t) sl], gk);
+                    lastCross[(size_t) sl] = gk;
+                }
+            }
             const bool both = loaded[(size_t) a] && loaded[(size_t) b] && imorph[(size_t) pr] > 0.001f;
             if (both)
             {
@@ -156,6 +172,8 @@ private:
         bool active = false;
     };
     std::array<Pair, 2> pairs;
+    std::array<float, 2> cross { 0.5f, 0.5f };
+    std::array<float, kSlots> lastCross { 1.0f, 1.0f, 1.0f, 1.0f };
     std::array<juce::AudioBuffer<float>, kSlots> scratch;
     std::array<std::array<float, 2>, kSlots> lastGain {};
     std::array<Spatializer, kSlots> spat;

@@ -151,6 +151,7 @@ private:
     std::atomic<float>* spMixP = nullptr; std::atomic<float>* spSpkP = nullptr;
     std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
     std::array<std::atomic<float>*, 2> imorphP {};
+    std::array<std::atomic<float>*, 2> xmorphP {};
     Resonator resonator;
     Slicer slicer;
     MelodicDelay delay;

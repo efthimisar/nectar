@@ -620,6 +620,8 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         std::vector<K> row1 { { "Level", levelIds[s], fixedVals[s][0] }, { "Pitch", pitchIds[s], fixedVals[s][1] }, { "Pan", panIds[s], 0.5f } };
         if (s == 0) row1.push_back ({ "Inter", "imorph12", 0.0f });
         if (s == 2) row1.push_back ({ "Inter", "imorph34", 0.0f });
+        if (s == 1) row1.push_back ({ "Cross", "xmorph12", 0.5f });
+        if (s == 3) row1.push_back ({ "Cross", "xmorph34", 0.5f });
         const std::vector<K> row2 { { "Noise", noiseIds[s], fixedVals[s][2] }, { "Hum", humIds[s], fixedVals[s][3] },
                                     { "Low cut", lowCutIds[s], fixedVals[s][4] }, { "Tail", tailIds[s], fixedVals[s][5] } };
         const float spacing = 28.0f;
