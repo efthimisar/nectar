@@ -401,7 +401,7 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
         const int chunk = juce::jmin (kChunk, num - done);
         std::fill (addL.begin(), addL.begin() + chunk, 0.0f);
         std::fill (addR.begin(), addR.begin() + chunk, 0.0f);
-        additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk);
+        additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
         if (v.spectral)
             spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
                                                partnerBuffer (p), p.morph, p.body);

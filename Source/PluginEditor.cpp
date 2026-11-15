@@ -328,15 +328,14 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
     {
         const char* modNames[4][4] = { { "Keep length", "Stretch", "Loop", "Freeze" }, { "Tone", "Focus", "Size", "Morph" },
-                                    { "Model", "Grit", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
+                                    { "Model", "Grit", "Spread", "Noise" }, { "Tune", "Decay", "Material", "Mix" } };
         const char* ids[4][4] = { { "keeplength", "stretch", "loop", "freeze" }, { "bodytone", "bodyfocus", "bodysize", "morph" },
-                                  { "model", "srcrough", "blur", nullptr }, { "restune", "resdecay", "resmat", "resmix" } };
+                                  { "model", "srcrough", "blur", "modelnoise" }, { "restune", "resdecay", "resmat", "resmix" } };
         const float vals[4][4] = { { 0.45f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f },
                                    { 0.50f, 0.30f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
         for (int m = 0; m < 4; ++m)
             for (int k = 0; k < 4; ++k)
             {
-                if (m == 2 && k == 3) continue;
                 const bool dim = false;
                 addKnob (130.0f + (float) m * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f,
                          modNames[m][k], dim, vals[m][k], ids[m][k], m == 0 && k == 2);
@@ -790,7 +789,7 @@ void NektarEditor::renderDesign (Graphics& g)
     const Mod mods[] = {
         { "Time",      juce::CharPointer_UTF8 ("length \xc2\xb7 freeze"), { "Keep length", "Stretch", "Loop" },  { 0.45f, 0.0f, 0.90f } },
         { "Body",      juce::CharPointer_UTF8 ("tone \xc2\xb7 morph"), { "Tone", "Focus", "Size" },     { 0.50f, 0.50f, 0.50f } },
-        { "Source",    juce::CharPointer_UTF8 ("spread"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
+        { "Source",    juce::CharPointer_UTF8 ("model · grit · spread"),             { "Bright", "Blur", "Freeze" },   { 0.50f, 0.0f, 0.0f } },
         { "Resonator", "follows key",                                              { "Tune", "Decay", "Material" },  { 0.62f, 0.85f, 0.42f } },
     };
     for (int m = 0; m < 4; ++m)

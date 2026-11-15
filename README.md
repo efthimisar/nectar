@@ -32,3 +32,9 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Not yet in the additive path: noise residual (sounds softer, no breath/noise), Body, Blur, Morph. Pitch, stretch and freeze work.
 - Linux test: level within 1 dB of original on pads, about 1.4-3.5% of realtime per voice (x86, unoptimised).
 - Open: residual model, partial matching for Morph.
+
+## Step 11B - residual (Noise knob)
+- Analysis also keeps, per frame, the strength of the sound outside the partial peaks (48 log-spaced bands, bins within +-5 of a tracked peak excluded). Idea: stochastic part of Serra & Smith 1990 (details of their method not re-checked here).
+- Source > Noise (0 = none, 1 = original strength) plays it as random-phase shaped noise (1024 FFT, hop 256, overlap-add) following the same position as the sines (stretch, freeze) and scaled with pitch. Noise is crossfaded with Model like the sines.
+- Linux release build: about 0.6-2.2% of realtime per voice with noise; analysis 0.35-0.65 s per sound. Level of sines + noise within 1 dB of the original on the test pads.
+- Not verified by listening. Limitation: bins of tracks that were dropped (weak, short, over the 96 per frame / 8192 cap) count as noise.

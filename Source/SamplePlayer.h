@@ -50,6 +50,7 @@ public:
         float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)
         float morph = 0.0f;      // 0..1 moves the colour (spectral envelope) towards the partner sound
         SpectralBody body;       // Tone / Focus / Size of the spectral envelope (0.5 = untouched)
+        float modelNoise = 0.0f; // 0..1 level of the residual (shaped noise) of the sine model
         float model = 0.0f;      // 0..1 blend from the normal engine to the sine-wave (additive) model
     };
 

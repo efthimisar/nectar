@@ -181,6 +181,62 @@ bool analyseChannel (const float* x, int n, double rate, SineModel::Channel& out
         }
     }
     out.segStart[(size_t) numFrames] = (int) out.segs.size();
+
+    // 5. residual: for each frame the mean power of the bins that are not under a partial peak, per band
+    {
+        constexpr int B = SineModel::kBands;
+        const double fTop = 0.46 * rate;
+        const double ratio = std::pow (fTop / SineModel::kBandLow, 1.0 / B);
+        double winSq = 0.0;
+        for (int i = 0; i < N; ++i) winSq += (double) win[(size_t) i] * win[(size_t) i];
+        out.noise.assign ((size_t) numFrames * B, 0.0f);
+        std::vector<char> masked ((size_t) N / 2 + 1);
+        std::vector<double> sum (B), cnt (B);
+        std::vector<float> pw ((size_t) N / 2 + 1);
+        for (int m = 0; m < numFrames; ++m)
+        {
+            if (cancel != nullptr && cancel->load())
+                return false;
+            for (int i = 0; i < N; ++i) buf[(size_t) i] = x[m * H + i] * win[(size_t) i];
+            std::fill (buf.begin() + N, buf.end(), 0.0f);
+            fft.performRealOnlyForwardTransform (buf.data(), true);
+            for (int k = 0; k <= N / 2; ++k)
+                pw[(size_t) k] = buf[(size_t) (2 * k)] * buf[(size_t) (2 * k)] + buf[(size_t) (2 * k + 1)] * buf[(size_t) (2 * k + 1)];
+            std::fill (masked.begin(), masked.end(), 0);
+            for (auto& e : frames[(size_t) m])
+            {
+                const int kc = (int) std::lround ((double) e.f * N / rate);
+                for (int k = std::max (0, kc - 5); k <= std::min (N / 2, kc + 5); ++k) masked[(size_t) k] = 1;
+            }
+            std::fill (sum.begin(), sum.end(), 0.0);
+            std::fill (cnt.begin(), cnt.end(), 0.0);
+            for (int k = 1; k <= N / 2; ++k)
+            {
+                if (masked[(size_t) k]) continue;
+                const double f = (double) k * rate / N;
+                if (f > fTop) break;
+                const int b = f <= SineModel::kBandLow ? 0 : juce::jmin (B - 1, (int) (std::log (f / SineModel::kBandLow) / std::log (ratio)));
+                sum[(size_t) b] += pw[(size_t) k];
+                cnt[(size_t) b] += 1.0;
+            }
+            float* dst = out.noise.data() + (size_t) m * B;
+            float last = 0.0f;
+            bool haveLast = false;
+            for (int b = 0; b < B; ++b)
+            {
+                if (cnt[(size_t) b] >= 2.0)
+                {
+                    last = (float) std::sqrt (sum[(size_t) b] / cnt[(size_t) b] / winSq);
+                    haveLast = true;
+                }
+                dst[b] = haveLast ? last : 0.0f; // bands with too few free bins take the one below
+            }
+            // first bands that had no value take the first one that has
+            int fb = 0;
+            while (fb < B && cnt[(size_t) fb] < 2.0) ++fb;
+            for (int b = 0; b < fb && fb < B; ++b) dst[b] = dst[fb];
+        }
+    }
     return true;
 }
 } // namespace
@@ -194,6 +250,7 @@ std::shared_ptr<SineModel> SineModel::analyse (const juce::AudioBuffer<float>& x
     if (chans < 1 || n < kFft * 2)
         return m; // too short: no tracks, the voice falls back to the normal engine
     m->ch.resize ((size_t) chans);
+    m->bandRatio = std::pow (0.46 * rate / kBandLow, 1.0 / kBands);
     for (int c = 0; c < chans; ++c)
     {
         int tracks = 0;
