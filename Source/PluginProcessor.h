@@ -158,7 +158,8 @@ private:
     std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
     std::array<std::atomic<float>*, 2> imorphP {};
     std::array<std::atomic<float>*, 2> xmorphP {};
-    Resonator resonator;
+    Resonator resonator, resonatorB;
+    juce::AudioBuffer<float> dryScratch, resBScratch;
     Slicer slicer;
     MelodicDelay delay;
     std::atomic<float>* delTimeP = nullptr;
@@ -183,6 +184,8 @@ private:
     std::atomic<float>* resDecayP = nullptr;
     std::atomic<float>* resMatP = nullptr;
     std::atomic<float>* resMixP = nullptr;
+    std::atomic<float>* resTuneBP = nullptr;
+    std::atomic<float>* resMixBP = nullptr;
     juce::AudioFormatManager formats;
     mutable juce::SpinLock sampleLock;
     std::array<std::shared_ptr<const Sample>, kSlots> currentSamples; // owned by the UI side

@@ -134,3 +134,8 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 ## Snapshots A and B (build 20)
 - The preset menu has "Store snapshot A/B" and "Recall A/B". A snapshot keeps every knob, all modulation routes and the joystick path, so two settings can be compared by ear. The four sounds are not part of a snapshot, and snapshots live in memory only (lost when the plugin closes, not saved with the project): save a preset to keep a setting.
 - Our own simple version for comparing settings; the Neuron manual's snapshot behaviour was not copied.
+
+## Second Resonator, "Mix" (build 21)
+- Resonator B runs beside the first one on the same input (parallel): out = dry + ring A + ring B. New knobs **Tune B** (default +7 semitones, a fifth) and **Mix B** (0 = off) sit just under the Resonator circle; B shares **Decay** and **Material** with A, so one more pair of knobs is all it costs. Both new knobs take modulation like every other knob.
+- Check: B with the same tune as A gives the same level as A; at +7 st it differs; A + B adds up. Measured on a pad sound with a held note.
+- **Not built:** the Neuron's "Chromophonic" and "Dual sphered" modes (the earlier note said they need another architecture, with the resonator inside each slot). They need the manual's description to be built faithfully: send the page if you want them.

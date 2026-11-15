@@ -200,6 +200,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmix", 1 }, "Resonator mix",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restuneb", 1 }, "Resonator B tune",
+                                                         NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 7.0f,
+                                                         juce::AudioParameterFloatAttributes().withLabel ("st")));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmixb", 1 }, "Resonator B mix (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
@@ -261,6 +266,8 @@ NektarProcessor::NektarProcessor()
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
     resMixP = apvts.getRawParameterValue ("resmix");
+    resTuneBP = apvts.getRawParameterValue ("restuneb");
+    resMixBP = apvts.getRawParameterValue ("resmixb");
     filTypeP = apvts.getRawParameterValue ("filtype");
     filCutP = apvts.getRawParameterValue ("filcut");
     filResP = apvts.getRawParameterValue ("filres");
@@ -396,6 +403,9 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         pl.prepare (sampleRate);
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
+    resonatorB.prepare (sampleRate);
+    dryScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
+    resBScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
     slicer.prepare (sampleRate);
     crusher.prepare (sampleRate);
     envStage = 0; envLevel = 0.0f; heldNotes = 0;
@@ -535,7 +545,29 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) }, space);
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
-    resonator.process (buffer, midi, modded (resTuneP), 0.1f * std::pow (80.0f, modded (resDecayP)), modded (resMatP), modded (resMixP));
+    // Resonator B runs beside A on the same input (parallel, "Mix"): out = A + B - dry, so each mix knob keeps its meaning.
+    // B shares Decay and Material with A and has its own Tune and Mix.
+    {
+        const float decaySec = 0.1f * std::pow (80.0f, modded (resDecayP)), mat = modded (resMatP);
+        const float mixB = modded (resMixBP);
+        if (mixB > 0.005f)
+        {
+            const int n = buffer.getNumSamples(), chs = juce::jmin (2, buffer.getNumChannels());
+            if (dryScratch.getNumSamples() < n) { dryScratch.setSize (2, n, false, false, true); resBScratch.setSize (2, n, false, false, true); }
+            for (int c = 0; c < chs; ++c) { dryScratch.copyFrom (c, 0, buffer, c, 0, n); resBScratch.copyFrom (c, 0, buffer, c, 0, n); }
+            juce::AudioBuffer<float> viewB (resBScratch.getArrayOfWritePointers(), chs, n); // only the first n samples
+            resonatorB.process (viewB, midi, modded (resTuneBP), decaySec, mat, mixB);
+            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, modded (resMixP));
+            for (int c = 0; c < juce::jmin (2, buffer.getNumChannels()); ++c)
+                juce::FloatVectorOperations::add (buffer.getWritePointer (c), resBScratch.getReadPointer (c), buffer.getNumSamples()),
+                juce::FloatVectorOperations::subtract (buffer.getWritePointer (c), dryScratch.getReadPointer (c), buffer.getNumSamples());
+        }
+        else
+        {
+            resonatorB.process (buffer, midi, 0.0f, decaySec, mat, 0.0f); // off: lets its strings go
+            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, modded (resMixP));
+        }
+    }
 
     // Filter with character (ladder, SVF, comb, formant)
     charFilter.process (buffer, buffer.getNumSamples(), modded (filTypeP), modded (filCutP), modded (filResP), modded (filMixP));

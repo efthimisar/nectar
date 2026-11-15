@@ -655,6 +655,11 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         addAndMakeVisible (*spacePad);
     }
 
+    {   // Resonator B (parallel to the first): its own Tune and Mix, sharing Decay and Material; just under the Resonator circle
+        const auto rc = moduleCentre (3);
+        addKnob (rc.x - 21.0f, rc.y + 76.0f, 8.0f, "Tune B", false, 0.0f, "restuneb");
+        addKnob (rc.x + 21.0f, rc.y + 76.0f, 8.0f, "Mix B", false, 0.0f, "resmixb");
+    }
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
     constrainer.setFixedAspectRatio ((double) (kDW / kDH));
