@@ -536,9 +536,9 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
                 if (back)
                 {
                     const double f = SineModel::kBodyLow * std::pow (2.0, ((double) b + 0.5) / 12.0);
-                    r *= std::pow (10.0f, -12.0f * p.chromoBack / 20.0f);
-                    if (f > 1000.0) r *= std::pow (10.0f, -4.0f * p.chromoDull * (float) std::log2 (f / 1000.0) / 20.0f);
-                    if (f < 300.0) r *= (float) juce::jlimit (0.0, 1.0, (f - 200.0) / 100.0);
+                    r *= std::pow (10.0f, -12.0f * p.chromoBack * p.chromo / 20.0f); // the back effects grow with the amount
+                    if (f > 1000.0) r *= std::pow (10.0f, -4.0f * p.chromoDull * p.chromo * (float) std::log2 (f / 1000.0) / 20.0f);
+                    if (f < 300.0) r *= (float) (1.0 - (double) p.chromo * (1.0 - juce::jlimit (0.0, 1.0, (f - 200.0) / 100.0)));
                 }
                 g[b] = r;
                 eOut += (double) src[(size_t) b] * (double) r * (double) r;
