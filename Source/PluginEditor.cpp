@@ -331,17 +331,18 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     const float modVals[4][3] = { { 0.45f, 0.0f, 0.0f }, { 0.55f, 0.68f, 0.30f },
                                   { 0.50f, 0.0f, 0.0f }, { 0.62f, 0.85f, 0.42f } };
     for (int m = 0; m < 4; ++m)
-        for (int k = 0; k < 3 && m != 2; ++k)
+        for (int k = 0; k < 3 && m != 2 && m != 3; ++k)
             addKnob (130.0f + (float) m * 185.0f + 34.0f + (float) k * 58.0f, 772.0f + 100.0f, 22.0f,
                      modKnobs[m][k], false, modVals[m][k], (m == 0 && k == 2) ? "loop" : ((m == 0 && k == 0) ? "keeplength" : ((m == 0 && k == 1) ? "stretch" : ((m == 2 && k == 0) ? "bright" : ((m == 2 && k == 1) ? "blur" : ((m == 2 && k == 2) ? "freeze" : nullptr))))), m == 0 && k == 2);
 
     // Spectral module: four smaller knobs (Bright, Morph, Blur, Freeze)
     {
-        const char* names4[4] = { "Bright", "Morph", "Blur", "Freeze" };
-        const char* ids4[4] = { "bright", "morph", "blur", "freeze" };
-        const float vals4[4] = { 0.50f, 0.0f, 0.0f, 0.0f };
-        for (int k = 0; k < 4; ++k)
-            addKnob (130.0f + 2.0f * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f, names4[k], false, vals4[k], ids4[k]);
+        const char* names4[2][4] = { { "Bright", "Morph", "Blur", "Freeze" }, { "Tune", "Decay", "Material", "Mix" } };
+        const char* ids4[2][4] = { { "bright", "morph", "blur", "freeze" }, { "restune", "resdecay", "resmat", "resmix" } };
+        const float vals4[2][4] = { { 0.50f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f } };
+        for (int q = 0; q < 2; ++q)
+            for (int k = 0; k < 4; ++k)
+                addKnob (130.0f + (float) (2 + q) * 185.0f + 30.0f + (float) k * 43.0f, 772.0f + 100.0f, 18.0f, names4[q][k], false, vals4[q][k], ids4[q][k]);
     }
 
     addKnob (740, 30, 13, "", false, 0.6f); // Out (not wired yet)

@@ -81,6 +81,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph", 1 }, "Morph",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restune", 1 }, "Resonator tune",
+                                                         NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
+                                                         juce::AudioParameterFloatAttributes().withLabel ("st")));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resdecay", 1 }, "Resonator decay",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmat", 1 }, "Resonator material",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmix", 1 }, "Resonator mix",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
@@ -119,6 +128,10 @@ NektarProcessor::NektarProcessor()
     blurP = apvts.getRawParameterValue ("blur");
     freezeP = apvts.getRawParameterValue ("freeze");
     morphP = apvts.getRawParameterValue ("morph");
+    resTuneP = apvts.getRawParameterValue ("restune");
+    resDecayP = apvts.getRawParameterValue ("resdecay");
+    resMatP = apvts.getRawParameterValue ("resmat");
+    resMixP = apvts.getRawParameterValue ("resmix");
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -218,6 +231,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int)
     for (auto& pl : players)
         pl.prepare (sampleRate);
     tilt.prepare (sampleRate);
+    resonator.prepare (sampleRate);
     keyboardState.reset();
     if (recordingAllowed && recState.load() == 0)
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
@@ -325,6 +339,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         pl.setVoiceLimit (limit);
         pl.process (buffer, midi, p, false);
     }
+
+    // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
+    resonator.process (buffer, midi, resTuneP->load(), 0.1f * std::pow (80.0f, resDecayP->load()), resMatP->load(), resMixP->load());
 
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((brightP->load() - 0.5f) * 2.0f * 9.0f);

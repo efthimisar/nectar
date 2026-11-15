@@ -5,6 +5,7 @@
 #include <atomic>
 #include "SamplePlayer.h"
 #include "TiltFilter.h"
+#include "Resonator.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -73,6 +74,11 @@ private:
 
     std::array<SamplePlayer, kSlots> players;
     TiltFilter tilt;
+    Resonator resonator;
+    std::atomic<float>* resTuneP = nullptr;
+    std::atomic<float>* resDecayP = nullptr;
+    std::atomic<float>* resMatP = nullptr;
+    std::atomic<float>* resMixP = nullptr;
     juce::AudioFormatManager formats;
     mutable juce::SpinLock sampleLock;
     std::array<std::shared_ptr<const Sample>, kSlots> currentSamples; // owned by the UI side
