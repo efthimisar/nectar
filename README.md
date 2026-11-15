@@ -107,3 +107,10 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - **Slicer 2 / 3**: extra sources on the Slicer's step clock - a 16-step staircase and a fixed 16-step level sequence (our own tables).
 - **CRUSH**: bits 3–16, sample-rate reduction 1–32x, TPDF dither, mix; sits after the Filter, before the Reverb.
 - Right-click a knob to choose any of the sources (LFO 1/2, Slicer, Slicer 2/3, Envelope, Joystick X/Y).
+
+## SPACE: placement around the head (build 16)
+- Each slot has a direction (-180..180 deg, 0 = front, 90 = right) and a distance, set by dragging the numbered dots on the SPACE pad (top view, front at the top). The knobs: Amount (0 = old plain pan, 1 = fully placed), Speakers (check mode), Far (how much distance lowers level and brightness), Back (how dark it gets behind the listener). Direction and distance of every slot can also be modulated.
+- For headphones. Structure after Brown & Duda (1998) *A structural model for binaural sound synthesis*: interaural time difference from Woodworth's spherical-head formula (Duda & Martens 1998 support it as a good approximation) and a one-pole/one-zero head-shadow filter per ear. The head-shadow coefficients (alpha_min 0.1, 150 deg, ears at 100 deg) are from memory and NEED CHECKING against the paper. Darker sound behind, and the distance law (level and high-frequency loss) are our own design.
+- Speakers mode: plain pan from the direction plus distance and back darkening, no time or head-shadow cues (they would only colour the sound on speakers).
+- Measured: ITD at 90 deg = 32 samples at 48 kHz (0.67 ms); the slot's stereo width is reduced to mono when placed.
+- The editor is now 1360 wide (the SPACE pad and module sit on the right).

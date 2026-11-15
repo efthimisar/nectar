@@ -74,6 +74,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                              juce::AudioParameterFloatAttributes().withLabel ("s")));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pan" + sfx, 1 }, "Pan" + nm,
                                                              NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+        {
+            static const float defAz[4] = { -60.0f, -20.0f, 20.0f, 60.0f };
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spaz" + sfx, 1 }, "Space direction" + nm,
+                                                                 NormalisableRange<float> (-180.0f, 180.0f, 0.1f), defAz[slot],
+                                                                 juce::AudioParameterFloatAttributes().withLabel ("deg")));
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spdist" + sfx, 1 }, "Space distance" + nm,
+                                                                 NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
+        }
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
@@ -149,6 +157,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crmix", 1 }, "Crusher mix (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spmix", 1 }, "Space amount (0 = plain pan)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "spspk", 1 }, "Space: speaker check mode", false));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spfar", 1 }, "Space: distance effect",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spback", 1 }, "Space: darker behind",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revsize", 1 }, "Reverb note (root pitch)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revdecay", 1 }, "Reverb decay",
@@ -205,6 +220,8 @@ NektarProcessor::NektarProcessor()
         pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
         tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
         panP[(size_t) slot] = apvts.getRawParameterValue ("pan" + sfx);
+        spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
+        spDistP[(size_t) slot] = apvts.getRawParameterValue ("spdist" + sfx);
         noiseP[(size_t) slot] = apvts.getRawParameterValue ("noise" + sfx);
         humP[(size_t) slot] = apvts.getRawParameterValue ("hum" + sfx);
         lowCutP[(size_t) slot] = apvts.getRawParameterValue ("lowcut" + sfx);
@@ -257,6 +274,10 @@ NektarProcessor::NektarProcessor()
     envP[1] = apvts.getRawParameterValue ("envdec");
     envP[2] = apvts.getRawParameterValue ("envsus");
     envP[3] = apvts.getRawParameterValue ("envrel");
+    spMixP = apvts.getRawParameterValue ("spmix");
+    spSpkP = apvts.getRawParameterValue ("spspk");
+    spFarP = apvts.getRawParameterValue ("spfar");
+    spBackP = apvts.getRawParameterValue ("spback");
     joyXP = apvts.getRawParameterValue ("joyx");
     joyYP = apvts.getRawParameterValue ("joyy");
     joyRecP = apvts.getRawParameterValue ("joyrec");
@@ -493,7 +514,17 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         loadedNow[(size_t) slot] = true;
         pans[(size_t) slot] = modded (panP[(size_t) slot]);
     }
-    mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) });
+    SlotMixer::Space space;
+    space.mix = modded (spMixP);
+    space.speakers = spSpkP->load() > 0.5f;
+    space.far = modded (spFarP);
+    space.back = modded (spBackP);
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        space.azDeg[(size_t) slot] = modded (spAzP[(size_t) slot]);
+        space.dist[(size_t) slot] = modded (spDistP[(size_t) slot]);
+    }
+    mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) }, space);
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
     resonator.process (buffer, midi, modded (resTuneP), 0.1f * std::pow (80.0f, modded (resDecayP)), modded (resMatP), modded (resMixP));

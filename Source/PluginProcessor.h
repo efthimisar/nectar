@@ -141,6 +141,9 @@ private:
     std::atomic<float>* crDitherP = nullptr; std::atomic<float>* crMixP = nullptr;
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> panP {};
+    std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
+    std::atomic<float>* spMixP = nullptr; std::atomic<float>* spSpkP = nullptr;
+    std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
     std::array<std::atomic<float>*, 2> imorphP {};
     Resonator resonator;
     Slicer slicer;

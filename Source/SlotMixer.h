@@ -2,6 +2,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <array>
 #include <cmath>
+#include "Spatializer.h"
 
 // Mixes the four slots: pan (balance) per slot and "Intermorph" per pair of slots.
 // Intermorph: the low band of the first slot of a pair (1 or 3) plus the high band of the second (2 or 4), split by a
@@ -24,6 +25,10 @@ public:
         }
         for (auto& b : scratch)
             b.setSize (2, juce::jmax (1, maxBlock));
+        for (auto& sp : spat) sp.prepare (sampleRate);
+        spatActive = {};
+        mono.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
+        binL = mono; binR = mono;
         lastGain = {};
         for (auto& g : lastGain) g = { 1.0f, 1.0f };
     }
@@ -49,19 +54,72 @@ public:
         return juce::AudioBuffer<float> (b.getArrayOfWritePointers(), 2, numSamples);
     }
 
-    // Adds the slots to `out`. loaded[s]: the slot was rendered into its scratch buffer. imorph[pair]: 0 = off.
+    // Placement of the four slots around the listener (see Spatializer). mix 0 = plain pan, 1 = fully placed.
+    struct Space
+    {
+        float mix = 0.0f, far = 0.5f, back = 0.7f;
+        bool speakers = false;
+        std::array<float, kSlots> azDeg { -60.0f, -20.0f, 20.0f, 60.0f };
+        std::array<float, kSlots> dist { 0.3f, 0.3f, 0.3f, 0.3f };
+    };
+
+    // without placement (plain pan only)
     void mix (juce::AudioBuffer<float>& out, int numSamples, const std::array<bool, kSlots>& loaded,
               const std::array<float, kSlots>& pan, const std::array<float, 2>& imorph)
+    {
+        mix (out, numSamples, loaded, pan, imorph, Space());
+    }
+
+    // Adds the slots to `out`. loaded[s]: the slot was rendered into its scratch buffer. imorph[pair]: 0 = off.
+    void mix (juce::AudioBuffer<float>& out, int numSamples, const std::array<bool, kSlots>& loaded,
+              const std::array<float, kSlots>& pan, const std::array<float, 2>& imorph,
+              const Space& space)
     {
         for (int s = 0; s < kSlots; ++s)
         {
             if (! loaded[(size_t) s]) continue;
             auto& b = scratch[(size_t) s];
+            const bool placed = space.mix > 0.001f;
+            if (placed)
+            {
+                if (mono.size() < (size_t) numSamples)
+                {
+                    mono.resize ((size_t) numSamples);
+                    binL.resize ((size_t) numSamples);
+                    binR.resize ((size_t) numSamples);
+                }
+                const float* l = b.getReadPointer (0);
+                const float* r = b.getReadPointer (1);
+                for (int i = 0; i < numSamples; ++i) mono[(size_t) i] = 0.5f * (l[i] + r[i]);
+                Spatializer::Params sp;
+                sp.azDeg = space.azDeg[(size_t) s];
+                sp.dist = space.dist[(size_t) s];
+                sp.far = space.far;
+                sp.back = space.back;
+                sp.speakers = space.speakers;
+                spat[(size_t) s].process (mono.data(), binL.data(), binR.data(), numSamples, sp);
+                spatActive[(size_t) s] = true;
+            }
+            else if (spatActive[(size_t) s])
+            {
+                spat[(size_t) s].reset();
+                spatActive[(size_t) s] = false;
+            }
             const auto g = panGains (pan[(size_t) s]);
             for (int c = 0; c < 2; ++c)
             {
                 b.applyGainRamp (c, 0, numSamples, lastGain[(size_t) s][(size_t) c], g[(size_t) c]);
                 lastGain[(size_t) s][(size_t) c] = g[(size_t) c];
+            }
+            if (placed)
+            {
+                float* l = b.getWritePointer (0);
+                float* r = b.getWritePointer (1);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    l[i] += space.mix * (binL[(size_t) i] - l[i]);
+                    r[i] += space.mix * (binR[(size_t) i] - r[i]);
+                }
             }
         }
         for (int pr = 0; pr < 2; ++pr)
@@ -100,4 +158,7 @@ private:
     std::array<Pair, 2> pairs;
     std::array<juce::AudioBuffer<float>, kSlots> scratch;
     std::array<std::array<float, 2>, kSlots> lastGain {};
+    std::array<Spatializer, kSlots> spat;
+    std::array<bool, kSlots> spatActive {};
+    std::vector<float> mono, binL, binR;
 };

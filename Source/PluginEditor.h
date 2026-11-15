@@ -60,6 +60,21 @@ private:
     NektarProcessor& proc;
 };
 
+// Top view of the listener with the four slots as numbered dots: direction = angle, distance = radius.
+class SpacePad : public juce::Component
+{
+public:
+    explicit SpacePad (NektarProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::DraggingHandCursor); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void setDot (int slot, juce::Point<float> pos);
+    NektarProcessor& proc;
+    int dragging = -1;
+};
+
 class RecordHud : public juce::Component
 {
 public:
@@ -115,6 +130,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<RecordHud> hud;
     std::unique_ptr<JoyPad> joyPad;
+    std::unique_ptr<SpacePad> spacePad;
     juce::Point<float> joyPadCentre;
     juce::String message;
     std::set<int> heldNotes;

@@ -10,7 +10,7 @@ namespace
 const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark (0xff2a2826);
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
-constexpr float kDW = 1100.0f, kDH = 665.0f;   // design space of the editor (wide)
+constexpr float kDW = 1360.0f, kDH = 665.0f;   // design space of the editor (wide)
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
@@ -34,15 +34,18 @@ const ModuleDef kModules[] = {
     { "CRUSH",     "bits \xc2\xb7 rate",              0xffd9a066, { "Bits", "Rate", "Dither", "Mix" },             { "crbits", "crrate", "crdither", "crmix" } },
     { "ENV",       "ADSR from keys",                 0xffb08fd8, { "Attack", "Decay", "Sustain", "Release" },     { "envatk", "envdec", "envsus", "envrel" } },
     { "JOY",       "x \xc2\xb7 y \xc2\xb7 path",       0xff8fd8b0, { "Rec", "Play", "", "" },                        { "joyrec", "joyplay", nullptr, nullptr } },
+    { "SPACE",     "around the head",                0xff7ec8e3, { "Amount", "Speakers", "Far", "Back" },         { "spmix", "spspk", "spfar", "spback" } },
 };
-constexpr int kNumModules = 12;
+constexpr int kNumModules = 13;
+constexpr float kSpaceX = 1218.0f, kSpaceY = 228.0f, kSpaceR = 100.0f; // the placement pad (top view of the listener)
 constexpr int kJoyModule = 11;
 // four pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
 // (place 0 = top, 1 = bottom left, 2 = bottom right)
-constexpr int kModPlace[12][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
+constexpr int kModPlace[13][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
                                    { 1, 1 }, { 1, 0 }, { 2, 0 },   // Resonator, Filter, Reverb
                                    { 2, 1 }, { 3, 0 }, { 2, 2 },   // Delay, LFO, Slicer
-                                   { 1, 2 }, { 3, 1 }, { 3, 2 } }; // Crush, Env, Joy
+                                   { 1, 2 }, { 3, 1 }, { 3, 2 },    // Crush, Env, Joy
+                                   { 4, 0 } };                        // Space
 juce::Point<float> moduleCentre (int m)
 {
     const float x = 150.0f + 267.0f * (float) kModPlace[m][0];
@@ -61,7 +64,7 @@ juce::Point<float> moduleKnobCentre (int m, int k)
         return { c.x + (k == 0 ? -26.0f : 26.0f), c.y + 24.0f };
     return { c.x + dx[k], c.y + dy[k] };
 }
-bool isToggleId (const juce::String& id) { return id == "loop" || id == "joyrec" || id == "joyplay"; }
+bool isToggleId (const juce::String& id) { return id == "loop" || id == "joyrec" || id == "joyplay" || id == "spspk"; }
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -479,6 +482,100 @@ void JoyPad::mouseUp (const juce::MouseEvent&)
     if (auto* py = proc.apvts.getParameter ("joyy")) py->endChangeGesture();
 }
 
+// ------------------------------------------------------------------ SpacePad
+namespace
+{
+juce::Point<float> spaceDotPos (float azDeg, float dist, float R)
+{
+    const float a = juce::degreesToRadians (azDeg), r = (0.12f + 0.88f * dist) * R * 0.92f;
+    return { R + std::sin (a) * r, R - std::cos (a) * r }; // up = in front of the listener
+}
+}
+
+void SpacePad::paint (Graphics& g)
+{
+    const float R = (float) getWidth() * 0.5f;
+    g.setColour (Colour (0xff1e1d1b));
+    g.fillEllipse (1.0f, 1.0f, 2 * R - 2.0f, 2 * R - 2.0f);
+    g.setColour (Colour (0xff7ec8e3).withAlpha (0.8f));
+    g.drawEllipse (1.0f, 1.0f, 2 * R - 2.0f, 2 * R - 2.0f, 1.6f);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    for (float f : { 0.36f, 0.68f })
+        g.drawEllipse (R - R * f, R - R * f, 2 * R * f, 2 * R * f, 1.0f);
+    g.drawLine (R, 4, R, 2 * R - 4, 1.0f);
+    g.drawLine (4, R, 2 * R - 4, R, 1.0f);
+    g.setColour (Colour (0xff7ec8e3).withAlpha (0.7f));
+    g.setFont (juce::Font (juce::FontOptions (11.0f)));
+    g.drawText ("front", juce::Rectangle<float> (R - 25, 5, 50, 13), juce::Justification::centred);
+    g.drawText ("back", juce::Rectangle<float> (R - 25, 2 * R - 18, 50, 13), juce::Justification::centred);
+    // the listener: a head seen from above, nose up
+    g.setColour (kLight);
+    g.fillEllipse (R - 9, R - 9, 18, 18);
+    juce::Path nose;
+    nose.addTriangle (R - 4, R - 8, R + 4, R - 8, R, R - 15);
+    g.fillPath (nose);
+    for (int s = 0; s < 4; ++s)
+    {
+        const auto az = proc.apvts.getRawParameterValue (s == 0 ? "spaz" : "spaz" + juce::String (s + 1))->load();
+        const auto di = proc.apvts.getRawParameterValue (s == 0 ? "spdist" : "spdist" + juce::String (s + 1))->load();
+        const auto p = spaceDotPos (az, di, R);
+        g.setColour (kWada[s % 5].withAlpha (s == dragging ? 1.0f : 0.92f));
+        g.fillEllipse (p.x - 9.5f, p.y - 9.5f, 19, 19);
+        g.setColour (kDark);
+        g.setFont (juce::Font (juce::FontOptions (12.0f).withStyle ("Bold")));
+        g.drawText (juce::String (s + 1), juce::Rectangle<float> (p.x - 9.5f, p.y - 9.5f, 19, 19), juce::Justification::centred);
+    }
+}
+
+void SpacePad::setDot (int s, juce::Point<float> pos)
+{
+    const float R = (float) getWidth() * 0.5f;
+    float dx = (pos.x - R) / (R * 0.92f), dy = (R - pos.y) / (R * 0.92f);
+    const float len = std::sqrt (dx * dx + dy * dy);
+    const float azDeg = juce::radiansToDegrees (std::atan2 (dx, dy));
+    const float dist = juce::jlimit (0.0f, 1.0f, (juce::jmin (len, 1.0f) - 0.12f) / 0.88f);
+    const juce::String sfx = s == 0 ? juce::String() : juce::String (s + 1);
+    if (auto* pa = proc.apvts.getParameter ("spaz" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 (azDeg));
+    if (auto* pd = proc.apvts.getParameter ("spdist" + sfx)) pd->setValueNotifyingHost (pd->convertTo0to1 (dist));
+}
+
+void SpacePad::mouseDown (const juce::MouseEvent& e)
+{
+    const float R = (float) getWidth() * 0.5f;
+    dragging = -1;
+    float best = 22.0f * R / 100.0f;
+    for (int s = 0; s < 4; ++s)
+    {
+        const auto az = proc.apvts.getRawParameterValue (s == 0 ? "spaz" : "spaz" + juce::String (s + 1))->load();
+        const auto di = proc.apvts.getRawParameterValue (s == 0 ? "spdist" : "spdist" + juce::String (s + 1))->load();
+        const float d = e.position.getDistanceFrom (spaceDotPos (az, di, R));
+        if (d < best) { best = d; dragging = s; }
+    }
+    if (dragging >= 0)
+    {
+        const juce::String sfx = dragging == 0 ? juce::String() : juce::String (dragging + 1);
+        if (auto* pa = proc.apvts.getParameter ("spaz" + sfx)) pa->beginChangeGesture();
+        if (auto* pd = proc.apvts.getParameter ("spdist" + sfx)) pd->beginChangeGesture();
+        setDot (dragging, e.position);
+    }
+}
+void SpacePad::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragging >= 0) setDot (dragging, e.position);
+    repaint();
+}
+void SpacePad::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging >= 0)
+    {
+        const juce::String sfx = dragging == 0 ? juce::String() : juce::String (dragging + 1);
+        if (auto* pa = proc.apvts.getParameter ("spaz" + sfx)) pa->endChangeGesture();
+        if (auto* pd = proc.apvts.getParameter ("spdist" + sfx)) pd->endChangeGesture();
+    }
+    dragging = -1;
+    repaint();
+}
+
 NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p), proc (p)
 {
     regular = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoRegular_ttf, BinaryData::CarlitoRegular_ttfSize);
@@ -535,6 +632,8 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         joyPad = std::make_unique<JoyPad> (proc);
         joyPadCentre = { c.x, c.y - 14.0f };
         addAndMakeVisible (*joyPad);
+        spacePad = std::make_unique<SpacePad> (proc);
+        addAndMakeVisible (*spacePad);
     }
 
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
@@ -549,7 +648,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     hud = std::make_unique<RecordHud> (proc, regular);
     addAndMakeVisible (*hud);
     startTimerHz (20);
-    setSize (1200, (int) (1200.0f * kDH / kDW));
+    setSize (1360, (int) (1360.0f * kDH / kDW));
     grabKeyboardFocus();
 }
 
@@ -583,6 +682,9 @@ void NektarEditor::resized()
         k->setBounds (juce::Rectangle<float> ((c.x - KnobComponent::kWidth / 2.0f) * s, (c.y - r) * s,
                                               KnobComponent::kWidth * s, k->height() * s).toNearestInt());
     }
+    if (spacePad != nullptr)
+        spacePad->setBounds (juce::Rectangle<float> ((kSpaceX - kSpaceR) * s, (kSpaceY - kSpaceR) * s,
+                                                     2 * kSpaceR * s, 2 * kSpaceR * s).toNearestInt());
     if (joyPad != nullptr)
         joyPad->setBounds (juce::Rectangle<float> ((joyPadCentre.x - JoyPad::kR) * s, (joyPadCentre.y - JoyPad::kR) * s,
                                                    2 * JoyPad::kR * s, 2 * JoyPad::kR * s).toNearestInt());
@@ -784,6 +886,8 @@ void NektarEditor::timerCallback()
     hudWasRecording = proc.isRecording();
     if (joyPad != nullptr)
         joyPad->repaint();
+    if (spacePad != nullptr)
+        spacePad->repaint();
 }
 
 void NektarEditor::chooseFile (int slot)
