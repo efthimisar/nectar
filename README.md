@@ -67,3 +67,8 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Every knob can take a modulation source: right-click the knob (None / LFO 1 / LFO 2 / Slicer), Shift+drag edits the amount (orange ring).
 - LFO 1 / LFO 2: rate + shape (sine, triangle, saw, square, sample-and-hold). Routes are saved with the state and presets.
 - The editor is now one panel: four slots, library ring, and a 3x3 grid of modules (Filter, Reverb, Delay and Slicer are placeholders until the next steps).
+
+## Step 14C – Slicer
+- Rhythmic gate after the resonator: Rate (1, 2, 4, 8 steps per beat), Pattern (8 own-design 16-step patterns), Smooth (0.3–25 ms edges), Depth (0 = off).
+- Follows the host tempo and position; free-runs at 120 bpm (or the host tempo) when the host is stopped or absent (standalone).
+- The gate is also a modulation source: right-click any knob, choose Slicer.

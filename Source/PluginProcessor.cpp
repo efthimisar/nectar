@@ -111,6 +111,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "shape", 1 }, "LFO " + n + " shape",
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     }
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slrate", 1 }, "Slicer rate",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slpattern", 1 }, "Slicer pattern",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.14f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slsmooth", 1 }, "Slicer smooth",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "sldepth", 1 }, "Slicer depth",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
@@ -183,6 +191,10 @@ NektarProcessor::NektarProcessor()
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
     resMixP = apvts.getRawParameterValue ("resmix");
+    slRateP = apvts.getRawParameterValue ("slrate");
+    slPatP = apvts.getRawParameterValue ("slpattern");
+    slSmoothP = apvts.getRawParameterValue ("slsmooth");
+    slDepthP = apvts.getRawParameterValue ("sldepth");
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -284,6 +296,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         pl.prepare (sampleRate);
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
+    slicer.prepare (sampleRate);
     keyboardState.reset();
     if (recState.load() == 0) // the buffer also serves Resample, which works in the plugin too
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
@@ -407,6 +420,22 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
     resonator.process (buffer, midi, modded (resTuneP), 0.1f * std::pow (80.0f, modded (resDecayP)), modded (resMatP), modded (resMixP));
+
+    // Slicer: rhythmic gate at the host tempo (120 bpm when the host gives none); its gate is also a modulation source
+    {
+        double bpm = 120.0, ppq = -1.0;
+        if (auto* ph = getPlayHead())
+            if (auto pos = ph->getPosition())
+            {
+                if (auto b = pos->getBpm()) bpm = *b;
+                if (pos->getIsPlaying())
+                    if (auto q = pos->getPpqPosition()) ppq = *q;
+            }
+        const float g = slicer.process (buffer, buffer.getNumSamples(), modded (slRateP), modded (slPatP), modded (slSmoothP),
+                                        modded (slDepthP), bpm, ppq);
+        modVal[(size_t) kModSlicer] = g * 2.0f - 1.0f; // used by the next block
+        modShown[(size_t) kModSlicer].store (g * 2.0f - 1.0f);
+    }
 
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);

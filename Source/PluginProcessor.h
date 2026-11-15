@@ -6,6 +6,7 @@
 #include "SamplePlayer.h"
 #include "TiltFilter.h"
 #include "SlotMixer.h"
+#include "Slicer.h"
 #include <unordered_map>
 #include <string>
 #include "Resonator.h"
@@ -118,6 +119,11 @@ private:
     std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, 2> imorphP {};
     Resonator resonator;
+    Slicer slicer;
+    std::atomic<float>* slRateP = nullptr;
+    std::atomic<float>* slPatP = nullptr;
+    std::atomic<float>* slSmoothP = nullptr;
+    std::atomic<float>* slDepthP = nullptr;
     std::atomic<float>* resTuneP = nullptr;
     std::atomic<float>* resDecayP = nullptr;
     std::atomic<float>* resMatP = nullptr;

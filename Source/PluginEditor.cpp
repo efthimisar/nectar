@@ -27,7 +27,7 @@ const ModuleDef kModules[] = {
     { "REVERB",    "shimmer \xc2\xb7 tuned",       0xff8fb8de, { "Size", "Decay", "Shimmer", "Mix" },           { nullptr, nullptr, nullptr, nullptr } },
     { "DELAY",     "pitch per repeat",               0xfff2cc8f, { "Time", "Feedback", "Pitch", "Mix" },          { nullptr, nullptr, nullptr, nullptr } },
     { "LFO",       "1 \xc2\xb7 2",                 0xfff4a6c0, { "Rate 1", "Shape 1", "Rate 2", "Shape 2" },    { "lfo1rate", "lfo1shape", "lfo2rate", "lfo2shape" } },
-    { "SLICER",    "rhythmic gate",                  0xff9bc89b, { "Rate", "Pattern", "Smooth", "Depth" },        { nullptr, nullptr, nullptr, nullptr } },
+    { "SLICER",    "rhythmic gate",                  0xff9bc89b, { "Rate", "Pattern", "Smooth", "Depth" },        { "slrate", "slpattern", "slsmooth", "sldepth" } },
 };
 constexpr int kNumModules = 9;
 constexpr float kGridX = 30.0f, kGridY = 566.0f, kGridW = 940.0f, kGridH = 418.0f, kGridPad = 12.0f, kGridGap = 10.0f;
