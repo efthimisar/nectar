@@ -45,20 +45,20 @@ constexpr int kModPlace[12][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body
                                    { 1, 2 }, { 3, 1 }, { 3, 2 } }; // Crush, Env, Joy
 juce::Point<float> moduleCentre (int m)
 {
-    const float x = 137.5f + 275.0f * (float) kModPlace[m][0];
+    const float x = 150.0f + 267.0f * (float) kModPlace[m][0];
     switch (kModPlace[m][1])
     {
-        case 0:  return { x, 455.0f };
-        case 1:  return { x - 64.0f, 570.0f };
-        default: return { x + 64.0f, 570.0f };
+        case 0:  return { x, 461.0f };
+        case 1:  return { x - 64.0f, 575.0f };
+        default: return { x + 64.0f, 575.0f };
     }
 }
 juce::Point<float> moduleKnobCentre (int m, int k)
 {
-    static const float dx[4] = { -23.0f, 23.0f, -23.0f, 23.0f }, dy[4] = { -28.0f, -28.0f, 25.0f, 25.0f };
+    static const float dx[4] = { -23.0f, 23.0f, -23.0f, 23.0f }, dy[4] = { -29.0f, -29.0f, 21.0f, 21.0f };
     const auto c = moduleCentre (m);
     if (m == kJoyModule) // Rec and Play sit side by side below the pad
-        return { c.x + (k == 0 ? -26.0f : 26.0f), c.y + 26.0f };
+        return { c.x + (k == 0 ? -26.0f : 26.0f), c.y + 24.0f };
     return { c.x + dx[k], c.y + dy[k] };
 }
 bool isToggleId (const juce::String& id) { return id == "loop" || id == "joyrec" || id == "joyplay"; }
@@ -1060,6 +1060,18 @@ void NektarEditor::renderDesign (Graphics& g)
         g.restoreState();
     }
     (void) p3;
+
+    // ---- backdrop of the module area: a darker rounded plate, so the lower circles read as one separate zone
+    {
+        const juce::Rectangle<float> plate (8.0f, 396.0f, kDW - 16.0f, 255.0f);
+        g.setGradientFill (ColourGradient (Colour (0xff6b6454).withAlpha (0.55f), 0, plate.getY(),
+                                           Colour (0xff4d4739).withAlpha (0.55f), 0, plate.getBottom(), false));
+        g.fillRoundedRectangle (plate, 34.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.drawRoundedRectangle (plate.reduced (0.5f), 34.0f, 1.2f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawRoundedRectangle (plate.translated (0, 1.2f).reduced (1.5f), 33.0f, 1.0f);
+    }
 
     // ---- nine modules: round, in three pyramids of three
     for (int m = 0; m < kNumModules; ++m)
