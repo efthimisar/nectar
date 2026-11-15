@@ -89,3 +89,6 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Pitch: every repeat is shifted again by the same number of semitones (-12 .. +12, centre = off), so repeats climb or fall like a melody. Each repeat is also darker. Feedback up to 0.92, with a soft limiter in the loop.
 - The pitch shifter (two crossfaded read taps) is our own simple implementation. Measured: with +12 the repeats of a 440 Hz tone were at 440, 862, 1704, 3386 Hz; with -6 at 440, 312, 222, 158 Hz.
 - Mix = 0 switches it off. Order after the reverb and before the slicer.
+
+## UI: wide layout with size hierarchy
+- Window is now wide (1100 x 665 design units, default 1200 px wide, aspect locked). Hierarchy by size: Library ring largest, four slots medium, nine round modules smallest in three pyramids of three (Source/Time/Body, Filter/Resonator/Slicer, Reverb/Delay/LFO). Top row: Slot 1, Slot 2, Library, Slot 3, Slot 4.

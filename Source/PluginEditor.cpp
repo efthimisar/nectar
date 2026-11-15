@@ -10,11 +10,14 @@ namespace
 const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark (0xff2a2826);
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
-constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f;
-constexpr float kSlotScale = 0.8f;   // the slot discs and the centre are drawn at 80 % so that the module grid fits below
-constexpr float kSlotCx[4] = { 186.0f, 814.0f, 186.0f, 814.0f };
-constexpr float kSlotCy[4] = { 220.0f, 220.0f, 450.0f, 450.0f };
-constexpr float kCentreY = 335.0f;   // centre of the ring and the check screen after scaling
+constexpr float kDW = 1100.0f, kDH = 665.0f;   // design space of the editor (wide)
+constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
+constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
+constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
+constexpr float kLibX = 550.0f, kLibY = 250.0f;
+constexpr float kSlotCx[4] = { 110.0f, 300.0f, 800.0f, 990.0f };
+constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
+constexpr float kModR = 66.0f;                   // module radius
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -30,16 +33,27 @@ const ModuleDef kModules[] = {
     { "SLICER",    "rhythmic gate",                  0xff9bc89b, { "Rate", "Pattern", "Smooth", "Depth" },        { "slrate", "slpattern", "slsmooth", "sldepth" } },
 };
 constexpr int kNumModules = 9;
-constexpr float kGridX = 30.0f, kGridY = 566.0f, kGridW = 940.0f, kGridH = 418.0f, kGridPad = 12.0f, kGridGap = 10.0f;
-juce::Rectangle<float> moduleRect (int m)
+// three pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
+// (place 0 = top, 1 = bottom left, 2 = bottom right)
+constexpr int kModPlace[9][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
+                                  { 1, 1 }, { 1, 0 }, { 2, 0 },   // Resonator, Filter, Reverb
+                                  { 2, 1 }, { 2, 2 }, { 1, 2 } }; // Delay, LFO, Slicer
+juce::Point<float> moduleCentre (int m)
 {
-    const float w = (kGridW - 2 * kGridPad - 2 * kGridGap) / 3.0f, h = (kGridH - 2 * kGridPad - 2 * kGridGap) / 3.0f;
-    return { kGridX + kGridPad + (float) (m % 3) * (w + kGridGap), kGridY + kGridPad + (float) (m / 3) * (h + kGridGap), w, h };
+    const float gx[3] = { 225.0f, 550.0f, 875.0f };
+    const float x = gx[kModPlace[m][0]];
+    switch (kModPlace[m][1])
+    {
+        case 0:  return { x, 462.0f };
+        case 1:  return { x - 74.0f, 576.0f };
+        default: return { x + 74.0f, 576.0f };
+    }
 }
 juce::Point<float> moduleKnobCentre (int m, int k)
 {
-    const auto r = moduleRect (m);
-    return { r.getX() + 10.0f + ((float) k + 0.5f) * ((r.getWidth() - 20.0f) / 4.0f), r.getY() + 52.0f };
+    static const float dx[4] = { -25.0f, 25.0f, -25.0f, 25.0f }, dy[4] = { -30.0f, -30.0f, 27.0f, 27.0f };
+    const auto c = moduleCentre (m);
+    return { c.x + dx[k], c.y + dy[k] };
 }
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
@@ -217,7 +231,7 @@ void KnobComponent::paint (Graphics& g)
     const float s = (float) getWidth() / kWidth;
     g.addTransform (juce::AffineTransform::scale (s));
     const float p = parameter != nullptr ? parameter->getValue() : fixed;
-    nektar::drawKnob (g, typeface, kWidth / 2.0f, radius, radius, p, text, dimmed);
+    nektar::drawKnob (g, typeface, kWidth / 2.0f, radius, radius, p, text, dimmed, juce::jlimit (9.0f, 12.0f, radius * 0.95f));
     if (modProc != nullptr && parameter != nullptr && ! toggle)
     {
         const auto r = modProc->getModRoute (parameter->paramID);
@@ -330,7 +344,7 @@ void KnobComponent::mouseDoubleClick (const juce::MouseEvent&)
 // ------------------------------------------------------------------ live top bar
 void RecordHud::paint (Graphics& g)
 {
-    g.addTransform (juce::AffineTransform::scale ((float) getWidth() / 1000.0f));
+    g.addTransform (juce::AffineTransform::scale ((float) getWidth() / kDW));
     const bool rt = proc.isRecordingRoomTone();
     const bool rs = proc.isResampling();
     const bool rec = proc.isRecording() && ! rt && ! rs;
@@ -435,12 +449,12 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         if (s == 2) row1.push_back ({ "Inter", "imorph34", 0.0f });
         const std::vector<K> row2 { { "Noise", noiseIds[s], fixedVals[s][2] }, { "Hum", humIds[s], fixedVals[s][3] },
                                     { "Low cut", lowCutIds[s], fixedVals[s][4] }, { "Tail", tailIds[s], fixedVals[s][5] } };
-        const float spacing = 33.0f;
+        const float spacing = 28.0f;
         for (int r = 0; r < 2; ++r)
         {
             const auto& row = r == 0 ? row1 : row2;
             for (size_t i = 0; i < row.size(); ++i)
-                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + (r == 0 ? 8.0f : 52.0f), 11.5f,
+                addKnob (slotX[s] + ((float) i - 0.5f * (float) (row.size() - 1)) * spacing, slotY[s] + (r == 0 ? 5.0f : 38.0f), 9.5f,
                          row[i].label, false, row[i].fixed, row[i].id);
         }
     }
@@ -452,14 +466,14 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         {
             const auto& d = kModules[m];
             const auto c = moduleKnobCentre (m, k);
-            addKnob (c.x, c.y, 17.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k], d.id[k] != nullptr && juce::String (d.id[k]) == "loop");
+            addKnob (c.x, c.y, 10.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k], d.id[k] != nullptr && juce::String (d.id[k]) == "loop");
         }
 
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
-    constrainer.setFixedAspectRatio (1.0);
-    constrainer.setMinimumSize (500, 500);
-    constrainer.setMaximumSize (2400, 2400);
+    constrainer.setFixedAspectRatio ((double) (kDW / kDH));
+    constrainer.setMinimumSize (660, (int) (660 * kDH / kDW));
+    constrainer.setMaximumSize (2600, (int) (2600 * kDH / kDW));
     setConstrainer (&constrainer);
     setResizable (true, true);
     setWantsKeyboardFocus (true);
@@ -467,7 +481,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     hud = std::make_unique<RecordHud> (proc, regular);
     addAndMakeVisible (*hud);
     startTimerHz (20);
-    setSize (860, 860);
+    setSize (1200, (int) (1200.0f * kDH / kDW));
     grabKeyboardFocus();
 }
 
@@ -491,7 +505,7 @@ void NektarEditor::addKnob (float cx, float cy, float r, const juce::String& lab
 
 void NektarEditor::resized()
 {
-    const float s = (float) getWidth() / 1000.0f;
+    const float s = (float) getWidth() / kDW;
     hud->setBounds (getLocalBounds());
     for (int i = 0; i < knobs.size(); ++i)
     {
@@ -519,7 +533,7 @@ void NektarEditor::paint (Graphics& g)
     {
         cache = juce::Image (juce::Image::ARGB, pw, ph, true);
         Graphics ig (cache);
-        ig.addTransform (juce::AffineTransform::scale ((float) pw / 1000.0f, (float) ph / 1000.0f));
+        ig.addTransform (juce::AffineTransform::scale ((float) pw / kDW, (float) ph / kDH));
         renderDesign (ig);
         addGrain (cache);
     }
@@ -545,7 +559,7 @@ void NektarEditor::addGrain (juce::Image& img)
 void NektarEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
-    const auto p = e.position / ((float) getWidth() / 1000.0f);
+    const auto p = e.position / ((float) getWidth() / kDW);
     const int slot = slotAt (p);
     if (slot >= 0 && juce::Rectangle<float> (kSlotCx[slot] - 80 * kSlotScale, kSlotCy[slot] - 68 * kSlotScale, 160 * kSlotScale, 46 * kSlotScale).contains (p))
     {
@@ -620,7 +634,7 @@ void NektarEditor::showPresetMenu()
         menu.addItem (2, "(no presets yet)", false);
     juce::Component::SafePointer<NektarEditor> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (
-                            juce::Rectangle<int> ((int) (316 * getWidth() / 1000.0f), (int) (45 * getWidth() / 1000.0f), 64, 4))),
+                            juce::Rectangle<int> ((int) (316 * getWidth() / kDW), (int) (45 * getWidth() / kDW), 64, 4))),
                         [safe, presets] (int result)
     {
         if (safe == nullptr || result == 0)
@@ -716,7 +730,7 @@ bool NektarEditor::isInterestedInFileDrag (const juce::StringArray& files)
 
 void NektarEditor::filesDropped (const juce::StringArray& files, int x, int y)
 {
-    int slot = slotAt (juce::Point<float> ((float) x, (float) y) / ((float) getWidth() / 1000.0f));
+    int slot = slotAt (juce::Point<float> ((float) x, (float) y) / ((float) getWidth() / kDW));
     if (slot < 0)
         slot = selectedSlot;
     selectSlot (slot);
@@ -791,9 +805,9 @@ void NektarEditor::renderDesign (Graphics& g)
     }
 
     // ---- top bar
-    shadowRect (g, { 0, 0, 1000, 60 }, 0, 0.5f, 14, { 0, 6 });
+    shadowRect (g, { 0, 0, kDW, 60 }, 0, 0.5f, 14, { 0, 6 });
     g.setGradientFill (ColourGradient (Colour (0xff353331), 0, 0, Colour (0xff272523), 0, 60, false));
-    g.fillRect (0.0f, 0.0f, 1000.0f, 60.0f);
+    g.fillRect (0.0f, 0.0f, kDW, 60.0f);
 
     g.setColour (kAcc);
     g.setFont (font (bld, 26));
@@ -841,7 +855,7 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setColour (kLight);
     g.setFont (font (reg, 32));
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xce\xbd\xce\xad\xce\xba\xcf\x84\xce\xb1\xcf\x81")),
-                juce::Rectangle<float> (850, 8, 130, 44), juce::Justification::centredRight);
+                juce::Rectangle<float> (kDW - 150.0f, 8, 130, 44), juce::Justification::centredRight);
 
     // ---- style chips
     {
@@ -871,9 +885,9 @@ void NektarEditor::renderDesign (Graphics& g)
         }
     }
 
-    // ---- ring (library map): recessed bowl; the ring and the check screen are drawn at 80 % (kSlotScale)
+    // ---- ring (library map): recessed bowl; the ring and the check screen are drawn smaller (kRingScale)
     g.saveState();
-    g.addTransform (juce::AffineTransform::scale (kSlotScale, kSlotScale, kCx, kCy).translated (0.0f, kCentreY - kCy));
+    g.addTransform (juce::AffineTransform::scale (kRingScale, kRingScale, kCx, kCy).translated (kLibX - kCx, kLibY - kCy));
     g.setColour (juce::Colours::white.withAlpha (0.16f));
     g.fillEllipse (kCx - kRingR + 4, kCy - kRingR + 5, 2 * kRingR, 2 * kRingR);
     g.setGradientFill (ColourGradient (Colour (0xff141312), kCx - 120, kCy - 150, Colour (0xff2a2826), kCx + 200, kCy + 230, true));
@@ -961,25 +975,19 @@ void NektarEditor::renderDesign (Graphics& g)
     }
     (void) p3;
 
-    // ---- module panel: nine modules in one panel (3 x 3)
-    shadowRect (g, { kGridX, kGridY, kGridW, kGridH }, 16, 0.55f, 26, { 10, 14 });
-    g.setGradientFill (ColourGradient (Colour (0xff393735), kGridX, kGridY, Colour (0xff242220), kGridX + kGridW, kGridY + kGridH, false));
-    g.fillRoundedRectangle (kGridX, kGridY, kGridW, kGridH, 16);
-    g.setColour (juce::Colours::white.withAlpha (0.06f));
-    g.drawRoundedRectangle (kGridX + 0.5f, kGridY + 0.5f, kGridW - 1, kGridH - 1, 16, 1.2f);
+    // ---- nine modules: round, in three pyramids of three
     for (int m = 0; m < kNumModules; ++m)
     {
-        const auto r = moduleRect (m);
+        const auto c = moduleCentre (m);
         const Colour col (kModules[m].colour);
-        g.setColour (Colour (0xff2b2927));
-        g.fillRoundedRectangle (r, 12);
+        shadowCircle (g, c.x, c.y, kModR, 0.5f, 22, { 8, 12 });
+        g.setGradientFill (ColourGradient (Colour (0xff3d3b39), c.x - kModR * 0.6f, c.y - kModR * 0.7f,
+                                           Colour (0xff222120), c.x + kModR * 0.7f, c.y + kModR, false));
+        g.fillEllipse (c.x - kModR, c.y - kModR, 2 * kModR, 2 * kModR);
+        g.setColour (col.withAlpha (0.85f));
+        g.drawEllipse (c.x - kModR + 1.5f, c.y - kModR + 1.5f, 2 * kModR - 3.0f, 2 * kModR - 3.0f, 2.0f);
         g.setColour (col);
-        g.fillRoundedRectangle (r.getX() + 12, r.getY(), r.getWidth() - 24, 2.0f, 1.0f);
-        g.setFont (font (bld, 14));
-        g.drawText (kModules[m].title, juce::Rectangle<float> (r.getX() + 12, r.getY() + 6, 110, 20), juce::Justification::centredLeft);
-        g.setColour (kMuted);
-        g.setFont (font (reg, 11));
-        g.drawText (juce::String (juce::CharPointer_UTF8 (kModules[m].sub)), juce::Rectangle<float> (r.getX() + 100, r.getY() + 6, r.getWidth() - 112, 20),
-                    juce::Justification::centredRight);
+        g.setFont (font (bld, 11.5f));
+        g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 4, 100, 16), juce::Justification::centred);
     }
 }
