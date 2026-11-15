@@ -845,6 +845,60 @@ juce::Array<juce::File> NektarProcessor::listPresets()
     return files;
 }
 
+juce::String NektarProcessor::renamePreset (const juce::File& file, const juce::String& newName)
+{
+    const auto clean = juce::File::createLegalFileName (newName.trim());
+    if (clean.isEmpty())
+        return "Give the preset a name.";
+    const auto target = file.getParentDirectory().getChildFile (clean + ".nektarpreset");
+    if (target == file)
+        return {};
+    if (target.exists())
+        return "A preset with that name already exists.";
+    return file.moveFileTo (target) ? "Renamed to: " + clean : "Could not rename the preset.";
+}
+
+juce::String NektarProcessor::deletePreset (const juce::File& file)
+{
+    const auto name = file.getFileNameWithoutExtension();
+    return file.moveToTrash() ? "Moved to the Trash: " + name : "Could not delete the preset.";
+}
+
+juce::StringArray NektarProcessor::factoryNames()
+{
+    return { "Init (all knobs to default)", "Chromophonic pairs", "Spiral rise", "Slow bloom" };
+}
+
+juce::String NektarProcessor::loadFactory (int index)
+{
+    for (auto* prm : apvts.processor.getParameters())
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (prm))
+            r->setValueNotifyingHost (r->getDefaultValue());
+    readModFromState (juce::ValueTree ("EMPTY")); // no routes, no joystick path
+    auto set = [this] (const char* id, float v)
+    {
+        if (auto* r = apvts.getParameter (id))
+            r->setValueNotifyingHost (r->convertTo0to1 (v));
+    };
+    switch (index)
+    {
+        case 1: // Chromophonic on both pairs
+            set ("chromo12", 1.0f); set ("chromo34", 1.0f);
+            break;
+        case 2: // LFO 1 on the pitch speeding up from very slow to very fast
+            set ("lfo1rate", 3.0f); set ("lfospiral", 0.9f); set ("ramptime", 0.85f); set ("lfo1shape", 0.0f);
+            setModRoute ("pitch", { kModLfo1, 0.12f });
+            break;
+        case 3: // LFO 1 slowly opening the tone, fading in
+            set ("lfo1rate", 0.3f); set ("lfodelay", 0.7f); set ("lfo1shape", 0.0f);
+            setModRoute ("bodytone", { kModLfo1, 0.3f });
+            break;
+        default: break;
+    }
+    const auto names = factoryNames();
+    return "Factory: " + names[juce::jlimit (0, names.size() - 1, index)];
+}
+
 void NektarProcessor::storeSnapshot (int which)
 {
     auto state = apvts.copyState();

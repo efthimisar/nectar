@@ -91,6 +91,10 @@ public:
     juce::String savePreset (const juce::String& name);
     juce::String loadPreset (const juce::File& file);
     static juce::Array<juce::File> listPresets();
+    juce::String renamePreset (const juce::File& file, const juce::String& newName);
+    juce::String deletePreset (const juce::File& file); // to the Trash, so it can be got back
+    static juce::StringArray factoryNames();
+    juce::String loadFactory (int index); // settings only (the sounds in the slots stay)
     std::shared_ptr<const Sample> getSample (int slot) const;
 
     juce::AudioProcessorValueTreeState apvts;

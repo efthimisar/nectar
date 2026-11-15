@@ -855,6 +855,21 @@ void NektarEditor::showPresetMenu()
         menu.addItem (100 + i, presets[i].getFileNameWithoutExtension());
     if (presets.isEmpty())
         menu.addItem (2, "(no presets yet)", false);
+    menu.addSeparator();
+    {
+        juce::PopupMenu factory, rename, remove;
+        const auto fn = NektarProcessor::factoryNames();
+        for (int i = 0; i < fn.size(); ++i)
+            factory.addItem (200 + i, fn[i]);
+        for (int i = 0; i < presets.size(); ++i)
+        {
+            rename.addItem (300 + i, presets[i].getFileNameWithoutExtension());
+            remove.addItem (400 + i, presets[i].getFileNameWithoutExtension());
+        }
+        menu.addSubMenu ("Factory presets", factory);
+        menu.addSubMenu ("Rename preset", rename, ! presets.isEmpty());
+        menu.addSubMenu ("Delete preset (to Trash)", remove, ! presets.isEmpty());
+    }
     juce::Component::SafePointer<NektarEditor> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (
                             juce::Rectangle<int> ((int) (316 * getWidth() / kDW), (int) (45 * getWidth() / kDW), 64, 4))),
@@ -862,6 +877,40 @@ void NektarEditor::showPresetMenu()
     {
         if (safe == nullptr || result == 0)
             return;
+        if (result >= 200 && result < 300)
+        {
+            safe->say (safe->proc.loadFactory (result - 200));
+            return;
+        }
+        if (result >= 300 && result < 400 && result - 300 < presets.size())
+        {
+            const auto file = presets[result - 300];
+            auto* w = new juce::AlertWindow ("Rename preset", "New name:", juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("name", file.getFileNameWithoutExtension(), "");
+            w->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, file] (int r)
+            {
+                if (r == 1 && safe != nullptr)
+                    safe->say (safe->proc.renamePreset (file, w->getTextEditorContents ("name")));
+                delete w;
+            }));
+            return;
+        }
+        if (result >= 400 && result < 500 && result - 400 < presets.size())
+        {
+            const auto file = presets[result - 400];
+            auto* w = new juce::AlertWindow ("Delete preset", "Move \"" + file.getFileNameWithoutExtension() + "\" to the Trash?", juce::MessageBoxIconType::NoIcon);
+            w->addButton ("Move to Trash", 1);
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, file] (int r)
+            {
+                if (r == 1 && safe != nullptr)
+                    safe->say (safe->proc.deletePreset (file));
+                delete w;
+            }));
+            return;
+        }
         if (result >= 100 && result - 100 < presets.size())
         {
             safe->say (safe->proc.loadPreset (presets[result - 100]));
