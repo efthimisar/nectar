@@ -661,26 +661,26 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         addKnob (rc.x - 21.0f, rc.y + 76.0f, 8.0f, "Tune B", false, 0.0f, "restuneb");
         addKnob (rc.x + 21.0f, rc.y + 76.0f, 8.0f, "Mix B", false, 0.0f, "resmixb");
     }
-    {   // Chromophonic, just under the BODY circle: one amount per pair of slots, and Move
-        const auto bc = moduleCentre (1);
-        addKnob (bc.x - 34.0f, bc.y + 76.0f, 7.5f, "Chroma 1+2", false, 0.0f, "chromo12");
-        addKnob (bc.x, bc.y + 76.0f, 7.5f, "Chroma 3+4", false, 0.0f, "chromo34");
-        addKnob (bc.x + 34.0f, bc.y + 76.0f, 7.5f, "Move", false, 0.0f, "chromomove");
-        addKnob (bc.x - 34.0f, bc.y + 112.0f, 7.5f, "Back", false, 0.5f, "chromoback");
-        addKnob (bc.x, bc.y + 112.0f, 7.5f, "Dull", false, 0.5f, "chromodull");
-        addKnob (bc.x + 34.0f, bc.y + 112.0f, 7.5f, "Speed", false, 0.5f, "chromospeed");
+    {   // Chromophonic: two rows of three, in the free space left of the SPACE pad (design units)
+        const float cx = 557.0f;
+        addKnob (cx - 34.0f, 500.0f, 7.5f, "Chr 1+2", false, 0.0f, "chromo12");
+        addKnob (cx, 500.0f, 7.5f, "Chr 3+4", false, 0.0f, "chromo34");
+        addKnob (cx + 34.0f, 500.0f, 7.5f, "Move", false, 0.0f, "chromomove");
+        addKnob (cx - 34.0f, 548.0f, 7.5f, "Back", false, 0.5f, "chromoback");
+        addKnob (cx, 548.0f, 7.5f, "Dull", false, 0.5f, "chromodull");
+        addKnob (cx + 34.0f, 548.0f, 7.5f, "Speed", false, 0.5f, "chromospeed");
     }
-    {   // LFO fade-in / fade-out time, just under the LFO circle
-        const auto lc = moduleCentre (7);
-        addKnob (lc.x - 34.0f, lc.y + 76.0f, 7.5f, "Fade in", false, 0.0f, "lfodelay");
-        addKnob (lc.x, lc.y + 76.0f, 7.5f, "Fade out", false, 0.0f, "lfofade");
-        addKnob (lc.x + 34.0f, lc.y + 76.0f, 7.5f, "Spiral", false, 0.0f, "lfospiral");
+    {   // LFO fade in / fade out / spiral: in the free space between REVERB and LFO
+        const float cx = 1090.0f;
+        addKnob (cx - 34.0f, 470.0f, 7.5f, "Fade in", false, 0.0f, "lfodelay");
+        addKnob (cx, 470.0f, 7.5f, "Fade out", false, 0.0f, "lfofade");
+        addKnob (cx + 34.0f, 470.0f, 7.5f, "Spiral", false, 0.0f, "lfospiral");
     }
     {   // Ramp time, just under the ENV circle
         const auto ec = moduleCentre (10);
         addKnob (ec.x, ec.y + 76.0f, 8.0f, "Ramp", false, 0.4f, "ramptime");
     }
-    addKnob (790, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
+    addKnob (845, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
 
     constrainer.setFixedAspectRatio ((double) (kDW / kDH));
