@@ -45,6 +45,7 @@ struct SineModel
     double rate = 0.0;
     int numTracks = 0;       // largest track id + 1, over the channels
     std::vector<float> body;  // kBodyBins energies (smoothed over +-1/3 octave), empty if the model has no tracks
+    float levelFix = 1.0f;    // gain that makes the sines alone as loud as the sound they were taken from
     double bandRatio = 1.0;  // frequency ratio between neighbouring residual bands
 
     // Slow (a second or so for a minute of stereo): call from a background thread only. Returns nullptr if cancelled.

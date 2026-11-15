@@ -348,6 +348,20 @@ std::shared_ptr<SineModel> SineModel::analyse (const juce::AudioBuffer<float>& x
         labelHarmonics (m->ch[(size_t) c], tracks, rate);
         m->numTracks = std::max (m->numTracks, tracks);
     }
+    // how loud the sines are compared with the sound itself (for Chromophonic, which plays only the sines)
+    {
+        const auto& c0 = m->ch[0];
+        double eMod = 0.0;
+        for (const auto& q : c0.segs) eMod += 0.5 * (double) q.aa * (double) q.aa;
+        eMod /= (double) std::max (1, c0.numFrames);
+        const auto* xs = x.getReadPointer (0);
+        double eOrig = 0.0;
+        const int last = std::min (n, kFirstCentre + c0.numFrames * kHop);
+        for (int i = 0; i < last; ++i) eOrig += (double) xs[i] * (double) xs[i];
+        eOrig /= (double) std::max (1, last);
+        if (eMod > 1.0e-12 && eOrig > 1.0e-12)
+            m->levelFix = (float) std::min (4.0, std::max (0.25, std::sqrt (eOrig / eMod)));
+    }
     // the body: where the partials put their energy, averaged over the whole sound (used by Chromophonic)
     {
         std::vector<double> e ((size_t) kBodyBins, 0.0);

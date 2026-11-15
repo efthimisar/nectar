@@ -210,7 +210,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromo34", 1 }, "Chromophonic 3<>4 (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromomove", 1 }, "Chromophonic move",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromoback", 1 }, "Chromophonic back level",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ramptime", 1 }, "Ramp time (0.05 .. 20 s)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
@@ -279,6 +283,8 @@ NektarProcessor::NektarProcessor()
     chromoP[0] = apvts.getRawParameterValue ("chromo12");
     chromoP[1] = apvts.getRawParameterValue ("chromo34");
     chromoMoveP = apvts.getRawParameterValue ("chromomove");
+    chromoBackP = apvts.getRawParameterValue ("chromoback");
+    chromoDullP = apvts.getRawParameterValue ("chromodull");
     resMixBP = apvts.getRawParameterValue ("resmixb");
     filTypeP = apvts.getRawParameterValue ("filtype");
     filCutP = apvts.getRawParameterValue ("filcut");
@@ -542,6 +548,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             continue;
         p.chromo = modded (chromoP[(size_t) (slot / 2)]);
         p.chromoMove = modded (chromoMoveP);
+        p.chromoBack = modded (chromoBackP);
+        p.chromoDull = modded (chromoDullP);
         p.model = juce::jmax (baseModel, p.chromo); // Chromophonic plays the sine model
         p.level = modded (levelP[(size_t) slot]);
         p.pitchSemis = modded (pitchP[(size_t) slot]);

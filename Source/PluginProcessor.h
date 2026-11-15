@@ -135,6 +135,8 @@ private:
     std::atomic<float>* rampTimeP = nullptr;
     std::array<std::atomic<float>*, 2> chromoP {};
     std::atomic<float>* chromoMoveP = nullptr;
+    std::atomic<float>* chromoBackP = nullptr;
+    std::atomic<float>* chromoDullP = nullptr;
     int heldNotes = 0;
     float lastVel = 0.0f, lastKey = 0.0f; // last note-on: velocity 0..1, key relative to C3 (-1..1 over +-3 octaves)
     int envStage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
