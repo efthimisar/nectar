@@ -239,6 +239,95 @@ bool analyseChannel (const float* x, int n, double rate, SineModel::Channel& out
     }
     return true;
 }
+
+// Finds one fundamental for the whole sound and gives each track the number of the harmonic it sits on.
+// Own design (harmonic-sum with a presence check, so that f0 / 2 does not win), not a published method.
+void labelHarmonics (SineModel::Channel& ch, int tracks, double rate)
+{
+    ch.harm.assign ((size_t) tracks, 0);
+    ch.f0 = 0.0f;
+    ch.harmonicity = 0.0f;
+    const int M = ch.numFrames;
+    if (M < 2 || tracks < 1)
+        return;
+    struct Pk { float f, a; };
+    struct Res { float f0, w; };
+    std::vector<Res> res;
+    double totalW = 0.0;
+    std::vector<Pk> pk;
+    const int step = std::max (1, M / 300);
+    for (int m = 0; m < M - 1; m += step)
+    {
+        pk.clear();
+        for (int s = ch.segStart[(size_t) m]; s < ch.segStart[(size_t) m + 1]; ++s)
+            if (ch.segs[(size_t) s].aa > 0.0f) pk.push_back ({ ch.segs[(size_t) s].fa, ch.segs[(size_t) s].aa });
+        if (pk.size() < 3)
+            continue;
+        std::sort (pk.begin(), pk.end(), [] (const Pk& a, const Pk& b) { return a.a > b.a; });
+        if (pk.size() > 24) pk.resize (24);
+        double tot = 0.0;
+        for (auto& p : pk) tot += (double) p.a * p.a;
+        totalW += tot;
+        float bestScore = 0.0f, bestF0 = 0.0f;
+        for (size_t i = 0; i < std::min<size_t> (4, pk.size()); ++i)
+            for (int k = 1; k <= 4; ++k)
+            {
+                const double f0c = pk[i].f / k;
+                if (f0c < 40.0 || f0c > 2000.0) continue;
+                double matched = 0.0, wsum = 0.0, fsum = 0.0;
+                for (auto& p : pk)
+                {
+                    const int n = (int) std::lround (p.f / f0c);
+                    if (n >= 1 && std::abs (p.f / f0c - n) < std::min (0.025 * n, 0.3))
+                    {
+                        matched += (double) p.a * p.a;
+                        wsum += (double) p.a * p.a;
+                        fsum += (double) p.a * p.a * (p.f / n);
+                    }
+                }
+                const int K = (int) std::min (8.0, std::floor (0.45 * rate / f0c));
+                int present = 0;
+                for (int n = 1; n <= K; ++n)
+                    for (auto& p : pk)
+                        if (std::abs (p.f / f0c - n) < std::min (0.025 * n, 0.3)) { ++present; break; }
+                const float score = (float) ((matched / tot) * ((double) present / std::max (1, K)));
+                if (score > bestScore && wsum > 0.0) { bestScore = score; bestF0 = (float) (fsum / wsum); }
+            }
+        if (bestScore > 0.4f)
+            res.push_back ({ bestF0, (float) tot });
+    }
+    double qualW = 0.0;
+    for (auto& r : res) qualW += r.w;
+    if (res.empty() || qualW < 0.3 * totalW)
+        return;
+    std::sort (res.begin(), res.end(), [] (const Res& a, const Res& b) { return a.f0 < b.f0; });
+    double acc = 0.0;
+    float f0 = res.back().f0;
+    for (auto& r : res) { acc += r.w; if (acc >= 0.5 * qualW) { f0 = r.f0; break; } }
+    ch.f0 = f0;
+
+    std::vector<double> sf ((size_t) tracks, 0.0), sw ((size_t) tracks, 0.0), se ((size_t) tracks, 0.0);
+    for (auto& q : ch.segs)
+    {
+        sf[(size_t) q.track] += (double) q.fa * q.aa;
+        sw[(size_t) q.track] += q.aa;
+        se[(size_t) q.track] += (double) q.aa * q.aa;
+    }
+    double eAll = 0.0, eHarm = 0.0;
+    for (int t = 0; t < tracks; ++t)
+    {
+        eAll += se[(size_t) t];
+        if (sw[(size_t) t] <= 0.0) continue;
+        const double mean = sf[(size_t) t] / sw[(size_t) t];
+        const int n = (int) std::lround (mean / f0);
+        if (n >= 1 && n <= SineModel::kMaxHarm && std::abs (mean / (double) f0 - n) < std::min (0.03 * n, 0.3)) // never wider than 0.3 of the harmonic spacing
+        {
+            ch.harm[(size_t) t] = (unsigned char) n;
+            eHarm += se[(size_t) t];
+        }
+    }
+    ch.harmonicity = eAll > 0.0 ? (float) (eHarm / eAll) : 0.0f;
+}
 } // namespace
 
 std::shared_ptr<SineModel> SineModel::analyse (const juce::AudioBuffer<float>& x, double rate, const std::atomic<bool>* cancel)
@@ -256,6 +345,7 @@ std::shared_ptr<SineModel> SineModel::analyse (const juce::AudioBuffer<float>& x
         int tracks = 0;
         if (! analyseChannel (x.getReadPointer (c), n, rate, m->ch[(size_t) c], tracks, cancel))
             return nullptr;
+        labelHarmonics (m->ch[(size_t) c], tracks, rate);
         m->numTracks = std::max (m->numTracks, tracks);
     }
     return m;

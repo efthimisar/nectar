@@ -187,6 +187,8 @@ void SamplePlayer::prepare (double sampleRate)
     addR.assign ((size_t) kChunk, 0.0f);
     for (auto& a : additives)
         a.prepare();
+    for (auto& a : morphs)
+        a.prepare();
     for (auto& v : voices)
     {
         v.active = false;
@@ -259,15 +261,22 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.startedAt = ++counter;
     v.additive = modelUsable (index, p);
     v.modelMix = p.model;
+    v.morphAdd = v.additive && partnerModelUsable (p);
     // with the model at full strength and nothing else asked of the spectral engine, only the model plays
-    v.spectral = index < kSpectralVoices && (spectralOn (p) || partnerBuffer (p) != nullptr || (v.additive && p.model < 0.99f));
+    v.spectral = index < kSpectralVoices && (v.additive ? p.model < 0.99f : (spectralOn (p) || partnerBuffer (p) != nullptr));
     v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
     v.adsr.noteOn();
 
     if (v.additive)
-        additives[(size_t) index].start ((juce::uint32) (v.startedAt * 2654435761u + (juce::uint32) note));
+    {
+        const auto seed = (juce::uint32) (v.startedAt * 2654435761u + (juce::uint32) note);
+        if (v.morphAdd)
+            morphs[(size_t) index].start (seed);
+        else
+            additives[(size_t) index].start (seed);
+    }
     if (v.spectral)
     {
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
@@ -379,6 +388,12 @@ const juce::AudioBuffer<float>* SamplePlayer::partnerBuffer (const Params& p) co
     return &partner->play;
 }
 
+bool SamplePlayer::partnerModelUsable (const Params& p) const noexcept
+{
+    return p.morph > 0.01f && partner != nullptr && partner->model != nullptr && std::abs (partner->modelRate - sr) < 0.5
+           && ! partner->model->ch.empty() && partner->model->ch[0].numFrames >= 2;
+}
+
 bool SamplePlayer::modelUsable (int index, const Params& p) const noexcept
 {
     return index < kSpectralVoices && p.model > 0.01f && sample != nullptr && sample->model != nullptr
@@ -401,7 +416,15 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
         const int chunk = juce::jmin (kChunk, num - done);
         std::fill (addL.begin(), addL.begin() + chunk, 0.0f);
         std::fill (addR.begin(), addR.begin() + chunk, 0.0f);
-        additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
+        if (v.morphAdd)
+        {
+            // the partner can be swapped or removed while the note plays: then this voice simply goes on silent
+            const auto pm = partner != nullptr ? partner->model : nullptr;
+            if (pm != nullptr && std::abs (partner->modelRate - sr) < 0.5)
+                morphs[(size_t) index].process (*sample->model, *pm, advance, R, p.morph, p.modelNoise, addL.data(), addR.data(), chunk);
+        }
+        else
+            additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
         if (v.spectral)
             spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
                                                partnerBuffer (p), p.morph, p.body);

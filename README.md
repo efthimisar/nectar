@@ -38,3 +38,10 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - Source > Noise (0 = none, 1 = original strength) plays it as random-phase shaped noise (1024 FFT, hop 256, overlap-add) following the same position as the sines (stretch, freeze) and scaled with pitch. Noise is crossfaded with Model like the sines.
 - Linux release build: about 0.6-2.2% of realtime per voice with noise; analysis 0.35-0.65 s per sound. Level of sines + noise within 1 dB of the original on the test pads.
 - Not verified by listening. Limitation: bins of tracks that were dropped (weak, short, over the 96 per frame / 8192 cap) count as noise.
+
+## Step 11C - Morph between two sounds on the sine model
+- With Model > 0 and a partner sound set, the Morph knob now morphs the partials (MorphVoice), at the pitch of the slot's sound. Notes started with Morph at 0 do not pick it up until the next note.
+- Pairing by harmonic number, following the description in Caetano 2021 (frequency interpolated in cents, amplitude linear), simplified. The full Tellman, Haken & Holloway 1995 paper was NOT available; their feature alignment (manual in Lemur) is not implemented. Sounds are read at the same time position, without time alignment.
+- Own design (not published): one f0 per sound (harmonic sum with presence check, median over frames), track labelling within 3% / max 0.3 of a harmonic spacing, "pairable" if both sounds have harmonicity >= 0.5. Otherwise the two sounds are cross-faded (not morphed). Chords and noise stay cross-faded.
+- Tests: synthetic harmonic tones (220 Hz / 1/h against 330 Hz odd harmonics) give exactly the expected partial amplitudes at m = 0, 0.5, 1. On real pads only the analysis numbers and CPU (about 2-3% per voice, Linux release) were checked, not the sound.
+- Known limits: f0 can be wrong for dense or noisy sounds (a door recording got f0 = 44 Hz with harmonicity 0.77); no listening test yet.

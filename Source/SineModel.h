@@ -18,6 +18,7 @@ struct SineModel
     static constexpr int kMaxTracks = 8192;
     static constexpr int kMaxPerFrame = 96;       // the strongest peaks of each frame are kept
     static constexpr int kMinTrackFrames = 4;
+    static constexpr int kMaxHarm = 128;          // highest harmonic number that is labelled
     static constexpr int kBands = 48;             // residual bands, spaced evenly on a log-frequency axis
     static constexpr double kBandLow = 60.0;      // Hz, lower edge of band 0 (below it band 0 is used)
 
@@ -32,6 +33,10 @@ struct SineModel
         // residual: numFrames * kBands values; the standard deviation of white noise that would have the same strength
         // in that band as the sound has outside its partial peaks. Empty if there is none.
         std::vector<float> noise;
+        // harmonic labels (for Morph between two sounds): harm[track] = harmonic number of the track (0 = none)
+        std::vector<unsigned char> harm;
+        float f0 = 0.0f;           // one fundamental for the whole sound in Hz, 0 if none was found
+        float harmonicity = 0.0f;  // share (0..1) of the sine energy that sits on whole multiples of f0
     };
 
     std::vector<Channel> ch; // 1 or 2 channels

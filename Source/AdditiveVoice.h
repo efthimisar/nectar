@@ -12,10 +12,11 @@
 class AdditiveVoice
 {
 public:
-    void prepare()
+    void prepare (bool needSines = true)
     {
         for (auto& p : phase)
-            p.assign ((size_t) SineModel::kMaxTracks, 0.0);
+            p.assign (needSines ? (size_t) SineModel::kMaxTracks : 0, 0.0);
+        sinesReady = needSines;
     }
 
     void start (juce::uint32 seed)
@@ -35,6 +36,8 @@ public:
         if (m.ch.empty() || m.ch[0].numFrames < 2)
             return;
         renderNoise (m, advance, ratio, outL, outR, n, noiseAmount);
+        if (! sinesReady)
+            return;
         constexpr int H = SineModel::kHop;
         const int frames = m.ch[0].numFrames;
         const double invSr = 1.0 / m.rate;
@@ -216,6 +219,7 @@ private:
     double npos = (double) SineModel::kFirstCentre;
     int base = 0, hopIdx = 0;
     bool primed = false;
+    bool sinesReady = true;
     std::vector<double> phase[2];
     double pos = (double) SineModel::kFirstCentre;
 };

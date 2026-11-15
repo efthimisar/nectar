@@ -8,6 +8,7 @@
 #include "SampleCleaner.h"
 #include "SineModel.h"
 #include "AdditiveVoice.h"
+#include "MorphVoice.h"
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
 struct Sample
@@ -91,6 +92,7 @@ private:
         bool active = false;
         bool stretched = false;
         bool spectral = false;
+        bool morphAdd = false; // the sine model is morphed towards the partner sound (MorphVoice)
         bool additive = false; // plays the sine model (alone or blended with the spectral engine)
         float modelMix = 0.0f;
         int note = -1;
@@ -109,12 +111,14 @@ private:
     void renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     void renderAdditive (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);
     bool modelUsable (int index, const Params& p) const noexcept;
+    bool partnerModelUsable (const Params& p) const noexcept;
     void fillInput (Voice& v, int count, const Params& p, float* l, float* r);
 
     std::array<Voice, kVoices> voices;
     std::array<std::unique_ptr<Stretch>, kStretchVoices> stretchers;
     std::array<SpectralStretch, kSpectralVoices> spectrals;
     std::array<AdditiveVoice, kSpectralVoices> additives;
+    std::array<MorphVoice, kSpectralVoices> morphs;
     std::vector<float> inL, inR, outL, outR, specL, specR, addL, addR;
     std::shared_ptr<const Sample> sample, partner;
     double sr = 44100.0;
