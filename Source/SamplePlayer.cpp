@@ -538,7 +538,7 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
                     const double f = SineModel::kBodyLow * std::pow (2.0, ((double) b + 0.5) / 12.0);
                     r *= std::pow (10.0f, -12.0f * p.chromoBack * p.chromo / 20.0f); // the back effects grow with the amount
                     if (f > 1000.0) r *= std::pow (10.0f, -4.0f * p.chromoDull * p.chromo * (float) std::log2 (f / 1000.0) / 20.0f);
-                    if (f < 300.0) r *= (float) (1.0 - (double) p.chromo * juce::jmin (1.0f, 2.0f * p.chromoBack) * (1.0 - juce::jlimit (0.0, 1.0, (f - 200.0) / 100.0))); // low cut goes with Back
+                    if (f < 130.0) r *= (float) (1.0 - (double) p.chromo * juce::jmin (1.0f, 2.0f * p.chromoBack) * (1.0 - juce::jlimit (0.0, 1.0, (f - 80.0) / 50.0))); // only the rumble below ~100 Hz goes (the grain that needed 300 Hz came from STFT)
                 }
                 g[b] = r;
                 eOut += (double) src[(size_t) b] * (double) r * (double) r;
