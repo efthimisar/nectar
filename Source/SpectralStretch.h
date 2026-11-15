@@ -28,6 +28,7 @@ class SpectralStretch
 {
 public:
     using Body = SpectralBody;
+    bool legacyMorph = false; // for tests: the earlier curve-ratio morph
     void prepare (double sampleRate);
     // pos = where in the sample to start (in samples)
     // partner / morph: see process()

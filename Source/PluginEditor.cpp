@@ -328,7 +328,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     // module panel (approved mockup): Time | Body | Source | Resonator, 4 knobs each
     {
         const char* modNames[4][4] = { { "Keep length", "Stretch", "Loop", "Freeze" }, { "Tone", "Focus", "Size", "Morph" },
-                                    { "Harmonic", "Rough", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
+                                    { "Harmonic", "Grit", "Spread", "" }, { "Tune", "Decay", "Material", "Mix" } };
         const char* ids[4][4] = { { "keeplength", "stretch", "loop", "freeze" }, { "bodytone", "bodyfocus", "bodysize", "morph" },
                                   { nullptr, "srcrough", "blur", nullptr }, { "restune", "resdecay", "resmat", "resmix" } };
         const float vals[4][4] = { { 0.45f, 0.0f, 0.0f, 0.0f }, { 0.50f, 0.50f, 0.50f, 0.0f },

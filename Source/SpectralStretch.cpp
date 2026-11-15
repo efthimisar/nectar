@@ -1,3 +1,4 @@
+#include <array>
 #include "SpectralStretch.h"
 #include <cmath>
 
@@ -44,6 +45,72 @@ void SpectralStretch::start (const juce::AudioBuffer<float>& src, double startPo
     // One frame in advance, so that the very first output is already at full level (no slow fade-in).
     makeFrame (src, 1.0, ratio, 0.0f, 0.0f, false, partner, morph, body);
     readIdx = hop; // the next call to process() makes the second frame
+}
+
+namespace
+{
+    // Envelope morph on a perceptual (mel-like) frequency axis, by interpolating log-area ratios of an all-pole fit.
+    // Idea: O'Reilly Regueiro 2010 (McGill MA thesis), who found that cross-fading envelopes flattens the peaks and
+    // leaves the resonances in place, while interpolating reflection coefficients / log-area ratios moves them.
+    constexpr int kWarpPts = 512;
+    constexpr int kLpcOrder = 24;
+
+    struct Lpc
+    {
+        std::array<double, kLpcOrder> k {}; // reflection coefficients
+        double err = 1.0;                  // prediction error power
+    };
+
+    Lpc fitLpc (const std::vector<double>& pw)
+    {
+        std::array<double, kLpcOrder + 1> r {};
+        for (int m = 0; m <= kLpcOrder; ++m)
+        {
+            double a = 0.0;
+            for (int j = 0; j < kWarpPts; ++j)
+                a += pw[(size_t) j] * std::cos (juce::MathConstants<double>::pi * (double) m * ((double) j + 0.5) / (double) kWarpPts);
+            r[(size_t) m] = a;
+        }
+        r[0] *= 1.0001; // small conditioning against ill-posed fits
+        Lpc out;
+        std::array<double, kLpcOrder + 1> a {}, tmp {};
+        a[0] = 1.0;
+        double e = r[0];
+        for (int i = 1; i <= kLpcOrder; ++i)
+        {
+            double acc = r[(size_t) i];
+            for (int j = 1; j < i; ++j) acc += a[(size_t) j] * r[(size_t) (i - j)];
+            const double ki = juce::jlimit (-0.999, 0.999, -acc / e);
+            out.k[(size_t) (i - 1)] = ki;
+            tmp = a;
+            for (int j = 1; j < i; ++j) a[(size_t) j] = tmp[(size_t) j] + ki * tmp[(size_t) (i - j)];
+            a[(size_t) i] = ki;
+            e *= (1.0 - ki * ki);
+        }
+        out.err = e;
+        return out;
+    }
+
+    // power response (up to the error power) of the all-pole model on the warped grid
+    void lpcResponse (const Lpc& l, std::vector<double>& out)
+    {
+        std::array<double, kLpcOrder + 1> a {}, tmp {};
+        a[0] = 1.0;
+        for (int i = 1; i <= kLpcOrder; ++i)
+        {
+            const double ki = l.k[(size_t) (i - 1)];
+            tmp = a;
+            for (int j = 1; j < i; ++j) a[(size_t) j] = tmp[(size_t) j] + ki * tmp[(size_t) (i - j)];
+            a[(size_t) i] = ki;
+        }
+        for (int j = 0; j < kWarpPts; ++j)
+        {
+            const double th = juce::MathConstants<double>::pi * ((double) j + 0.5) / (double) kWarpPts;
+            double re = 0.0, im = 0.0;
+            for (int m = 0; m <= kLpcOrder; ++m) { re += a[(size_t) m] * std::cos (th * m); im -= a[(size_t) m] * std::sin (th * m); }
+            out[(size_t) j] = l.err / juce::jmax (1.0e-12, re * re + im * im);
+        }
+    }
 }
 
 void SpectralStretch::envelope (const float* in, float* out)
@@ -143,12 +210,64 @@ void SpectralStretch::applyMorph (const juce::AudioBuffer<float>& partner, int c
         return; // one of the two is silent here: nothing to morph
     const float flA = 1.0e-3f * maxA, flB = 1.0e-3f * maxB; // floors, so that empty regions do not explode
     double after = 0.0;
-    for (int k = 0; k <= bins; ++k)
+    if (legacyMorph)
     {
-        const float ratio = (envB[(size_t) k] + flB) / (envA[(size_t) k] + flA);
-        const float g = juce::jlimit (0.01f, 100.0f, std::pow (ratio, morph));
-        shifted[(size_t) k] *= g;
-        after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+        for (int k = 0; k <= bins; ++k)
+        {
+            const float ratio = (envB[(size_t) k] + flB) / (envA[(size_t) k] + flA);
+            const float g = juce::jlimit (0.01f, 100.0f, std::pow (ratio, morph));
+            shifted[(size_t) k] *= g;
+            after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+        }
+    }
+    else
+    {
+        // both envelopes on a mel-like axis -> all-pole fits -> interpolate log-area ratios -> gain = morphed / own fit
+        const double binHz = (double) rate / (double) N, f0 = 700.0, fMax = 0.5 * (double) rate;
+        const double uDen = std::log (1.0 + fMax / f0);
+        std::vector<double> pa (kWarpPts), pb (kWarpPts);
+        for (int j = 0; j < kWarpPts; ++j)
+        {
+            const double u = ((double) j + 0.5) / (double) kWarpPts;
+            const double f = f0 * (std::exp (u * uDen) - 1.0);
+            const double pos = juce::jlimit (0.0, (double) bins, f / binHz);
+            const int i0 = juce::jmin (bins - 1, (int) pos);
+            const double fr = pos - i0;
+            const double ea = (double) envA[(size_t) i0] * (1.0 - fr) + (double) envA[(size_t) i0 + 1] * fr + flA;
+            const double eb = (double) envB[(size_t) i0] * (1.0 - fr) + (double) envB[(size_t) i0 + 1] * fr + flB;
+            pa[(size_t) j] = ea * ea;
+            pb[(size_t) j] = eb * eb;
+        }
+        // equal level before fitting, so that only the shape is interpolated
+        double sa = 0.0, sb = 0.0;
+        for (int j = 0; j < kWarpPts; ++j) { sa += pa[(size_t) j]; sb += pb[(size_t) j]; }
+        for (int j = 0; j < kWarpPts; ++j) { pa[(size_t) j] /= sa; pb[(size_t) j] /= sb; }
+        const Lpc la = fitLpc (pa), lb = fitLpc (pb);
+        Lpc lm;
+        for (int i = 0; i < kLpcOrder; ++i)
+        {
+            const double xa = std::log ((1.0 + la.k[(size_t) i]) / (1.0 - la.k[(size_t) i]));
+            const double xb = std::log ((1.0 + lb.k[(size_t) i]) / (1.0 - lb.k[(size_t) i]));
+            lm.k[(size_t) i] = std::tanh (0.5 * ((1.0 - morph) * xa + morph * xb));
+        }
+        lm.err = std::exp ((1.0 - morph) * std::log (la.err) + morph * std::log (lb.err));
+        std::vector<double> ra (kWarpPts), rm (kWarpPts);
+        lpcResponse (la, ra);
+        lpcResponse (lm, rm);
+        std::vector<float> gw ((size_t) kWarpPts);
+        for (int j = 0; j < kWarpPts; ++j)
+            gw[(size_t) j] = (float) std::sqrt (juce::jmax (1.0e-12, rm[(size_t) j]) / juce::jmax (1.0e-12, ra[(size_t) j]));
+        for (int k = 0; k <= bins; ++k)
+        {
+            const double f = (double) k * binHz;
+            const double u = std::log (1.0 + f / f0) / uDen * (double) kWarpPts - 0.5;
+            const double uc = juce::jlimit (0.0, (double) kWarpPts - 1.0, u);
+            const int j0 = juce::jmin (kWarpPts - 2, (int) uc);
+            const float fr = (float) (uc - j0);
+            const float g = juce::jlimit (0.01f, 100.0f, gw[(size_t) j0] * (1.0f - fr) + gw[(size_t) j0 + 1] * fr);
+            shifted[(size_t) k] *= g;
+            after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+        }
     }
     const float fix = (float) std::sqrt (before / juce::jmax (1.0e-20, after)); // the loudness stays that of this sound
     for (int k = 0; k <= bins; ++k) shifted[(size_t) k] *= fix;
