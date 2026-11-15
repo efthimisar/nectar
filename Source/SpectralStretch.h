@@ -13,7 +13,9 @@ struct SpectralBody
     float tone = 0.5f;  // 0 dark ... 1 bright (tilt of the envelope only)
     float focus = 0.5f; // 0 soft / wide ... 1 sharp / narrow (contrast of the envelope)
     float size = 0.5f;  // 0 small (envelope moves up) ... 1 big (envelope moves down)
-    bool active() const noexcept { return std::abs (tone - 0.5f) > 0.01f || std::abs (focus - 0.5f) > 0.01f || std::abs (size - 0.5f) > 0.01f; }
+    float rough = 0.0f; // Source: 0 smooth ... 1 rough (random level jitter per bin, new for every frame)
+    bool shapeActive() const noexcept { return std::abs (tone - 0.5f) > 0.01f || std::abs (focus - 0.5f) > 0.01f || std::abs (size - 0.5f) > 0.01f; }
+    bool active() const noexcept { return shapeActive() || rough > 0.01f; }
 };
 
 // Extreme time stretch, written for Nektar from the published idea of random-phase spectral stretching:

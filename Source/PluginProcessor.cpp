@@ -87,6 +87,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bodysize", 1 }, "Body size",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "srcrough", 1 }, "Source rough",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restune", 1 }, "Resonator tune",
                                                          NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
                                                          juce::AudioParameterFloatAttributes().withLabel ("st")));
@@ -137,6 +139,7 @@ NektarProcessor::NektarProcessor()
     bodyToneP = apvts.getRawParameterValue ("bodytone");
     bodyFocusP = apvts.getRawParameterValue ("bodyfocus");
     bodySizeP = apvts.getRawParameterValue ("bodysize");
+    srcRoughP = apvts.getRawParameterValue ("srcrough");
     resTuneP = apvts.getRawParameterValue ("restune");
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
@@ -329,6 +332,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     p.body.tone = bodyToneP->load();
     p.body.focus = bodyFocusP->load();
     p.body.size = bodySizeP->load();
+    p.body.rough = srcRoughP->load();
     // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());

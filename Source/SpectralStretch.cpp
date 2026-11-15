@@ -193,8 +193,34 @@ void SpectralStretch::makeFrame (const juce::AudioBuffer<float>& src, double str
         if (partner != nullptr && morph > 0.01f && partner->getNumSamples() >= 2)
             applyMorph (*partner, c, morph);
 
-        if (body.active())
+        if (body.shapeActive())
             applyBody (body);
+
+        if (body.rough > 0.01f)
+        {
+            // Rough: every bin gets a random level change per ~60 Hz patch (about 10 dB spread at 1, in patches of ~60 Hz), the loudness is kept
+            const float amt = body.rough * 1.2f;
+            const int spacing = juce::jmax (2, (int) std::lround (60.0 / ((double) rate / (double) N))); // a random level every ~60 Hz
+            double before = 0.0, after = 0.0;
+            float g0 = std::exp (amt * (rng.nextFloat() + rng.nextFloat() + rng.nextFloat() - 1.5f) * 2.0f), g1 = g0;
+            for (int k = 0; k <= bins; ++k)
+            {
+                if (k % spacing == 0)
+                {
+                    g0 = g1;
+                    g1 = std::exp (amt * (rng.nextFloat() + rng.nextFloat() + rng.nextFloat() - 1.5f) * 2.0f);
+                }
+                const float t = (float) (k % spacing) / (float) spacing;
+                before += (double) shifted[(size_t) k] * shifted[(size_t) k];
+                shifted[(size_t) k] *= g0 + (g1 - g0) * t;
+                after += (double) shifted[(size_t) k] * shifted[(size_t) k];
+            }
+            if (after > 1e-20)
+            {
+                const float g = (float) std::sqrt (before / after);
+                for (int k = 0; k <= bins; ++k) shifted[(size_t) k] *= g;
+            }
+        }
 
         if (blur > 0.01f)
         {

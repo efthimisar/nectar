@@ -23,3 +23,4 @@ Next, in this order (each step is tested by ear before the next):
 Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persistence of unsaved recordings and room tone, soft limiter against clipping.
 
 - UI update (approved mockup): modules Time | Body | Source | Resonator, Tilt (ex-Bright) in the top bar, Freeze in Time, Morph in Body, Blur shown as Spread in Source (Harmonic/Rough are placeholders for step 10B).
+- Step 10B (partly): Source Rough = random level patches (~60 Hz) per frame, energy kept; Harmonic stays dim until the sinusoidal model (step 11).
