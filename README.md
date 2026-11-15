@@ -130,3 +130,7 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 ## Crossmorph inside a slot pair (build 19)
 - New **Cross** knob on slots 2 and 4 (one per pair 1+2 and 3+4). Centre = both slots at full level; towards 0 only the first slot sounds, towards 1 only the second. Equal-power law, each side capped at 1, so the centre position leaves the sound unchanged.
 - It is a normal knob, so the Neuron's two crossmorphs are made by routing: **Velocity** to Cross = velocity crossmorph (soft keys one slot, hard keys the other; set the knob at 0 and amount +1 for a full swing). **Envelope** to Cross = dynamic crossmorph (the balance moves with the note's ADSR). This is our reading of the two names, not a copy of the manual.
+
+## Snapshots A and B (build 20)
+- The preset menu has "Store snapshot A/B" and "Recall A/B". A snapshot keeps every knob, all modulation routes and the joystick path, so two settings can be compared by ear. The four sounds are not part of a snapshot, and snapshots live in memory only (lost when the plugin closes, not saved with the project): save a preset to keep a setting.
+- Our own simple version for comparing settings; the Neuron manual's snapshot behaviour was not copied.

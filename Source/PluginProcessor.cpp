@@ -769,6 +769,24 @@ juce::Array<juce::File> NektarProcessor::listPresets()
     return files;
 }
 
+void NektarProcessor::storeSnapshot (int which)
+{
+    auto state = apvts.copyState();
+    addModToState (state);
+    snapshots[(size_t) juce::jlimit (0, 1, which)] = state;
+}
+
+bool NektarProcessor::recallSnapshot (int which)
+{
+    const auto& snap = snapshots[(size_t) juce::jlimit (0, 1, which)];
+    if (! snap.isValid())
+        return false;
+    auto state = snap.createCopy();
+    apvts.replaceState (state);
+    readModFromState (state);
+    return true;
+}
+
 juce::String NektarProcessor::savePreset (const juce::String& name)
 {
     const auto clean = juce::File::createLegalFileName (name.trim());

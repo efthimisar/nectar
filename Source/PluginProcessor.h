@@ -83,6 +83,11 @@ public:
     // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
     // A sound that has no file of its own (a recording, a resample) is written into the library first.
     static juce::File getPresetFolder() { return getLibraryFolder().getChildFile ("Presets"); }
+    // Snapshots A and B (for comparing two settings): all knobs, modulation routes and the joystick path, kept in memory
+    // (not saved with the project, and the four sounds are not part of them).
+    void storeSnapshot (int which);
+    bool hasSnapshot (int which) const { return snapshots[(size_t) juce::jlimit (0, 1, which)].isValid(); }
+    bool recallSnapshot (int which);
     juce::String savePreset (const juce::String& name);
     juce::String loadPreset (const juce::File& file);
     static juce::Array<juce::File> listPresets();
@@ -125,6 +130,7 @@ private:
     juce::Random lfoRng;
     float lfoPrev[2] { 0.0f, 0.0f }, lfoNext[2] { 0.0f, 0.0f };
     // envelope (ADSR) driven by the held keys
+    std::array<juce::ValueTree, 2> snapshots;
     int heldNotes = 0;
     float lastVel = 0.0f, lastKey = 0.0f; // last note-on: velocity 0..1, key relative to C3 (-1..1 over +-3 octaves)
     int envStage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release

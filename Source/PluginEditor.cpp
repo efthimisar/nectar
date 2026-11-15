@@ -819,6 +819,11 @@ void NektarEditor::showPresetMenu()
     juce::PopupMenu menu;
     menu.addItem (1, "Save preset...");
     menu.addSeparator();
+    menu.addItem (3, "Store snapshot A");
+    menu.addItem (4, "Store snapshot B");
+    menu.addItem (5, "Recall A", proc.hasSnapshot (0));
+    menu.addItem (6, "Recall B", proc.hasSnapshot (1));
+    menu.addSeparator();
     const auto presets = NektarProcessor::listPresets();
     for (int i = 0; i < presets.size(); ++i)
         menu.addItem (100 + i, presets[i].getFileNameWithoutExtension());
@@ -834,6 +839,18 @@ void NektarEditor::showPresetMenu()
         if (result >= 100 && result - 100 < presets.size())
         {
             safe->say (safe->proc.loadPreset (presets[result - 100]));
+            return;
+        }
+        if (result == 3 || result == 4)
+        {
+            safe->proc.storeSnapshot (result - 3);
+            safe->say (juce::String ("Stored snapshot ") + (result == 3 ? "A" : "B") + ".");
+            return;
+        }
+        if (result == 5 || result == 6)
+        {
+            safe->proc.recallSnapshot (result - 5);
+            safe->say (juce::String ("Recalled snapshot ") + (result == 5 ? "A" : "B") + ".");
             return;
         }
         if (result == 1)
