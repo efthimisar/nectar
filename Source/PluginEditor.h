@@ -49,7 +49,7 @@ private:
 class JoyPad : public juce::Component
 {
 public:
-    static constexpr float kR = 27.0f; // radius in design units
+    static constexpr float kR = 22.0f; // radius in design units
     explicit JoyPad (NektarProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::CrosshairCursor); }
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;

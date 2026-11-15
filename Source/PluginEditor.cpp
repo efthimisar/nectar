@@ -14,10 +14,10 @@ constexpr float kDW = 1360.0f, kDH = 665.0f;   // design space of the editor (wi
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
-constexpr float kLibX = 550.0f, kLibY = 250.0f;
-constexpr float kSlotCx[4] = { 110.0f, 300.0f, 800.0f, 990.0f };
+constexpr float kLibX = 680.0f, kLibY = 250.0f;
+constexpr float kSlotCx[4] = { 210.0f, 420.0f, 940.0f, 1150.0f };
 constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
-constexpr float kModR = 60.0f;                   // module radius
+constexpr float kModR = 56.0f;                   // module radius
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -37,31 +37,37 @@ const ModuleDef kModules[] = {
     { "SPACE",     "around the head",                0xff7ec8e3, { "Amount", "Speakers", "Far", "Back" },         { "spmix", "spspk", "spfar", "spback" } },
 };
 constexpr int kNumModules = 13;
-constexpr float kSpaceX = 1218.0f, kSpaceY = 228.0f, kSpaceR = 100.0f; // the placement pad (top view of the listener)
+constexpr float kSpaceX = 680.0f, kSpaceY = 474.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
 constexpr int kJoyModule = 11;
 // four pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
 // (place 0 = top, 1 = bottom left, 2 = bottom right)
 constexpr int kModPlace[13][2] = { { 0, 1 }, { 0, 2 }, { 0, 0 },   // Time, Body, Source
                                    { 1, 1 }, { 1, 0 }, { 2, 0 },   // Resonator, Filter, Reverb
                                    { 2, 1 }, { 3, 0 }, { 2, 2 },   // Delay, LFO, Slicer
-                                   { 1, 2 }, { 3, 1 }, { 3, 2 },    // Crush, Env, Joy
-                                   { 4, 0 } };                        // Space
+                                   { 1, 2 }, { 3, 1 }, { 3, 2 },   // Crush, Env, Joy
+                                   { 4, 0 } };                        // Space (centre, no disc: pad above, four knobs below)
+// layout A: mirror symmetric about x = 680. Sound on the left (two pyramids), effects and controls on the right, Space in the middle.
 juce::Point<float> moduleCentre (int m)
 {
-    const float x = 150.0f + 267.0f * (float) kModPlace[m][0];
+    static const float gx[4] = { 140.0f, 395.0f, 965.0f, 1220.0f };
+    if (kModPlace[m][0] == 4)
+        return { 680.0f, 590.0f };
+    const float x = gx[kModPlace[m][0]];
     switch (kModPlace[m][1])
     {
-        case 0:  return { x, 461.0f };
-        case 1:  return { x - 64.0f, 575.0f };
-        default: return { x + 64.0f, 575.0f };
+        case 0:  return { x, 458.0f };
+        case 1:  return { x - 57.0f, 560.0f };
+        default: return { x + 57.0f, 560.0f };
     }
 }
 juce::Point<float> moduleKnobCentre (int m, int k)
 {
-    static const float dx[4] = { -23.0f, 23.0f, -23.0f, 23.0f }, dy[4] = { -29.0f, -29.0f, 21.0f, 21.0f };
+    static const float dx[4] = { -21.0f, 21.0f, -21.0f, 21.0f }, dy[4] = { -28.0f, -28.0f, 17.0f, 17.0f };
     const auto c = moduleCentre (m);
-    if (m == kJoyModule) // Rec and Play sit side by side below the pad
-        return { c.x + (k == 0 ? -26.0f : 26.0f), c.y + 24.0f };
+    if (m == kJoyModule) // Rec and Play side by side below the pad
+        return { c.x + (k == 0 ? -21.0f : 21.0f), c.y + 22.0f };
+    if (kModPlace[m][0] == 4) // Space: the four knobs in a row below the pad
+        return { c.x + ((float) k - 1.5f) * 44.0f, c.y };
     return { c.x + dx[k], c.y + dy[k] };
 }
 bool isToggleId (const juce::String& id) { return id == "loop" || id == "joyrec" || id == "joyplay" || id == "spspk"; }
@@ -543,7 +549,7 @@ void SpacePad::mouseDown (const juce::MouseEvent& e)
 {
     const float R = (float) getWidth() * 0.5f;
     dragging = -1;
-    float best = 22.0f * R / 100.0f;
+    float best = 0.3f * R;
     for (int s = 0; s < 4; ++s)
     {
         const auto az = proc.apvts.getRawParameterValue (s == 0 ? "spaz" : "spaz" + juce::String (s + 1))->load();
@@ -624,13 +630,13 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
             if (m == kJoyModule && k >= 2)
                 continue;
             const auto c = moduleKnobCentre (m, k);
-            addKnob (c.x, c.y, m == kJoyModule ? 8.0f : 10.0f, d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k],
+            addKnob (c.x, c.y, m == kJoyModule ? 7.5f : (kModPlace[m][0] == 4 ? 9.5f : 9.0f), d.knob[k], d.id[k] == nullptr, 0.0f, d.id[k],
                      d.id[k] != nullptr && isToggleId (d.id[k]));
         }
     {
         const auto c = moduleCentre (kJoyModule);
         joyPad = std::make_unique<JoyPad> (proc);
-        joyPadCentre = { c.x, c.y - 14.0f };
+        joyPadCentre = { c.x, c.y - 12.0f };
         addAndMakeVisible (*joyPad);
         spacePad = std::make_unique<SpacePad> (proc);
         addAndMakeVisible (*spacePad);
@@ -1051,7 +1057,7 @@ void NektarEditor::renderDesign (Graphics& g)
     {
         const char* chips[] = { "All", "Glass", "Metal", "Wood", "Paper", "Water", "Voice" };
         const Colour cc[] = { kLight, kWada[0], kWada[1], kWada[2], kWada[3], kWada[2], kWada[0] };
-        float x = 253;
+        float x = 433;
         for (int i = 0; i < 7; ++i)
         {
             const juce::Rectangle<float> r (x, 77, 62, 26);
@@ -1167,7 +1173,7 @@ void NektarEditor::renderDesign (Graphics& g)
 
     // ---- backdrop of the module area: a darker rounded plate, so the lower circles read as one separate zone
     {
-        const juce::Rectangle<float> plate (8.0f, 396.0f, kDW - 16.0f, 255.0f);
+        const juce::Rectangle<float> plate (8.0f, 400.0f, kDW - 16.0f, 252.0f);
         g.setGradientFill (ColourGradient (Colour (0xff6b6454).withAlpha (0.55f), 0, plate.getY(),
                                            Colour (0xff4d4739).withAlpha (0.55f), 0, plate.getBottom(), false));
         g.fillRoundedRectangle (plate, 34.0f);
@@ -1182,6 +1188,13 @@ void NektarEditor::renderDesign (Graphics& g)
     {
         const auto c = moduleCentre (m);
         const Colour col (kModules[m].colour);
+        if (kModPlace[m][0] == 4)
+        {
+            g.setColour (col);
+            g.setFont (font (bld, 11.5f));
+            g.drawText (kModules[m].title, juce::Rectangle<float> (c.x - 50, c.y - 38, 100, 16), juce::Justification::centred);
+            continue;
+        }
         shadowCircle (g, c.x, c.y, kModR, 0.5f, 22, { 8, 12 });
         g.setGradientFill (ColourGradient (Colour (0xff3d3b39), c.x - kModR * 0.6f, c.y - kModR * 0.7f,
                                            Colour (0xff222120), c.x + kModR * 0.7f, c.y + kModR, false));
