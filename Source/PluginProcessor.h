@@ -61,6 +61,13 @@ public:
     float getInputLevel() const { return inputLevel.load(); }
     juce::String saveToLibrary (int slot); // writes the slot as a WAV into the library folder; returns a message
     static juce::File getLibraryFolder();
+
+    // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
+    // A sound that has no file of its own (a recording, a resample) is written into the library first.
+    static juce::File getPresetFolder() { return getLibraryFolder().getChildFile ("Presets"); }
+    juce::String savePreset (const juce::String& name);
+    juce::String loadPreset (const juce::File& file);
+    static juce::Array<juce::File> listPresets();
     std::shared_ptr<const Sample> getSample (int slot) const;
 
     juce::AudioProcessorValueTreeState apvts;

@@ -547,6 +547,71 @@ juce::String NektarProcessor::saveToLibrary (int slot)
     return "Saved: " + file.getFileName();
 }
 
+// ---- presets
+juce::Array<juce::File> NektarProcessor::listPresets()
+{
+    juce::Array<juce::File> files = getPresetFolder().findChildFiles (juce::File::findFiles, false, "*.nektarpreset");
+    files.sort();
+    return files;
+}
+
+juce::String NektarProcessor::savePreset (const juce::String& name)
+{
+    const auto clean = juce::File::createLegalFileName (name.trim());
+    if (clean.isEmpty())
+        return "Give the preset a name.";
+    auto state = apvts.copyState();
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        auto s = getSample (slot);
+        const juce::String key = "samplePath" + juce::String (slot + 1);
+        state.removeProperty (key, nullptr);
+        if (s == nullptr)
+            continue;
+        juce::String path = s->path;
+        if (path.isEmpty() || ! juce::File (path).existsAsFile())
+        {
+            const auto msg = saveToLibrary (slot);
+            if (! msg.startsWith ("Saved: "))
+                return "Could not keep the sound of slot " + juce::String (slot + 1) + ": " + msg;
+            path = getLibraryFolder().getChildFile (msg.fromFirstOccurrenceOf ("Saved: ", false, false)).getFullPathName();
+        }
+        state.setProperty (key, path, nullptr);
+    }
+    if (! getPresetFolder().createDirectory())
+        return "Could not create the presets folder.";
+    const auto file = getPresetFolder().getChildFile (clean + ".nektarpreset");
+    if (auto xml = state.createXml())
+        if (xml->writeTo (file))
+            return "Saved preset: " + clean;
+    return "Could not write the preset.";
+}
+
+juce::String NektarProcessor::loadPreset (const juce::File& file)
+{
+    auto xml = juce::XmlDocument::parse (file);
+    if (xml == nullptr)
+        return "Could not read the preset.";
+    auto state = juce::ValueTree::fromXml (*xml);
+    if (! state.isValid())
+        return "Could not read the preset.";
+    juce::String missing;
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
+        if (path.isNotEmpty() && ! juce::File (path).existsAsFile())
+            missing += (missing.isEmpty() ? "" : ", ") + juce::String (slot + 1);
+    }
+    apvts.replaceState (state);
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
+        if (path.isNotEmpty() && juce::File (path).existsAsFile())
+            loadSample (juce::File (path), slot);
+    }
+    return missing.isEmpty() ? juce::String() : "Sound file missing for slot " + missing + ".";
+}
+
 std::shared_ptr<const Sample> NektarProcessor::getSample (int slot) const
 {
     if (slot < 0 || slot >= kSlots)

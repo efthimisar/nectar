@@ -465,6 +465,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         toggleRoomTone();
     else if (p.getDistanceFrom ({ 497.0f, 30.0f }) <= 22.0f)
         toggleResample();
+    else if (juce::Rectangle<float> (316, 15, 56, 30).contains (p))
+        showPresetMenu();
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
         say (proc.saveToLibrary (selectedSlot));
 }
@@ -508,6 +510,44 @@ void NektarEditor::toggleRecording()
     if (message.isNotEmpty())
         say ({});
     proc.startRecording (selectedSlot);
+}
+
+void NektarEditor::showPresetMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Save preset...");
+    menu.addSeparator();
+    const auto presets = NektarProcessor::listPresets();
+    for (int i = 0; i < presets.size(); ++i)
+        menu.addItem (100 + i, presets[i].getFileNameWithoutExtension());
+    if (presets.isEmpty())
+        menu.addItem (2, "(no presets yet)", false);
+    juce::Component::SafePointer<NektarEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (
+                            juce::Rectangle<int> ((int) (316 * getWidth() / 1000.0f), (int) (45 * getWidth() / 1000.0f), 64, 4))),
+                        [safe, presets] (int result)
+    {
+        if (safe == nullptr || result == 0)
+            return;
+        if (result >= 100 && result - 100 < presets.size())
+        {
+            safe->say (safe->proc.loadPreset (presets[result - 100]));
+            return;
+        }
+        if (result == 1)
+        {
+            auto* w = new juce::AlertWindow ("Save preset", "Name of the preset:", juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("name", "", "");
+            w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w] (int r)
+            {
+                if (r == 1 && safe != nullptr)
+                    safe->say (safe->proc.savePreset (w->getTextEditorContents ("name")));
+                delete w;
+            }), false);
+        }
+    });
 }
 
 void NektarEditor::toggleResample()
@@ -686,6 +726,12 @@ void NektarEditor::renderDesign (Graphics& g)
         head.addTriangle (bx[2] + 5, 20, bx[2] + 13, 22, bx[2] + 8, 29);
         g.fillPath (head);
     }
+
+    g.setColour (kMuted);
+    g.drawRoundedRectangle (316, 15, 56, 30, 15, 1.5f);
+    g.setColour (kLight);
+    g.setFont (font (reg, 13));
+    g.drawText ("Presets", juce::Rectangle<float> (316, 15, 56, 30), juce::Justification::centred);
 
     g.setColour (kAcc);
     g.fillRoundedRectangle (570, 11, 142, 38, 19);

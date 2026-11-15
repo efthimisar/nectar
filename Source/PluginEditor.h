@@ -73,6 +73,7 @@ private:
     void toggleRecording();
     void toggleRoomTone();
     void toggleResample();
+    void showPresetMenu();
     void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);

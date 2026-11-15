@@ -55,3 +55,10 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 - The circular-arrow button in the top bar (next to room tone) records the output of the synth (all slots, resonator, Tilt) into the selected slot; click again to stop (limit 60 s). Works in the plugin too, not only the standalone. The new sound is named "Resample <date-time>" and goes through the normal analysis and cleaning, then the sine model.
 - Test (headless, Linux): processor loaded with nord pad 1, a held note recorded for 4 s: the sample in slot 2 has the same RMS as the live output (0.0247) and 2 channels.
 - Not yet: stopping by key, recording only while a note sounds, a tail after the last note.
+
+## Step 14A - Presets
+- "Presets" pill in the top bar (left of the Rec button): menu with "Save preset..." and the list of saved presets. Files: `~/Music/Nektar Library/Presets/<name>.nektarpreset` (XML: all knob values + the path of each slot's sound).
+- A sound without a file of its own (a recording or a resample) is written as WAV into `~/Music/Nektar Library` when the preset is saved, so that the preset can find it again. A missing file is reported on loading.
+- Test (headless, Linux): save, change two knobs, load: values restored; resampled slot restored from the library.
+- Not yet: rename/delete, folders, preset browser in the main window, factory presets.
+- Next in step 14: modulation (LFO, slicer, filter) and effects: to be specified with the author.
