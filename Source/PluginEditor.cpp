@@ -292,12 +292,14 @@ void KnobComponent::mouseDown (const juce::MouseEvent& e)
             menu.addItem (7, "Envelope", true, r.src == NektarProcessor::kModEnv);
             menu.addItem (8, "Joystick X", true, r.src == NektarProcessor::kModJoyX);
             menu.addItem (9, "Joystick Y", true, r.src == NektarProcessor::kModJoyY);
+            menu.addItem (10, "Velocity", true, r.src == NektarProcessor::kModVel);
+            menu.addItem (11, "Key (C3 = centre)", true, r.src == NektarProcessor::kModKey);
             menu.addSeparator();
             menu.addItem (100, "Amount: hold Shift and drag the knob", false);
             juce::Component::SafePointer<KnobComponent> safe (this);
             menu.showMenuAsync (juce::PopupMenu::Options(), [safe, r] (int choice)
             {
-                if (safe == nullptr || choice < 1 || choice > 9)
+                if (safe == nullptr || choice < 1 || choice > 11)
                     return;
                 auto n = r;
                 n.src = choice - 1;

@@ -122,3 +122,7 @@ Source: Hartmann Neuron user manual (2002), stick animation p. 28, 89-92 and bas
 - The path (200 points/s, up to 30 s) and the stick position are saved in presets and in the host state. Loading a preset never starts a recording.
 - The manual describes the Neuron stick as four cross-x parameters with opposite pairs; our pad gives X and Y as modulation sources, so opposite pairs come from a positive and a negative amount.
 - **LFO shapes**: five shapes added after the Neuron manual p. 118 (positive triangle, positive sine, positive square, stepped triangle, stepped saw down), 17 in total. The positive ones run 0..1. The number of steps in the stepped shapes is read off the picture, not specified. Old presets that use the shape knob change sound again (none exist yet).
+
+## Velocity and Key sources (build 18)
+- Two new modulation sources in the right-click menu: **Velocity** (last note-on velocity, 0..1, held after release) and **Key** (last note relative to C3 = MIDI 60, -1..1 over +-3 octaves, clamped). Both are block-rate like the other sources. The +-3 octave span is our choice, not the manual's.
+- SPACE position (azimuth, distance) already follows any source through the generic route; the pad still draws the unmodulated dot.

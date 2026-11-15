@@ -982,7 +982,7 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
-        if (m.isNoteOn())       { ++heldNotes; retrigger = true; }
+        if (m.isNoteOn())       { ++heldNotes; retrigger = true; lastVel = m.getFloatVelocity(); lastKey = juce::jlimit (-1.0f, 1.0f, (float) (m.getNoteNumber() - 60) / 36.0f); }
         else if (m.isNoteOff()) heldNotes = juce::jmax (0, heldNotes - 1);
         else if (m.isAllNotesOff() || m.isAllSoundOff()) heldNotes = 0;
     }
@@ -1004,6 +1004,10 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
     }
     modVal[(size_t) kModEnv] = envLevel;
     modShown[(size_t) kModEnv].store (envLevel);
+    modVal[(size_t) kModVel] = lastVel;
+    modShown[(size_t) kModVel].store (lastVel);
+    modVal[(size_t) kModKey] = lastKey;
+    modShown[(size_t) kModKey].store (lastKey);
 
     // Joystick (after the Hartmann Neuron manual p. 89-92 and 41):
     // Rec = standby, the recording starts when the stick moves or a key is pressed (200 points a second, up to 30 s).
