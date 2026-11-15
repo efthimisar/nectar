@@ -205,6 +205,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          juce::AudioParameterFloatAttributes().withLabel ("st")));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmixb", 1 }, "Resonator B mix (0 = off)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromo12", 1 }, "Chromophonic 1<>2 (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromo34", 1 }, "Chromophonic 3<>4 (0 = off)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromomove", 1 }, "Chromophonic move",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ramptime", 1 }, "Ramp time (0.05 .. 20 s)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
@@ -270,6 +276,9 @@ NektarProcessor::NektarProcessor()
     resMixP = apvts.getRawParameterValue ("resmix");
     resTuneBP = apvts.getRawParameterValue ("restuneb");
     rampTimeP = apvts.getRawParameterValue ("ramptime");
+    chromoP[0] = apvts.getRawParameterValue ("chromo12");
+    chromoP[1] = apvts.getRawParameterValue ("chromo34");
+    chromoMoveP = apvts.getRawParameterValue ("chromomove");
     resMixBP = apvts.getRawParameterValue ("resmixb");
     filTypeP = apvts.getRawParameterValue ("filtype");
     filCutP = apvts.getRawParameterValue ("filcut");
@@ -510,6 +519,12 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());
+    // Chromophonic: each slot of a pair takes the body of the other (both ways)
+    players[0].setBodyPartner (players[1].getSample());
+    players[1].setBodyPartner (players[0].getSample());
+    players[2].setBodyPartner (players[3].getSample());
+    players[3].setBodyPartner (players[2].getSample());
+    const float baseModel = p.model;
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;
@@ -525,6 +540,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         auto& pl = players[(size_t) slot];
         if (! pl.hasSample())
             continue;
+        p.chromo = modded (chromoP[(size_t) (slot / 2)]);
+        p.chromoMove = modded (chromoMoveP);
+        p.model = juce::jmax (baseModel, p.chromo); // Chromophonic plays the sine model
         p.level = modded (levelP[(size_t) slot]);
         p.pitchSemis = modded (pitchP[(size_t) slot]);
         p.releaseSec = modded (tailP[(size_t) slot]);

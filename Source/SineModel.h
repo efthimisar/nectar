@@ -20,6 +20,8 @@ struct SineModel
     static constexpr int kMinTrackFrames = 4;
     static constexpr int kMaxHarm = 128;          // highest harmonic number that is labelled
     static constexpr int kBands = 48;             // residual bands, spaced evenly on a log-frequency axis
+    static constexpr int kBodyBins = 100;         // "body": time-averaged strength of the partials per twelfth of an octave...
+    static constexpr double kBodyLow = 40.0;      // ...from 40 Hz upwards (100 bins reach about 12.9 kHz)
     static constexpr double kBandLow = 60.0;      // Hz, lower edge of band 0 (below it band 0 is used)
 
     // One piece of a track, between analysis frame m and m + 1 (frequency in Hz, linear amplitude).
@@ -42,6 +44,7 @@ struct SineModel
     std::vector<Channel> ch; // 1 or 2 channels
     double rate = 0.0;
     int numTracks = 0;       // largest track id + 1, over the channels
+    std::vector<float> body;  // kBodyBins energies (smoothed over +-1/3 octave), empty if the model has no tracks
     double bandRatio = 1.0;  // frequency ratio between neighbouring residual bands
 
     // Slow (a second or so for a minute of stereo): call from a background thread only. Returns nullptr if cancelled.

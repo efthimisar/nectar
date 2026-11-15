@@ -29,12 +29,22 @@ public:
             for (auto& v : p) v = (double) rng.nextFloat();
     }
 
+    // Chromophonic: the partials of this sound are given the body of another (see SineModel::body).
+    // ratio[b] = linear gain per twelfth of an octave from kBodyLow; wave = depth (natural log) of a slow filter-like
+    // sweep that travels up the spectrum (about 6 s a turn), a little later in the right channel.
+    struct BodyShape { const float* ratio = nullptr; float wave = 0.0f; };
+    void setShape (const BodyShape* shape) noexcept { shape_ = shape; }
+
     // Adds to outL / outR (n samples). Returns nothing; silent if the model has no tracks.
     // `noiseAmount` (0..1) is the level of the residual (shaped noise), 1 = as strong as in the original.
     void process (const SineModel& m, double advance, double ratio, float* outL, float* outR, int n, float noiseAmount = 0.0f)
     {
         if (m.ch.empty() || m.ch[0].numFrames < 2)
             return;
+        shapeOn = shape_ != nullptr && shape_->ratio != nullptr;
+        if (shapeOn)
+            for (int b = 0; b <= SineModel::kBands; ++b)
+                bandGain[(size_t) b] = bodyGain (SineModel::kBandLow * std::pow (m.bandRatio, (double) b + 0.5));
         renderNoise (m, advance, ratio, outL, outR, n, noiseAmount);
         if (! sinesReady)
             return;
@@ -72,8 +82,25 @@ public:
                     const double f = ((double) q.fa + ((double) q.fb - (double) q.fa) * um) * ratio;
                     if (f >= fMax)
                         continue;
-                    const float a0 = q.aa + (q.ab - q.aa) * (float) u0;
-                    const float a1 = q.aa + (q.ab - q.aa) * (float) u1;
+                    float a0 = q.aa + (q.ab - q.aa) * (float) u0;
+                    float a1 = q.aa + (q.ab - q.aa) * (float) u1;
+                    if (shapeOn)
+                    {
+                        const double fm = (double) q.fa + ((double) q.fb - (double) q.fa) * um;
+                        const float gb = bodyGain (fm);
+                        float w0 = 1.0f, w1 = 1.0f;
+                        if (shape_->wave > 0.0f)
+                        {
+                            const double t0 = (pos - (double) SineModel::kFirstCentre) / m.rate;
+                            const double t1 = t0 + (double) nb * advance / m.rate;
+                            const double oct = 0.55 * std::log2 (std::max (fm, 60.0) / 200.0);
+                            const double ph = 0.25 * (double) c;
+                            w0 = std::exp (shape_->wave * (float) std::sin (6.2831853 * (0.16 * t0 + ph - oct)));
+                            w1 = std::exp (shape_->wave * (float) std::sin (6.2831853 * (0.16 * t1 + ph - oct)));
+                        }
+                        a0 *= gb * w0;
+                        a1 *= gb * w1;
+                    }
                     double p = ph[(size_t) q.track];
                     const double w = f * invSr;
                     const float twoPi = 6.2831853f;
@@ -99,6 +126,14 @@ public:
     }
 
 private:
+    float bodyGain (double f) const noexcept
+    {
+        const int b = juce::jlimit (0, SineModel::kBodyBins - 1, (int) std::floor (12.0 * std::log2 (std::max (f, SineModel::kBodyLow) / SineModel::kBodyLow)));
+        return shape_->ratio[b];
+    }
+    const BodyShape* shape_ = nullptr;
+    bool shapeOn = false;
+    std::array<float, SineModel::kBands + 1> bandGain {};
     static constexpr int kBlock = 64;
     static constexpr int kM = 1024, kMHop = 256; // residual: synthesis frame and hop
 
@@ -134,6 +169,8 @@ private:
                 {
                     const float t = binFrac[(size_t) k];
                     amp = (na[b] * (1.0f - u) + nb[b] * u) * (1.0f - t) + (na[b + 1] * (1.0f - u) + nb[b + 1] * u) * t;
+                    if (shapeOn)
+                        amp *= bandGain[(size_t) b] * (1.0f - t) + bandGain[(size_t) b + 1] * t;
                 }
                 const int pi = (int) (nrng.nextInt() & (kPhases - 1));
                 fbuf[(size_t) (2 * k)] = amp * phaseCos[(size_t) pi];

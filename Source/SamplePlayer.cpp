@@ -424,7 +424,10 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
                 morphs[(size_t) index].process (*sample->model, *pm, advance, R, p.morph, p.modelNoise, addL.data(), addR.data(), chunk);
         }
         else
-            additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
+            {
+                additives[(size_t) index].setShape (bodyShapeOn ? &bodyShape : nullptr);
+                additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
+            }
         if (v.spectral)
             spectrals[(size_t) index].process (sample->play, factor, R, p.blur, p.freeze, specL.data(), specR.data(), chunk,
                                                partnerBuffer (p), p.morph, p.body);
@@ -507,6 +510,27 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
         }
         done = upTo;
     };
+
+    // Chromophonic: gain per twelfth of an octave that turns this sound's body into the partner's (at most +-12 dB)
+    bodyShapeOn = false;
+    if (p.chromo > 0.001f && sample != nullptr && bodyPartner != nullptr && sample->model != nullptr && bodyPartner->model != nullptr
+        && sample->model->body.size() == (size_t) SineModel::kBodyBins && bodyPartner->model->body.size() == (size_t) SineModel::kBodyBins)
+    {
+        double eIn = 0.0, eOut = 0.0; // keep the loudness: the shaped sound has the same energy as the original
+        for (int b = 0; b < SineModel::kBodyBins; ++b)
+        {
+            const float g = juce::jlimit (0.25f, 4.0f, std::sqrt (bodyPartner->model->body[(size_t) b] / sample->model->body[(size_t) b]));
+            bodyRatio[(size_t) b] = std::pow (g, p.chromo);
+            const double e = (double) sample->model->body[(size_t) b];
+            eIn += e;
+            eOut += e * (double) bodyRatio[(size_t) b] * (double) bodyRatio[(size_t) b];
+        }
+        const float norm = eOut > 0.0 ? (float) std::sqrt (eIn / eOut) : 1.0f;
+        for (auto& r : bodyRatio) r *= norm;
+        bodyShape.ratio = bodyRatio.data();
+        bodyShape.wave = 1.6f * p.chromoMove;
+        bodyShapeOn = true;
+    }
 
     for (const auto meta : midi)
     {

@@ -661,6 +661,12 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         addKnob (rc.x - 21.0f, rc.y + 76.0f, 8.0f, "Tune B", false, 0.0f, "restuneb");
         addKnob (rc.x + 21.0f, rc.y + 76.0f, 8.0f, "Mix B", false, 0.0f, "resmixb");
     }
+    {   // Chromophonic, just under the BODY circle: one amount per pair of slots, and Move
+        const auto bc = moduleCentre (1);
+        addKnob (bc.x - 34.0f, bc.y + 76.0f, 7.5f, "Chroma 1+2", false, 0.0f, "chromo12");
+        addKnob (bc.x, bc.y + 76.0f, 7.5f, "Chroma 3+4", false, 0.0f, "chromo34");
+        addKnob (bc.x + 34.0f, bc.y + 76.0f, 7.5f, "Move", false, 1.0f, "chromomove");
+    }
     {   // Ramp time, just under the ENV circle
         const auto ec = moduleCentre (10);
         addKnob (ec.x, ec.y + 76.0f, 8.0f, "Ramp", false, 0.4f, "ramptime");

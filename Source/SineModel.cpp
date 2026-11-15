@@ -348,5 +348,36 @@ std::shared_ptr<SineModel> SineModel::analyse (const juce::AudioBuffer<float>& x
         labelHarmonics (m->ch[(size_t) c], tracks, rate);
         m->numTracks = std::max (m->numTracks, tracks);
     }
+    // the body: where the partials put their energy, averaged over the whole sound (used by Chromophonic)
+    {
+        std::vector<double> e ((size_t) kBodyBins, 0.0);
+        for (const auto& chn : m->ch)
+            for (const auto& q : chn.segs)
+            {
+                if (q.fa < (float) kBodyLow) continue;
+                const int b = (int) std::floor (12.0 * std::log2 ((double) q.fa / kBodyLow));
+                if (b >= 0 && b < kBodyBins) e[(size_t) b] += (double) q.aa * (double) q.aa;
+            }
+        m->body.assign ((size_t) kBodyBins, 0.0f);
+        double mx = 0.0;
+        std::vector<double> sm ((size_t) kBodyBins, 0.0);
+        for (int i = 0; i < kBodyBins; ++i)
+        {
+            double a = 0.0, w = 0.0;
+            for (int j = -4; j <= 4; ++j)
+            {
+                const int k = i + j;
+                if (k < 0 || k >= kBodyBins) continue;
+                const double g = std::exp (-0.5 * (double) (j * j) / 4.0);
+                a += g * e[(size_t) k];
+                w += g;
+            }
+            sm[(size_t) i] = a / w;
+            mx = std::max (mx, sm[(size_t) i]);
+        }
+        if (mx > 0.0)
+            for (int i = 0; i < kBodyBins; ++i)
+                m->body[(size_t) i] = (float) std::max (sm[(size_t) i], mx * 1.0e-6);
+    }
     return m;
 }
