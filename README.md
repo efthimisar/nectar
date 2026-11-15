@@ -92,3 +92,6 @@ Parked: pipes between modules, fullscreen standalone, compact VST3 layout, persi
 
 ## UI: wide layout with size hierarchy
 - Window is now wide (1100 x 665 design units, default 1200 px wide, aspect locked). Hierarchy by size: Library ring largest, four slots medium, nine round modules smallest in three pyramids of three (Source/Time/Body, Filter/Resonator/Slicer, Reverb/Delay/LFO). Top row: Slot 1, Slot 2, Library, Slot 3, Slot 4.
+
+## Output safety
+- A soft knee limiter at the end of the chain (identity below 0.9, never above 1.0) keeps reverb, delay and shimmer peaks from clipping. It sits before Resample, so resampled sounds are limited too.

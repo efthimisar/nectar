@@ -495,6 +495,18 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
 
+    // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps reverb/delay/shimmer peaks below 1.0; identical below 0.9
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        float* d = buffer.getWritePointer (ch);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const float a = std::abs (d[i]);
+            if (a > 0.9f)
+                d[i] = std::copysign (0.9f + 0.1f * std::tanh ((a - 0.9f) / 0.1f), d[i]);
+        }
+    }
+
     // Resample: copy what is about to be heard
     if (recState.load() == 1 && recSource.load() == 1)
     {
