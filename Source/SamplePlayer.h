@@ -57,6 +57,7 @@ public:
         float model = 0.0f;      // 0..1 blend from the normal engine to the sine-wave (additive) model
         float chromo = 0.0f;     // 0..1 Chromophonic: this sound's partials take the body of the body partner (needs the model)
         float chromoMove = 0.0f; // 0..1 depth of the slow travelling filter sweep that goes with it
+        float chromoSpeed = 0.5f; // 0..1 speed of the sweep (0.03 .. 1 turn per second, 0.5 = about 0.17)
         float chromoBack = 0.5f; // 0..1 how far back the lower sound of the pair is pushed (level, 0.5 = -6 dB)
         float chromoDull = 0.5f; // 0..1 how dull the back sound is (high-frequency slope, 0.5 = -2 dB/oct above 1 kHz)
     };

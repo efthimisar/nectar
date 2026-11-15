@@ -139,6 +139,7 @@ private:
     std::array<std::atomic<float>*, 2> chromoP {};
     std::atomic<float>* chromoMoveP = nullptr;
     std::atomic<float>* chromoBackP = nullptr;
+    std::atomic<float>* chromoSpeedP = nullptr;
     std::atomic<float>* chromoDullP = nullptr;
     int heldNotes = 0;
     float lastVel = 0.0f, lastKey = 0.0f; // last note-on: velocity 0..1, key relative to C3 (-1..1 over +-3 octaves)

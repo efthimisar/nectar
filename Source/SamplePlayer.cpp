@@ -599,6 +599,7 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
         for (auto& r : bodyRatio) r *= pairGain * sample->model->levelFix;
         bodyShape.ratio = bodyRatio.data();
         bodyShape.wave = 1.6f * p.chromoMove;
+        bodyShape.rate = 0.03f * std::pow (33.3f, p.chromoSpeed);
         bodyShapeOn = true;
     }
 

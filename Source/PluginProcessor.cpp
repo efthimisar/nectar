@@ -212,6 +212,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromomove", 1 }, "Chromophonic move",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromospeed", 1 }, "Chromophonic move speed",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromoback", 1 }, "Chromophonic back level",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
@@ -291,6 +293,7 @@ NektarProcessor::NektarProcessor()
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
     lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
+    chromoSpeedP = apvts.getRawParameterValue ("chromospeed");
     chromoDullP = apvts.getRawParameterValue ("chromodull");
     resMixBP = apvts.getRawParameterValue ("resmixb");
     filTypeP = apvts.getRawParameterValue ("filtype");
@@ -557,6 +560,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         p.chromo = modded (chromoP[(size_t) (slot / 2)]);
         p.chromoMove = modded (chromoMoveP);
         p.chromoBack = modded (chromoBackP);
+        p.chromoSpeed = modded (chromoSpeedP);
         p.chromoDull = modded (chromoDullP);
         p.model = juce::jmax (baseModel, p.chromo); // Chromophonic plays the sine model
         p.level = modded (levelP[(size_t) slot]);

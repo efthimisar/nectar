@@ -32,7 +32,7 @@ public:
     // Chromophonic: the partials of this sound are given the body of another (see SineModel::body).
     // ratio[b] = linear gain per twelfth of an octave from kBodyLow; wave = depth (natural log) of a slow filter-like
     // sweep that travels up the spectrum (about 6 s a turn), a little later in the right channel.
-    struct BodyShape { const float* ratio = nullptr; float wave = 0.0f; };
+    struct BodyShape { const float* ratio = nullptr; float wave = 0.0f; float rate = 0.16f; }; // rate = turns of the sweep per second
     void setShape (const BodyShape* shape) noexcept { shape_ = shape; }
 
     // Adds to outL / outR (n samples). Returns nothing; silent if the model has no tracks.
@@ -95,8 +95,8 @@ public:
                             const double t1 = t0 + (double) nb * advance / m.rate;
                             const double oct = 0.55 * std::log2 (std::max (fm, 60.0) / 200.0);
                             const double ph = 0.25 * (double) c;
-                            w0 = std::exp (shape_->wave * (float) std::sin (6.2831853 * (0.16 * t0 + ph - oct)));
-                            w1 = std::exp (shape_->wave * (float) std::sin (6.2831853 * (0.16 * t1 + ph - oct)));
+                            w0 = std::exp (shape_->wave * (float) std::sin (6.2831853 * ((double) shape_->rate * t0 + ph - oct)));
+                            w1 = std::exp (shape_->wave * (float) std::sin (6.2831853 * ((double) shape_->rate * t1 + ph - oct)));
                         }
                         a0 *= gb * w0;
                         a1 *= gb * w1;
