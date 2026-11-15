@@ -11,7 +11,7 @@ const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark 
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
 constexpr float kDW = 1360.0f, kDH = 665.0f;   // design space of the editor (wide)
-constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 106.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
+constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
 constexpr float kLibX = 680.0f, kLibY = 250.0f;
@@ -1226,16 +1226,16 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setGradientFill (ColourGradient (Colour (0xff3a3836), kCx - 70, kCy - 80, Colour (0xff222120), kCx + 80, kCy + 100, false));
     g.fillEllipse (kCx - kScreenR, kCy - kScreenR, 2 * kScreenR, 2 * kScreenR);
     g.setGradientFill (ColourGradient (Colour (0xff181716), kCx - 40, kCy - 60, Colour (0xff201f1d), kCx + 60, kCy + 70, false));
-    g.fillEllipse (kCx - 94, kCy - 94, 188, 188);
+    g.fillEllipse (kCx - 122, kCy - 122, 244, 244);
 
     const auto sel = proc.getSample (selectedSlot);
     g.setColour (kMuted);
-    g.setFont (font (reg, 13));
-    g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot ")) + juce::String (selectedSlot + 1), juce::Rectangle<float> (kCx - 80, kCy - 88, 160, 18), juce::Justification::centred);
+    g.setFont (font (reg, 20));
+    g.drawText (message.isNotEmpty() ? message : juce::String (juce::CharPointer_UTF8 ("Check \xc2\xb7 slot ")) + juce::String (selectedSlot + 1), juce::Rectangle<float> (kCx - 112, kCy - 116, 224, 28), juce::Justification::centred);
     {
         const auto pk = peaksOf (sel.get());
         if (pk.size() > 0)
-            realWave (g, kCx, kCy - 52, 114, 10.0f, pk);
+            realWave (g, kCx, kCy - 68, 150, 13.0f, pk);
     }
     const char* rows[] = { "Noise floor", "Hum", "Clipping" };
     juce::String vals[3] = { "-", "-", "-" };
@@ -1245,7 +1245,7 @@ void NektarEditor::renderDesign (Graphics& g)
     else if (sel != nullptr)
     {
         const auto& an = sel->analysis;
-        vals[0] = juce::String (an.noiseFloorDb, 0) + " dB";
+        vals[0] = juce::String (juce::roundToInt (an.noiseFloorDb)) + " dB";
         good[0] = an.noiseFloorDb <= -45.0f;
         if (an.humHz > 0) vals[1] = juce::String (an.humHz) + " Hz, " + juce::String (an.humHarmonics) + " harm.";
         else              { vals[1] = "none"; good[1] = true; }
@@ -1254,20 +1254,20 @@ void NektarEditor::renderDesign (Graphics& g)
     }
     for (int i = 0; i < 3; ++i)
     {
-        const float y = kCy - 12 + (float) i * 22.0f;
+        const float y = kCy - 22 + (float) i * 34.0f;
         g.setColour (kAcc);
-        if (good[i]) g.fillEllipse (kCx - 80, y - 5, 10, 10);
-        else         g.drawEllipse (kCx - 79.5f, y - 4.5f, 9, 9, 1.3f);
+        if (good[i]) g.fillEllipse (kCx - 104, y - 6, 12, 12);
+        else         g.drawEllipse (kCx - 103.5f, y - 5.5f, 11, 11, 1.5f);
         g.setColour (kLight);
-        g.setFont (font (reg, 14));
-        g.drawText (rows[i], juce::Rectangle<float> (kCx - 64, y - 9, 90, 18), juce::Justification::centredLeft);
+        g.setFont (font (reg, 21));
+        g.drawText (rows[i], juce::Rectangle<float> (kCx - 84, y - 14, 118, 28), juce::Justification::centredLeft);
         g.setColour (kMuted);
-        g.setFont (font (reg, 12));
-        g.drawText (vals[i], juce::Rectangle<float> (kCx - 4, y - 9, 84, 18), juce::Justification::centredRight);
+        g.setFont (font (reg, 18));
+        g.drawText (vals[i], juce::Rectangle<float> (kCx - 8, y - 14, 118, 28), juce::Justification::centredRight);
     }
     g.setColour (kMuted.withAlpha (0.8f));
-    g.setFont (font (reg, 11));
-    g.drawText (proc.hasRoomTone() ? "room tone: recorded" : "room tone: automatic", juce::Rectangle<float> (kCx - 70, kCy + 58, 140, 16), juce::Justification::centred);
+    g.setFont (font (reg, 16));
+    g.drawText (proc.hasRoomTone() ? "room tone: recorded" : "room tone: automatic", juce::Rectangle<float> (kCx - 100, kCy + 80, 200, 24), juce::Justification::centred);
 
     g.restoreState();
 
