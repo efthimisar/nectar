@@ -14,14 +14,26 @@ constexpr float kDW = 1040.0f, kDH = 665.0f;   // design space of the editor (wi
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
-constexpr float kDotR = 50.0f;                   // v2: radius of the small slot circles
+constexpr float kDotR = 32.0f;                   // v2: radius of the small slot circles
 constexpr float kLibX = 520.0f, kLibY = 250.0f;
-constexpr float kSlotCx[4] = { 140.0f, 260.0f, 780.0f, 900.0f };
-constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
+constexpr float kSlotCx[4] = { 138.0f, 222.0f, 818.0f, 902.0f };
+constexpr float kSlotCy[4] = { 340.0f, 340.0f, 340.0f, 340.0f };
+constexpr float kPadCx[2] = { 180.0f, 860.0f };
+constexpr float kPadCy = 212.0f;
 constexpr float kModR = 56.0f;                   // module radius
 const juce::Rectangle<float> kScreen (24.0f, 450.0f, 992.0f, 62.0f);
 const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, { 208.0f, 414.0f, 78.0f, 26.0f }, { 290.0f, 414.0f, 84.0f, 26.0f } };
-const juce::Rectangle<float> kScaleBtn[2] = { { 386.0f, 414.0f, 190.0f, 26.0f }, { 582.0f, 414.0f, 80.0f, 26.0f } };
+const juce::Rectangle<float> kScaleBtn[2] = { { 386.0f, 414.0f, 170.0f, 26.0f }, { 562.0f, 414.0f, 74.0f, 26.0f } };
+const juce::Rectangle<float> kFaceBtn (644.0f, 412.0f, 94.0f, 28.0f);      // details view: back to the joysticks
+const juce::Rectangle<float> kDetailsBtn (892.0f, 606.0f, 120.0f, 32.0f);  // joystick face: open the panel with all the knobs
+inline juce::Rectangle<float> pairBtn (int pair, int which) // which: 0 New, 1 Back, 2 Keep
+{
+    const float w[3] = { 96.0f, 80.0f, 80.0f };
+    float x = pair == 0 ? 28.0f : 1040.0f - 28.0f - 272.0f;
+    for (int i = 0; i < which; ++i) x += w[i] + 8.0f;
+    return { x, 424.0f, w[which], 38.0f };
+}
+inline juce::Rectangle<float> charChip (int i) { return { 264.0f + (float) i * 104.0f, 520.0f, 96.0f, 34.0f }; }
 constexpr float kColW = (992.0f - 48.0f) / 5.0f;
 inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
 const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev", "noise", "hum", "lowcut", "pan", "loop" };
@@ -222,7 +234,7 @@ void slotDot (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface:
     g.drawEllipse (cx - kDotR + 1.0f, cy - kDotR + 1.0f, 2 * kDotR - 2.0f, 2 * kDotR - 2.0f, selected ? 3.0f : 1.5f);
     g.setColour (selected ? kAcc : kLight);
     g.setFont (font (bold, 15));
-    g.drawText (juce::String (index), juce::Rectangle<float> (cx - 20, cy - kDotR + 8, 40, 18), juce::Justification::centred);
+    g.drawText (juce::String (index), juce::Rectangle<float> (cx - 20, cy - kDotR + 5, 40, 16), juce::Justification::centred);
     if (empty)
     {
         g.setColour (kMuted);
@@ -230,10 +242,10 @@ void slotDot (Graphics& g, const juce::Typeface::Ptr& reg, const juce::Typeface:
         g.drawLine (cx, cy - 3, cx, cy + 15, 1.8f);
     }
     else if (peaks.size() > 0)
-        realWave (g, cx, cy + 8, 64, 11.0f, peaks);
+        realWave (g, cx, cy + 7, 40, 8.0f, peaks);
     g.setColour (selected ? kLight : kMuted);
     g.setFont (font (reg, 15));
-    g.drawText (empty ? juce::String ("Empty") : name, juce::Rectangle<float> (cx - 56, cy + kDotR + 8, 112, 20), juce::Justification::centred, true);
+    g.drawText (empty ? juce::String ("Empty") : name, juce::Rectangle<float> (cx - 40, cy + kDotR + 5, 80, 20), juce::Justification::centred, true);
 }
 } // namespace
 
@@ -482,6 +494,71 @@ namespace
 const char* kKeys = "awsedftgyhujkolp;"; // computer keyboard = one chromatic octave and a bit, from C
 }
 
+// ------------------------------------------------------------------ PairPad
+void PairPad::paint (Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (1.5f);
+    const float corner = b.getWidth() * 0.09f;
+    const bool on = proc.vectorOn (pair);
+    const auto tint = kWada[pair == 0 ? 1 : 2];
+    g.setColour (Colour (0xff1b1a19));
+    g.fillRoundedRectangle (b, corner);
+    g.setColour (on ? tint.withAlpha (0.9f) : juce::Colours::white.withAlpha (0.12f));
+    g.drawRoundedRectangle (b, corner, on ? 2.0f : 1.2f);
+    const float u = b.getWidth() / (2.0f * kHalf); // one design unit
+    if (! on)
+    {
+        g.setColour (kMuted);
+        g.setFont (juce::Font (juce::FontOptions (15.0f * u)));
+        g.drawFittedText ("Press New", getLocalBounds(), juce::Justification::centred, 1);
+        return;
+    }
+    g.setColour (juce::Colours::white.withAlpha (0.08f));
+    g.drawLine (b.getCentreX(), b.getY() + 10 * u, b.getCentreX(), b.getBottom() - 10 * u, 1.0f);
+    g.drawLine (b.getX() + 10 * u, b.getCentreY(), b.getRight() - 10 * u, b.getCentreY(), 1.0f);
+    const auto in = b.reduced (14.0f * u);
+    for (int i = 0; i < 4; ++i)
+    {   // the four corners
+        const float cx = (i & 1) ? in.getRight() : in.getX(), cy = (i & 2) ? in.getY() : in.getBottom();
+        g.setColour (tint.withAlpha (0.35f));
+        g.fillEllipse (cx - 4 * u, cy - 4 * u, 8 * u, 8 * u);
+    }
+    const float x = in.getX() + proc.vectorX (pair) * in.getWidth(), y = in.getBottom() - proc.vectorY (pair) * in.getHeight();
+    g.setColour (tint.withAlpha (0.25f));
+    g.fillEllipse (x - 15 * u, y - 15 * u, 30 * u, 30 * u);
+    g.setColour (tint);
+    g.fillEllipse (x - 9 * u, y - 9 * u, 18 * u, 18 * u);
+}
+
+void PairPad::setFromMouse (const juce::MouseEvent& e)
+{
+    if (! dragging) return;
+    const float u = (float) getWidth() / (2.0f * kHalf);
+    const auto in = getLocalBounds().toFloat().reduced (1.5f).reduced (14.0f * u);
+    const float x = juce::jlimit (0.0f, 1.0f, (e.position.x - in.getX()) / in.getWidth());
+    const float y = juce::jlimit (0.0f, 1.0f, (in.getBottom() - e.position.y) / in.getHeight());
+    if (auto* p = proc.apvts.getParameter (pair == 0 ? "vec1x" : "vec2x")) p->setValueNotifyingHost (x);
+    if (auto* p = proc.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) p->setValueNotifyingHost (y);
+    repaint();
+}
+
+void PairPad::mouseDown (const juce::MouseEvent& e)
+{
+    if (! proc.vectorOn (pair)) return;
+    dragging = true;
+    for (const char* id : { pair == 0 ? "vec1x" : "vec2x", pair == 0 ? "vec1y" : "vec2y" })
+        if (auto* p = proc.apvts.getParameter (id)) p->beginChangeGesture();
+    setFromMouse (e);
+}
+
+void PairPad::mouseUp (const juce::MouseEvent&)
+{
+    if (! dragging) return;
+    dragging = false;
+    for (const char* id : { pair == 0 ? "vec1x" : "vec2x", pair == 0 ? "vec1y" : "vec2y" })
+        if (auto* p = proc.apvts.getParameter (id)) p->endChangeGesture();
+}
+
 // ------------------------------------------------------------------ JoyPad
 void JoyPad::paint (Graphics& g)
 {
@@ -639,6 +716,11 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     joyPad = std::make_unique<JoyPad> (proc);
     joyPadCentre = { colX (4) + 62.0f, 590.0f };
     addChildComponent (*joyPad);
+    for (int i = 0; i < 2; ++i)
+    {
+        pairPads[i] = std::make_unique<PairPad> (proc, i);
+        addAndMakeVisible (*pairPads[i]);
+    }
     fixedKnobs = knobs.size();
     rebuildPanel();
 
@@ -689,6 +771,10 @@ void NektarEditor::resized()
     if (spacePad != nullptr)
         spacePad->setBounds (juce::Rectangle<float> ((kSpaceX - kSpaceR) * s, (kSpaceY - kSpaceR) * s,
                                                      2 * kSpaceR * s, 2 * kSpaceR * s).toNearestInt());
+    for (int i = 0; i < 2; ++i)
+        if (pairPads[i] != nullptr)
+            pairPads[i]->setBounds (juce::Rectangle<float> ((kPadCx[i] - PairPad::kHalf) * s, (kPadCy - PairPad::kHalf) * s,
+                                                            2 * PairPad::kHalf * s, 2 * PairPad::kHalf * s).toNearestInt());
     if (joyPad != nullptr)
         joyPad->setBounds (juce::Rectangle<float> ((joyPadCentre.x - JoyPad::kR) * s, (joyPadCentre.y - JoyPad::kR) * s,
                                                    2 * JoyPad::kR * s, 2 * JoyPad::kR * s).toNearestInt());
@@ -739,6 +825,40 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / kDW);
+    if (! detailsView)
+    {   // the joystick face
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            if (pairBtn (pair, 0).contains (p)) { pressNew (pair); return; }
+            if (pairBtn (pair, 1).contains (p)) { pressBack (pair); return; }
+            if (pairBtn (pair, 2).contains (p)) { pressKeep(); return; }
+        }
+        for (int i = 0; i < 5; ++i)
+            if (charChip (i).contains (p))
+            {
+                if (auto* pa = proc.apvts.getParameter ("character")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) i));
+                repaint();
+                return;
+            }
+        if (kDetailsBtn.contains (p))
+        {
+            detailsView = true;
+            cache = juce::Image();
+            rebuildPanel();
+            repaint();
+            return;
+        }
+        if (const int sl = slotAt (p); sl >= 0) selectedSlot = sl;
+        return;
+    }
+    if (kFaceBtn.contains (p))
+    {
+        detailsView = false; masterView = false; motionView = false;
+        cache = juce::Image();
+        rebuildPanel();
+        repaint();
+        return;
+    }
     const int slot = slotAt (p);
     if (slot >= 0)
     {
@@ -825,6 +945,28 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
         say (proc.saveToLibrary (selectedSlot));
+}
+
+void NektarEditor::pressNew (int pair)
+{
+    if (proc.getSample (pair * 2) == nullptr && proc.getSample (pair * 2 + 1) == nullptr)
+    {
+        say (juce::String ("Load a sound into circle ") + (pair == 0 ? "1 or 2" : "3 or 4") + " first (double-click it).");
+        return;
+    }
+    proc.newVector (pair);
+    say ("New corners. Hold a key and move the joystick.");
+}
+
+void NektarEditor::pressBack (int pair)
+{
+    if (proc.backVector (pair)) say ("Back to the corners before.");
+}
+
+void NektarEditor::pressKeep()
+{
+    if (! proc.vectorOn (0) && ! proc.vectorOn (1)) return;
+    say (proc.savePreset ("Joystick " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S")));
 }
 
 int NektarEditor::slotAt (juce::Point<float> p) const
@@ -1051,6 +1193,8 @@ void NektarEditor::timerCallback()
         joyPad->repaint();
     if (spacePad != nullptr)
         spacePad->repaint();
+    for (auto& pp : pairPads)
+        if (pp != nullptr) pp->repaint();
 
     // a change on the first selected sample is copied to the other selected samples (only the knob that moved)
     juce::String key;
@@ -1062,21 +1206,30 @@ void NektarEditor::timerCallback()
         const float v = src->getValue();
         key << juce::String (v, 4) << ";";
         auto it = lastPanel.find (base);
-        if (it != lastPanel.end() && std::abs (it->second - v) > 1.0e-6f && ! masterView)
+        if (it != lastPanel.end() && std::abs (it->second - v) > 1.0e-6f && ! masterView && detailsView)
+        {
+            const bool byHand = juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown();
+            if (byHand) proc.pinVector (slotId (base, prim), v); // a knob turned by hand is no longer moved by the pair joystick
             for (int sl : selection)
                 if (sl != prim)
                     if (auto* dst = proc.apvts.getParameter (slotId (base, sl)))
+                    {
                         dst->setValueNotifyingHost (v);
+                        if (byHand) proc.pinVector (slotId (base, sl), v);
+                    }
+        }
         lastPanel[base] = v;
     }
     key << juce::roundToInt (proc.apvts.getRawParameterValue ("scale")->load()) << "k" << juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load());
+    key << (detailsView ? "D" : "F") << juce::roundToInt (proc.apvts.getRawParameterValue ("character")->load()) << (proc.vectorOn (0) ? "a" : "") << (proc.vectorOn (1) ? "b" : "")
+        << proc.vectorHistory (0) << "h" << proc.vectorHistory (1) << message;
     key << prim << (motionView ? "o" : "") << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
-    if (! motionView && panelMix != mixMask())
+    if (detailsView && ! motionView && panelMix != mixMask())
     {
         cache = juce::Image();
         rebuildPanel();
     }
-    if (! masterView && (panelHum != humFound (prim) || panelClean != noiseFound (prim) || panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0)))
+    if (detailsView && ! masterView && (panelHum != humFound (prim) || panelClean != noiseFound (prim) || panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0)))
     {
         cache = juce::Image();
         rebuildPanel();
@@ -1111,7 +1264,13 @@ void NektarEditor::rebuildPanel()
         knobPos.removeLast();
     }
     lastPanel.clear();
-    if (joyPad != nullptr) joyPad->setVisible (motionView);
+    if (joyPad != nullptr) joyPad->setVisible (detailsView && motionView);
+    if (! detailsView)
+    {   // the joystick face has one knob: how far apart the corners are
+        addKnob (520.0f, 596.0f, 15.0f, "Gentle - Wild", false, 0.0f, "wild");
+        resized();
+        return;
+    }
     const float y1 = 568.0f, y2 = 612.0f, r = 10.0f;
     auto row = [&] (int col, float y, std::initializer_list<std::pair<const char*, juce::String>> ks)
     {
@@ -1209,6 +1368,54 @@ void NektarEditor::rebuildPanel()
 // Live parts of the panel (drawn in design units on top of the cached picture).
 void NektarEditor::drawOverlay (Graphics& g)
 {
+    if (! detailsView)
+    {
+        const char* labels[3] = { "New", "Back", "Keep" };
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            const bool have = proc.getSample (pair * 2) != nullptr || proc.getSample (pair * 2 + 1) != nullptr;
+            for (int w = 0; w < 3; ++w)
+            {
+                const auto r = pairBtn (pair, w);
+                const bool usable = w == 0 ? have : (w == 1 ? proc.vectorHistory (pair) > 0 : proc.vectorOn (pair));
+                g.setColour (w == 0 && usable ? kWada[pair == 0 ? 1 : 2] : Colour (0xff2f2d2b));
+                g.fillRoundedRectangle (r, 19);
+                g.setColour (w == 0 && usable ? kDark : (usable ? kLight : kMuted.withAlpha (0.45f)));
+                g.setFont (font (w == 0 ? bold : regular, 17));
+                g.drawText (labels[w], r, juce::Justification::centred);
+            }
+            g.setColour (kMuted);
+            g.setFont (font (regular, 14));
+            g.drawText (pair == 0 ? "Joystick for sounds 1 + 2" : "Joystick for sounds 3 + 4",
+                        juce::Rectangle<float> (pairBtn (pair, 0).getX(), 468.0f, 272.0f, 20.0f), juce::Justification::centred);
+        }
+        g.setColour (kMuted);
+        g.setFont (font (regular, 14));
+        g.drawText ("Character of the next New", juce::Rectangle<float> (264.0f, 494.0f, 512.0f, 20.0f), juce::Justification::centred);
+        const char* chars[5] = { "Cloud", "Rhythm", "Metal", "Air", "Reverse" };
+        const int cur = juce::roundToInt (proc.apvts.getRawParameterValue ("character")->load());
+        for (int i = 0; i < 5; ++i)
+        {
+            const auto r = charChip (i);
+            g.setColour (i == cur ? kAcc : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 17);
+            g.setColour (i == cur ? kDark : kLight);
+            g.setFont (font (regular, 16));
+            g.drawText (chars[i], r, juce::Justification::centred);
+        }
+        g.setColour (Colour (0xff2f2d2b));
+        g.fillRoundedRectangle (kDetailsBtn, 16);
+        g.setColour (kLight);
+        g.setFont (font (regular, 16));
+        g.drawText ("Details", kDetailsBtn, juce::Justification::centred);
+        if (message.isNotEmpty())
+        {
+            g.setColour (kMuted);
+            g.setFont (font (regular, 15));
+            g.drawText (message, juce::Rectangle<float> (28.0f, 610.0f, 400.0f, 24.0f), juce::Justification::centredLeft);
+        }
+        return;
+    }
     if (masterView)
     {
         g.setColour (kMuted);
@@ -1529,7 +1736,7 @@ void NektarEditor::renderDesign (Graphics& g)
         const auto smp = proc.getSample (slot);
         const auto peaks = peaksOf (smp.get(), 30);
         slotDot (g, reg, bld, kSlotCx[slot], kSlotCy[slot], slot + 1, smp != nullptr ? smp->name : juce::String(),
-                 smp == nullptr, peaks, selection.count (slot) > 0 && ! masterView);
+                 smp == nullptr, peaks, selection.count (slot) > 0 && ! masterView && detailsView);
     }
 
     // ---- v2: one panel from edge to edge
@@ -1541,6 +1748,15 @@ void NektarEditor::renderDesign (Graphics& g)
         g.setColour (juce::Colours::black.withAlpha (0.35f));
         g.drawRoundedRectangle (plate.reduced (0.5f), 24.0f, 1.2f);
 
+        if (! detailsView)
+            return; // the joystick face: its buttons are drawn live (drawOverlay)
+        {
+            g.setColour (Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (kFaceBtn, 14);
+            g.setColour (kLight);
+            g.setFont (font (reg, 16));
+            g.drawText ("Joysticks", kFaceBtn, juce::Justification::centred);
+        }
         juce::String title = motionView ? "Motion (what moves the knobs)" : "Master (all four together)";
         if (! masterView)
         {
@@ -1555,7 +1771,7 @@ void NektarEditor::renderDesign (Graphics& g)
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText (message, juce::Rectangle<float> (386, 412, 350, 30), juce::Justification::centredLeft);
+            g.drawText (message, juce::Rectangle<float> (386, 412, 250, 30), juce::Justification::centredLeft);
         }
         const bool allOn = ! masterView && selection.size() == 4;
         for (int k = 0; k < 3; ++k)
@@ -1583,7 +1799,7 @@ void NektarEditor::renderDesign (Graphics& g)
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText ("Pair tools work on 1 + 2 and on 3 + 4", juce::Rectangle<float> (386, 412, 350, 30), juce::Justification::centredLeft);
+            g.drawText ("Pair tools work on 1 + 2 and on 3 + 4", juce::Rectangle<float> (386, 412, 250, 30), juce::Justification::centredLeft);
         }
 
         // columns (controls come next)

@@ -46,6 +46,24 @@ private:
 };
 
 // Live parts of the top bar: timer, progress bar and the Record button (they change while recording).
+// Square pad of a pair joystick (pair 0 = samples 1+2, pair 1 = samples 3+4): the stick blends the four corner settings.
+// It moves only while the mouse holds it and stays where it is let go.
+class PairPad : public juce::Component
+{
+public:
+    static constexpr float kHalf = 78.0f; // half side in design units
+    PairPad (NektarProcessor& p, int pairIn) : proc (p), pair (pairIn) { setMouseCursor (juce::MouseCursor::CrosshairCursor); }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent& e) override { setFromMouse (e); }
+    void mouseUp (const juce::MouseEvent&) override;
+private:
+    void setFromMouse (const juce::MouseEvent&);
+    NektarProcessor& proc;
+    int pair;
+    bool dragging = false;
+};
+
 // Round XY pad for the joystick modulation source; right-click clears the recorded path.
 class JoyPad : public juce::Component
 {
@@ -132,6 +150,11 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<RecordHud> hud;
     std::unique_ptr<JoyPad> joyPad;
+    std::unique_ptr<PairPad> pairPads[2];
+    bool detailsView = false;           // false = the joystick face, true = the panel with all the knobs
+    void pressNew (int pair);
+    void pressBack (int pair);
+    void pressKeep();
     std::unique_ptr<SpacePad> spacePad;
     juce::Point<float> joyPadCentre;
     juce::String message;
