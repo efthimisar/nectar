@@ -25,8 +25,11 @@ struct Sample
     std::vector<float> hitGate;         // 0..1 per sample: how much of `play` counts as a hit at that moment
     juce::AudioBuffer<float> transient; // only the sudden hits of `play` (same length); laid back over the morph, which smooths them
     juce::AudioBuffer<float> grainSrcHi; // second coloured copy: the other end of a colour knob that is being moved (LFO etc.)
-    int moveParam = -1;                 // which colour knob moves between grainSrc and grainSrcHi (-1 = none)
+    int moveParam = -1;                 // which colour knob moves between grainSrc and grainSrcHi (-1 = none, 100 = Air)
     float moveLo = 0.0f, moveHi = 1.0f;
+    juce::AudioBuffer<float> grainSrcY, grainSrcXY; // with a second, differently moved knob: its other end, and both other ends
+    int moveParam2 = -1;
+    float moveLo2 = 0.0f, moveHi2 = 1.0f;
     juce::AudioBuffer<float> grainSrc;  // `play` with the colour (Tone / Focus / Size) baked in, for the grains (0 samples = use play)
     float cleanN = -1.0f, cleanH = -1.0f, cleanL = -1.0f; // the cleaning settings `cleaned` was made with
     bool reverse = false;               // the chosen part is played backwards

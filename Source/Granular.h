@@ -30,6 +30,9 @@ public:
         float gain = 1.0f;
         const juce::AudioBuffer<float>* src2 = nullptr; // a second copy of the sound (same length) with other colour settings
         float mix2 = 0.0f;                              // 0 = the sound given to process(), 1 = src2 (moved by an LFO etc.)
+        const juce::AudioBuffer<float>* src3 = nullptr; // second, differently moved knob: its other end ...
+        const juce::AudioBuffer<float>* src4 = nullptr; // ... and both other ends
+        float mix3 = 0.0f;
     };
 
     void prepare (double sr) { rate = sr; reset(); }
@@ -63,6 +66,11 @@ public:
         lastMix2 = mixEnd;
         float mixNow = mixStart;
         const float mixStep = (mixEnd - mixStart) / (float) juce::jmax (1, num);
+        const bool four = two && p.src3 != nullptr && p.src4 != nullptr && p.src3->getNumSamples() == n && p.src4->getNumSamples() == n;
+        const float mix3Start = lastMix3, mix3End = juce::jlimit (0.0f, 1.0f, p.mix3);
+        lastMix3 = mix3End;
+        float mix3Now = mix3Start;
+        const float mix3Step = (mix3End - mix3Start) / (float) juce::jmax (1, num);
         const float relC = 1.0f - std::exp (-1.0f / (juce::jmax (0.01f, p.releaseSec) * (float) rate));
         for (int i = 0; i < num; ++i)
         {
@@ -96,6 +104,7 @@ public:
             scanPos -= std::floor (scanPos);
 
             mixNow += mixStep;
+            mix3Now += mix3Step;
             float l = 0.0f, r = 0.0f;
             for (auto& g : grains)
             {
@@ -119,6 +128,16 @@ public:
                     const float xr = chs2 > 1 ? p.src2->getSample (1, i0) * (1.0f - fr) + p.src2->getSample (1, i0 + 1) * fr : xl;
                     sl2 = sl + (xl - sl) * mixNow;
                     sr2 = sr2 + (xr - sr2) * mixNow;
+                    if (four)
+                    {
+                        const float yl = p.src3->getSample (0, i0) * (1.0f - fr) + p.src3->getSample (0, i0 + 1) * fr;
+                        const float yr = p.src3->getNumChannels() > 1 ? p.src3->getSample (1, i0) * (1.0f - fr) + p.src3->getSample (1, i0 + 1) * fr : yl;
+                        const float zl = p.src4->getSample (0, i0) * (1.0f - fr) + p.src4->getSample (0, i0 + 1) * fr;
+                        const float zr = p.src4->getNumChannels() > 1 ? p.src4->getSample (1, i0) * (1.0f - fr) + p.src4->getSample (1, i0 + 1) * fr : zl;
+                        const float bl = yl + (zl - yl) * mixNow, br = yr + (zr - yr) * mixNow;
+                        sl2 += (bl - sl2) * mix3Now;
+                        sr2 += (br - sr2) * mix3Now;
+                    }
                 }
                 l += (two ? sl2 : sl) * w * g.gl;
                 r += sr2 * w * g.gr;
@@ -137,7 +156,7 @@ private:
     juce::Random rnd { 1234 };
     double rate = 48000.0, untilNext = 0.0, scanPos = 0.0;
     int note = 60, step = 0;
-    float velocity = 1.0f, env = 0.0f, lastMix2 = 0.0f;
+    float velocity = 1.0f, env = 0.0f, lastMix2 = 0.0f, lastMix3 = 0.0f;
     bool held = false;
 };
 

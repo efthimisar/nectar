@@ -2,14 +2,19 @@
 #include "PluginEditor.h"
 #include "BodyBake.h"
 
+// Colour settings for the grains at the ends of what LFOs / envelopes do to the colour knobs: 1 setting (nothing moves),
+// 2 (one source moves knobs) or 4 (two different sources: every combination of their two ends).
+struct ColourCorner { SpectralBody body; float blur = 0.0f, air = 0.5f; };
+struct ColourMove { ColourCorner c[4]; int n = 1; int param[2] = { -1, -1 }; float lo[2] = { 0.0f, 0.0f }, hi[2] = { 1.0f, 1.0f }; };
+
 // Cleans one slot in the background: analysis once per sound, then low cut, hum and noise reduction.
 class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai, bool rv, std::shared_ptr<const Sample> pt, float pm, bool al, SpectralBody bh, float blh, int mvp, float mlo, float mhi)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai, bool rv, std::shared_ptr<const Sample> pt, float pm, bool al, ColourMove cm)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai), reverse (rv), partner (std::move (pt)), pairMorph (pm), autoLevel (al), bodyHi (bh), blurHi (blh), moveParam (mvp), moveLo (mlo), moveHi (mhi) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai), reverse (rv), partner (std::move (pt)), pairMorph (pm), autoLevel (al), mv (cm) {}
 
     JobStatus runJob() override
     {
@@ -62,28 +67,16 @@ public:
             }
             if (b > 1.0e-20) smp.grainSrc.applyGain ((float) juce::jlimit (0.25, 4.0, std::sqrt (a / b)));
         };
-        auto bake = [this, &bakeOne] (Sample& smp)
+        auto clearMove = [] (Sample& smp)
         {
-            smp.moveParam = -1;
-            smp.grainSrcHi.setSize (0, 0);
-            if (moveParam >= 0 && grains)
-            {
-                bakeOne (smp, bodyHi, blurHi);
-                if (smp.grainSrc.getNumSamples() == 0) smp.grainSrc = smp.play;
-                smp.grainSrcHi = std::move (smp.grainSrc);
-                smp.grainSrc.setSize (0, 0);
-            }
-            bakeOne (smp, body, blur);
-            if (smp.grainSrcHi.getNumSamples() > 0)
-            {
-                if (smp.grainSrc.getNumSamples() == 0) smp.grainSrc = smp.play;
-                smp.moveParam = moveParam; smp.moveLo = moveLo; smp.moveHi = moveHi;
-            }
+            smp.moveParam = smp.moveParam2 = -1;
+            smp.grainSrcHi.setSize (0, 0); smp.grainSrcY.setSize (0, 0); smp.grainSrcXY.setSize (0, 0);
         };
-        bake (*s);
+        clearMove (*s);
         if (! (soundSame && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5))
         {
             {   // the sound itself is ready: hand it over now, the sine-wave description follows when it is done
+                bakeOne (*s, body, blur);
                 auto quick = std::make_shared<Sample> (*s);
                 quick->model = nullptr;
                 const juce::ScopedLock sl (owner.resultLock);
@@ -103,13 +96,35 @@ public:
                 s->modelGain = b > 1.0e-20 ? (float) juce::jlimit (0.25, 4.0, std::sqrt (a / b)) : 1.0f;
             }
         }
-        if (std::abs (air - 0.5f) >= 0.01f && s->model != nullptr)
-        {
-            applyAir (s->play, *s->model, air);
-            bake (*s);
+        clearMove (*s);
+        if (grains && mv.n > 1)
+        {   // something moves colour knobs: the grains get a coloured copy for every end of the movement and blend between them
+            const juce::AudioBuffer<float> plain (s->play);
+            juce::AudioBuffer<float> copies[4];
+            for (int i = mv.n - 1; i >= 0; --i)
+            {
+                s->play = plain;
+                if (std::abs (mv.c[i].air - 0.5f) >= 0.01f && s->model != nullptr) applyAir (s->play, *s->model, mv.c[i].air);
+                bakeOne (*s, mv.c[i].body, mv.c[i].blur);
+                copies[i] = s->grainSrc.getNumSamples() > 0 ? s->grainSrc : s->play;
+                if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
+                    return jobHasFinished;
+            }
+            s->grainSrc = std::move (copies[0]); // s->play is now the sound with the first setting
+            s->grainSrcHi = std::move (copies[1]);
+            s->moveParam = mv.param[0]; s->moveLo = mv.lo[0]; s->moveHi = mv.hi[0];
+            if (mv.n == 4)
+            {
+                s->grainSrcY = std::move (copies[2]);
+                s->grainSrcXY = std::move (copies[3]);
+                s->moveParam2 = mv.param[1]; s->moveLo2 = mv.lo[1]; s->moveHi2 = mv.hi[1];
+            }
         }
-        else if (modelMix > 0.01f || pairMorph > 0.01f)
-            bake (*s);
+        else
+        {
+            if (std::abs (air - 0.5f) >= 0.01f && s->model != nullptr) applyAir (s->play, *s->model, air);
+            bakeOne (*s, body, blur);
+        }
         const juce::ScopedLock sl (owner.resultLock);
         owner.results[(size_t) slot] = s;
         return jobHasFinished;
@@ -130,10 +145,7 @@ private:
     std::shared_ptr<const Sample> partner;
     float pairMorph;
     bool autoLevel;
-    SpectralBody bodyHi;
-    float blurHi;
-    int moveParam;
-    float moveLo, moveHi;
+    ColourMove mv;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -571,34 +583,65 @@ void NektarProcessor::scheduleClean (int slot)
     }
     SpectralBody bd;
     bd.tone = colP[(size_t) slot][4]->load(); bd.focus = colP[(size_t) slot][5]->load(); bd.size = colP[(size_t) slot][6]->load(); bd.rough = colP[(size_t) slot][7]->load();
-    // colour knobs that something moves (LFO, envelope ...): the colour is baked at both ends of the movement
-    SpectralBody bdHi = bd;
-    float blurLo = colP[(size_t) slot][2]->load(), blurHi = blurLo, mvLo = 0.0f, mvHi = 1.0f;
-    int mvParam = -1;
+    // colour knobs that something moves (LFO, envelope ...): the colour is baked at the ends of the movement
+    const float blurBase = colP[(size_t) slot][2]->load(), airBase = airP[(size_t) slot]->load();
+    ColourMove mv;
+    for (auto& c : mv.c) { c.body = bd; c.blur = blurBase; c.air = airBase; }
+    if (grP[(size_t) slot][0]->load() > 0.5f)
     {
-        const int order[5] = { 4, 5, 6, 2, 7 };
-        float* lo[5] = { &bd.tone, &bd.focus, &bd.size, &blurLo, &bd.rough };
-        float* hi[5] = { &bdHi.tone, &bdHi.focus, &bdHi.size, &blurHi, &bdHi.rough };
-        for (int k = 0; k < 5; ++k)
+        struct K { int id; const std::atomic<float>* raw; float v = 0, amt = 0; int src = 0, axis = 0; };
+        K ks[6] = { { 4, colP[(size_t) slot][4] }, { 5, colP[(size_t) slot][5] }, { 6, colP[(size_t) slot][6] },
+                    { 2, colP[(size_t) slot][2] }, { 7, colP[(size_t) slot][7] }, { 100, airP[(size_t) slot] } };
+        int ax[2] = { -1, -1 };
+        for (int k = 0; k < 6; ++k)
         {
-            const auto it = modIdxByRaw.find (colP[(size_t) slot][(size_t) order[k]]);
+            auto& q = ks[k];
+            q.v = q.raw->load();
+            const auto it = modIdxByRaw.find (q.raw);
             if (it == modIdxByRaw.end()) continue;
-            const float amt = std::abs (routeAmt[(size_t) it->second].load());
-            if (routeSrc[(size_t) it->second].load() <= 0 || amt < 0.01f) continue;
-            const float v = colP[(size_t) slot][(size_t) order[k]]->load();
-            *lo[k] = juce::jlimit (0.0f, 1.0f, v - amt);
-            *hi[k] = juce::jlimit (0.0f, 1.0f, v + amt);
-            if (mvParam < 0 && *hi[k] - *lo[k] > 0.01f) { mvParam = order[k]; mvLo = *lo[k]; mvHi = *hi[k]; }
+            q.amt = routeAmt[(size_t) it->second].load();
+            q.src = routeSrc[(size_t) it->second].load();
+            if (q.src <= 0 || std::abs (q.amt) < 0.01f) { q.src = 0; continue; }
+            if (ax[0] < 0) ax[0] = k;
+            else if (ax[1] < 0 && q.src != ks[ax[0]].src) ax[1] = k;
         }
+        for (auto& q : ks)
+            if (q.src > 0) q.axis = (ax[1] >= 0 && q.src == ks[ax[1]].src) ? 2 : 1;
+        mv.n = ax[1] >= 0 ? 4 : (ax[0] >= 0 ? 2 : 1);
+        for (int a = 0; a < 2; ++a)
+            if (ax[a] >= 0)
+            {
+                mv.param[a] = ks[ax[a]].id;
+                mv.lo[a] = juce::jlimit (0.0f, 1.0f, ks[ax[a]].v - std::abs (ks[ax[a]].amt));
+                mv.hi[a] = juce::jlimit (0.0f, 1.0f, ks[ax[a]].v + std::abs (ks[ax[a]].amt));
+            }
+        for (int i = 0; i < mv.n; ++i)
+            for (const auto& q : ks)
+            {
+                if (q.src <= 0) continue;
+                const auto& ref = ks[ax[q.axis - 1]];
+                const float dir = (q.amt * ref.amt >= 0.0f ? 1.0f : -1.0f) * (((i >> (q.axis - 1)) & 1) ? 1.0f : -1.0f);
+                const float val = juce::jlimit (0.0f, 1.0f, q.v + std::abs (q.amt) * dir);
+                auto& c = mv.c[i];
+                switch (q.id)
+                {
+                    case 4: c.body.tone = val; break;
+                    case 5: c.body.focus = val; break;
+                    case 6: c.body.size = val; break;
+                    case 2: c.blur = val; break;
+                    case 7: c.body.rough = val; break;
+                    default: c.air = val; break;
+                }
+            }
     }
     const int gen = ++latestJob[(size_t) slot];
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
                                     grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
                                     grP[(size_t) slot][0]->load() > 0.5f, bd,
-                                    blurLo, colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
+                                    blurBase, colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
                                     airP[(size_t) slot]->load(), revP[(size_t) slot]->load() > 0.5f,
                                     slot % 2 == 0 ? getSample (slot + 1) : nullptr, slot % 2 == 0 ? pairMorphP[(size_t) (slot / 2)]->load() : 0.0f,
-                                    apvts.getRawParameterValue ("autolevel")->load() > 0.5f, bdHi, blurHi, mvParam, mvLo, mvHi), true);
+                                    apvts.getRawParameterValue ("autolevel")->load() > 0.5f, mv), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
@@ -862,10 +905,18 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             g.gain = p.level * p.level * p.autoGain;
             const auto smpNow = pl.getSample();
             const bool baked = smpNow->grainSrc.getNumSamples() == smpNow->play.getNumSamples();
-            if (baked && smpNow->moveParam >= 0 && smpNow->grainSrcHi.getNumSamples() == smpNow->play.getNumSamples())
+            const int nPlay = smpNow->play.getNumSamples();
+            auto knobNow = [&] (int id) { return id == 100 ? modded (airP[(size_t) slot]) : modded (colP[(size_t) slot][(size_t) id]); };
+            if (baked && smpNow->moveParam >= 0 && smpNow->grainSrcHi.getNumSamples() == nPlay)
             {
                 g.src2 = &smpNow->grainSrcHi;
-                g.mix2 = (modded (colP[(size_t) slot][(size_t) smpNow->moveParam]) - smpNow->moveLo) / juce::jmax (0.001f, smpNow->moveHi - smpNow->moveLo);
+                g.mix2 = (knobNow (smpNow->moveParam) - smpNow->moveLo) / juce::jmax (0.001f, smpNow->moveHi - smpNow->moveLo);
+                if (smpNow->moveParam2 >= 0 && smpNow->grainSrcY.getNumSamples() == nPlay && smpNow->grainSrcXY.getNumSamples() == nPlay)
+                {
+                    g.src3 = &smpNow->grainSrcY;
+                    g.src4 = &smpNow->grainSrcXY;
+                    g.mix3 = (knobNow (smpNow->moveParam2) - smpNow->moveLo2) / juce::jmax (0.001f, smpNow->moveHi2 - smpNow->moveLo2);
+                }
             }
             grPl.process (view, grMode > 0 ? midi : emptyMidi, baked ? smpNow->grainSrc : smpNow->play, g);
         }
@@ -1398,7 +1449,7 @@ void NektarProcessor::setModRoute (const juce::String& id, ModRoute r)
         return;
     routeAmt[(size_t) it->second].store (juce::jlimit (-1.0f, 1.0f, r.amount));
     routeSrc[(size_t) it->second].store (juce::jlimit (0, (int) kModCount - 1, r.src));
-    if (id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough"))
+    if (id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough") || id.startsWith ("air"))
     {   // a colour knob got (or lost) something that moves it: the colour for the grains is baked again
         const juce::juce_wchar last = id.getLastCharacter();
         const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
