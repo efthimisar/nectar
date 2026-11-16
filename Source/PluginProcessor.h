@@ -8,10 +8,6 @@
 #include "Shifter.h"
 #include "TiltFilter.h"
 #include "SlotMixer.h"
-#include "Slicer.h"
-#include "MelodicDelay.h"
-#include "MelodicReverb.h"
-#include "Bitcrusher.h"
 #include "CharacterFilter.h"
 #include <unordered_map>
 #include <string>
@@ -71,8 +67,8 @@ public:
     juce::String saveToLibrary (int slot); // writes the slot as a WAV into the library folder; returns a message
     static juce::File getLibraryFolder();
 
-    // Modulation: every knob can follow a source (LFO 1, LFO 2, Slicer) by an amount (-1..1 of the knob's range).
-    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, kModSlicer, kModSlicer2, kModSlicer3, kModEnv, kModJoyX, kModJoyY, kModVel, kModKey, kModRamp, kModCount };
+    // Modulation: every knob can follow a source (LFO 1, LFO 2, envelope, joystick ...) by an amount (-1..1 of the knob's range).
+    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, /* 3..5 were the slicers: the numbers stay free so saved sounds keep their sources */ kModEnv = 6, kModJoyX, kModJoyY, kModVel, kModKey, kModRamp, kModCount };
     struct ModRoute { int src = 0; float amount = 0.0f; };
     ModRoute getModRoute (const juce::String& paramId) const;
     void setModRoute (const juce::String& paramId, ModRoute r);
@@ -182,9 +178,6 @@ private:
     std::atomic<bool> joyResetReq { false };
     std::atomic<float>* joyXP = nullptr; std::atomic<float>* joyYP = nullptr;
     std::atomic<float>* joyRecP = nullptr; std::atomic<float>* joyPlayP = nullptr;
-    Bitcrusher crusher;
-    std::atomic<float>* crBitsP = nullptr; std::atomic<float>* crRateP = nullptr;
-    std::atomic<float>* crDitherP = nullptr; std::atomic<float>* crMixP = nullptr;
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
@@ -194,26 +187,11 @@ private:
     std::array<std::atomic<float>*, 2> xmorphP {};
     Resonator resonator, resonatorB;
     juce::AudioBuffer<float> dryScratch, resBScratch;
-    Slicer slicer;
-    MelodicDelay delay;
-    std::atomic<float>* delTimeP = nullptr;
-    std::atomic<float>* delFbP = nullptr;
-    std::atomic<float>* delPitchP = nullptr;
-    std::atomic<float>* delMixP = nullptr;
-    MelodicReverb reverb;
-    std::atomic<float>* revSizeP = nullptr;
-    std::atomic<float>* revDecayP = nullptr;
-    std::atomic<float>* revShimP = nullptr;
-    std::atomic<float>* revMixP = nullptr;
     CharacterFilter charFilter;
     std::atomic<float>* filTypeP = nullptr;
     std::atomic<float>* filCutP = nullptr;
     std::atomic<float>* filResP = nullptr;
     std::atomic<float>* filMixP = nullptr;
-    std::atomic<float>* slRateP = nullptr;
-    std::atomic<float>* slPatP = nullptr;
-    std::atomic<float>* slSmoothP = nullptr;
-    std::atomic<float>* slDepthP = nullptr;
     std::atomic<float>* resTuneP = nullptr;
     std::atomic<float>* resDecayP = nullptr;
     std::atomic<float>* resMatP = nullptr;

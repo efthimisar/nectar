@@ -258,14 +258,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "shape", 1 }, "LFO " + n + " shape",
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     }
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slrate", 1 }, "Slicer rate",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slpattern", 1 }, "Slicer pattern",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.14f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "slsmooth", 1 }, "Slicer smooth",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "sldepth", 1 }, "Slicer depth",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filtype", 1 }, "Filter type (ladder, SVF, comb, formant)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filcut", 1 }, "Filter cutoff",
@@ -289,14 +281,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyrec", 1 }, "Joystick record", false));
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "joyplay", 1 }, "Joystick play path",
                                                           juce::StringArray { "Off", "1shot", "Repeat", "Free" }, 0));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crbits", 1 }, "Crusher bits",
-                                                         NormalisableRange<float> (3.0f, 16.0f, 0.01f), 16.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crrate", 1 }, "Crusher rate reduction",
-                                                         NormalisableRange<float> (1.0f, 32.0f, 0.01f, 0.4f), 1.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crdither", 1 }, "Crusher dither",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "crmix", 1 }, "Crusher mix (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spmix", 1 }, "Space amount (0 = plain pan)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "spspk", 1 }, "Space: speaker check mode", false));
@@ -304,22 +288,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spback", 1 }, "Space: darker behind",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revsize", 1 }, "Reverb note (root pitch)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revdecay", 1 }, "Reverb decay",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revshimmer", 1 }, "Reverb shimmer",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "revmix", 1 }, "Reverb mix (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "deltime", 1 }, "Delay time (tempo steps)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "delfb", 1 }, "Delay feedback",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "delpitch", 1 }, "Delay pitch per repeat (centre = 0)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "delmix", 1 }, "Delay mix (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
@@ -482,18 +450,6 @@ NektarProcessor::NektarProcessor()
     filCutP = apvts.getRawParameterValue ("filcut");
     filResP = apvts.getRawParameterValue ("filres");
     filMixP = apvts.getRawParameterValue ("filmix");
-    revSizeP = apvts.getRawParameterValue ("revsize");
-    revDecayP = apvts.getRawParameterValue ("revdecay");
-    revShimP = apvts.getRawParameterValue ("revshimmer");
-    revMixP = apvts.getRawParameterValue ("revmix");
-    delTimeP = apvts.getRawParameterValue ("deltime");
-    delFbP = apvts.getRawParameterValue ("delfb");
-    delPitchP = apvts.getRawParameterValue ("delpitch");
-    delMixP = apvts.getRawParameterValue ("delmix");
-    slRateP = apvts.getRawParameterValue ("slrate");
-    slPatP = apvts.getRawParameterValue ("slpattern");
-    slSmoothP = apvts.getRawParameterValue ("slsmooth");
-    slDepthP = apvts.getRawParameterValue ("sldepth");
     envP[0] = apvts.getRawParameterValue ("envatk");
     envP[1] = apvts.getRawParameterValue ("envdec");
     envP[2] = apvts.getRawParameterValue ("envsus");
@@ -506,10 +462,6 @@ NektarProcessor::NektarProcessor()
     joyYP = apvts.getRawParameterValue ("joyy");
     joyRecP = apvts.getRawParameterValue ("joyrec");
     joyPlayP = apvts.getRawParameterValue ("joyplay");
-    crBitsP = apvts.getRawParameterValue ("crbits");
-    crRateP = apvts.getRawParameterValue ("crrate");
-    crDitherP = apvts.getRawParameterValue ("crdither");
-    crMixP = apvts.getRawParameterValue ("crmix");
     joyPathX.assign ((size_t) kJoyMax, 0.5f);
     joyPathY.assign ((size_t) kJoyMax, 0.5f);
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
@@ -696,11 +648,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     resonatorB.prepare (sampleRate);
     dryScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
     resBScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
-    slicer.prepare (sampleRate);
-    crusher.prepare (sampleRate);
     envStage = 0; envLevel = 0.0f; heldNotes = 0; rampLevel = 1.0f;
-    delay.prepare (sampleRate);
-    reverb.prepare (sampleRate);
     charFilter.prepare (sampleRate, samplesPerBlock);
     keyboardState.reset();
     if (recState.load() == 0) // the buffer also serves Resample, which works in the plugin too
@@ -973,44 +921,6 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Filter with character (ladder, SVF, comb, formant)
     charFilter.process (buffer, buffer.getNumSamples(), modded (filTypeP), modded (filCutP), modded (filResP), modded (filMixP));
 
-    // Bitcrusher (bit depth, sample-rate reduction)
-    crusher.process (buffer, buffer.getNumSamples(), modded (crBitsP), modded (crRateP), modded (crDitherP), modded (crMixP));
-
-    // Reverb (pitched FDN with shimmer)
-    reverb.process (buffer, buffer.getNumSamples(), modded (revSizeP), modded (revDecayP), modded (revShimP), modded (revMixP));
-
-    // Delay (ping-pong, pitch per repeat), tempo-synced
-    {
-        double bpm = 120.0;
-        if (auto* ph = getPlayHead())
-            if (auto pos = ph->getPosition())
-                if (auto b = pos->getBpm()) bpm = *b;
-        delay.process (buffer, buffer.getNumSamples(), modded (delTimeP), modded (delFbP), modded (delPitchP), modded (delMixP), bpm);
-    }
-
-    // Slicer: rhythmic gate at the host tempo (120 bpm when the host gives none); its gate is also a modulation source
-    {
-        double bpm = 120.0, ppq = -1.0;
-        if (auto* ph = getPlayHead())
-            if (auto pos = ph->getPosition())
-            {
-                if (auto b = pos->getBpm()) bpm = *b;
-                if (pos->getIsPlaying())
-                    if (auto q = pos->getPpqPosition()) ppq = *q;
-            }
-        const float g = slicer.process (buffer, buffer.getNumSamples(), modded (slRateP), modded (slPatP), modded (slSmoothP),
-                                        modded (slDepthP), bpm, ppq);
-        modVal[(size_t) kModSlicer] = g * 2.0f - 1.0f; // used by the next block
-        modShown[(size_t) kModSlicer].store (g * 2.0f - 1.0f);
-        // Slicer 2 and 3: stepped level sequences on the same clock (our own tables, not taken from any product)
-        static const float seq3[16] = { 0.9f, -0.4f, 0.3f, -0.9f, 0.6f, 0.0f, -0.6f, 1.0f, -0.2f, 0.5f, -1.0f, 0.1f, 0.8f, -0.7f, 0.2f, -0.3f };
-        const int st = slicer.currentStep();
-        modVal[(size_t) kModSlicer2] = (float) st / 15.0f * 2.0f - 1.0f; // staircase over one bar of 16 steps
-        modVal[(size_t) kModSlicer3] = seq3[st];
-        modShown[(size_t) kModSlicer2].store (modVal[(size_t) kModSlicer2]);
-        modShown[(size_t) kModSlicer3].store (modVal[(size_t) kModSlicer3]);
-    }
-
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
@@ -1044,7 +954,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
     }
 
-    // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps reverb/delay/shimmer peaks below 1.0; identical below 0.9
+    // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps peaks below 1.0; identical below 0.9
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
         float* d = buffer.getWritePointer (ch);

@@ -24,7 +24,7 @@ const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, {
 const juce::Rectangle<float> kScaleBtn[2] = { { 386.0f, 414.0f, 190.0f, 26.0f }, { 582.0f, 414.0f, 80.0f, 26.0f } };
 constexpr float kColW = (992.0f - 48.0f) / 5.0f;
 inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
-const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev", "noise", "hum", "lowcut" };
+const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev", "noise", "hum", "lowcut", "pan", "loop" };
 const juce::Rectangle<float> kAllBtn (744.0f, 412.0f, 62.0f, 28.0f), kMasterBtn (920.0f, 412.0f, 96.0f, 28.0f), kMotionBtn (814.0f, 412.0f, 98.0f, 28.0f);
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
@@ -319,9 +319,6 @@ void KnobComponent::mouseDown (const juce::MouseEvent& e)
             menu.addItem (1, "None", true, r.src == 0);
             menu.addItem (2, "LFO 1", true, r.src == NektarProcessor::kModLfo1);
             menu.addItem (3, "LFO 2", true, r.src == NektarProcessor::kModLfo2);
-            menu.addItem (4, "Slicer", true, r.src == NektarProcessor::kModSlicer);
-            menu.addItem (5, "Slicer 2 (staircase)", true, r.src == NektarProcessor::kModSlicer2);
-            menu.addItem (6, "Slicer 3 (step sequence)", true, r.src == NektarProcessor::kModSlicer3);
             menu.addItem (7, "Envelope", true, r.src == NektarProcessor::kModEnv);
             menu.addItem (8, "Joystick X", true, r.src == NektarProcessor::kModJoyX);
             menu.addItem (9, "Joystick Y", true, r.src == NektarProcessor::kModJoyY);
@@ -639,6 +636,9 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
 
     addKnob (845, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
+    joyPad = std::make_unique<JoyPad> (proc);
+    joyPadCentre = { colX (4) + 62.0f, 590.0f };
+    addChildComponent (*joyPad);
     fixedKnobs = knobs.size();
     rebuildPanel();
 
@@ -1071,7 +1071,7 @@ void NektarEditor::timerCallback()
     }
     key << juce::roundToInt (proc.apvts.getRawParameterValue ("scale")->load()) << "k" << juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load());
     key << prim << (motionView ? "o" : "") << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
-    if (masterView && ! motionView && panelMix != mixMask())
+    if (! motionView && panelMix != mixMask())
     {
         cache = juce::Image();
         rebuildPanel();
@@ -1090,10 +1090,11 @@ void NektarEditor::timerCallback()
 
 int NektarEditor::mixMask() const
 {
-    const char* ids[5] = { "filmix", "revmix", "delmix", "crmix", "spmix" };
+    const char* ids[3] = { "filmix", "resmix", "spmix" };
+    const int bits[3] = { 1, 2, 16 };
     int m = 0;
-    for (int i = 0; i < 5; ++i)
-        if (proc.apvts.getRawParameterValue (ids[i])->load() > 0.001f) m |= 1 << i;
+    for (int i = 0; i < 3; ++i)
+        if (proc.apvts.getRawParameterValue (ids[i])->load() > 0.001f) m |= bits[i];
     return m;
 }
 
@@ -1110,6 +1111,7 @@ void NektarEditor::rebuildPanel()
         knobPos.removeLast();
     }
     lastPanel.clear();
+    if (joyPad != nullptr) joyPad->setVisible (motionView);
     const float y1 = 568.0f, y2 = 612.0f, r = 10.0f;
     auto row = [&] (int col, float y, std::initializer_list<std::pair<const char*, juce::String>> ks)
     {
@@ -1129,7 +1131,8 @@ void NektarEditor::rebuildPanel()
         row (2, 590.0f, { { "Fade in", "lfodelay" }, { "Fade out", "lfofade" }, { "Spiral", "lfospiral" } });
         row (3, y1, { { "Attack", "envatk" }, { "Decay", "envdec" }, { "Sustain", "envsus" }, { "Release", "envrel" } });
         row (3, y2, { { "Ramp", "ramptime" } });
-        row (4, 590.0f, { { "Rate", "slrate" }, { "Pattern", "slpattern" }, { "Smooth", "slsmooth" }, { "Depth", "sldepth" } });
+        addKnob (colX (4) + kColW - 34.0f, y1, r, "Record", false, 0.0f, "joyrec", true);
+        addKnob (colX (4) + kColW - 34.0f, y2, r, "Play", false, 0.0f, "joyplay");
     }
     else if (masterView)
     {
@@ -1144,17 +1147,22 @@ void NektarEditor::rebuildPanel()
         panelMix = mixMask();
         if (panelMix & 1) row (1, 590.0f, { { "Type", "filtype" }, { "Cutoff", "filcut" }, { "Reso", "filres" }, { "Mix", "filmix" } });
         else              row (1, 590.0f, { { "Mix", "filmix" } });
-        if (panelMix & 2) row (2, 590.0f, { { "Note", "revsize" }, { "Decay", "revdecay" }, { "Mix", "revmix" } });
-        else              row (2, 590.0f, { { "Mix", "revmix" } });
-        if (panelMix & 4) row (3, 590.0f, { { "Time", "deltime" }, { "Feedback", "delfb" }, { "Pitch", "delpitch" }, { "Mix", "delmix" } });
-        else              row (3, 590.0f, { { "Mix", "delmix" } });
-        if (panelMix & 8) row (4, 590.0f, { { "Bits", "crbits" }, { "Rate", "crrate" }, { "Mix", "crmix" } });
-        else              row (4, 590.0f, { { "Mix", "crmix" } });
+        if (panelMix & 2)
+        {
+            row (2, 590.0f, { { "Tune", "restune" }, { "Tail", "resdecay" }, { "Material", "resmat" }, { "Mix", "resmix" } });
+            row (3, 590.0f, { { "Tune B", "restuneb" }, { "Mix B", "resmixb" } });
+        }
+        else
+            row (2, 590.0f, { { "Mix", "resmix" } });
     }
     else
     {
         const int s = primarySlot();
-        row (0, y1, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
+        panelMix = mixMask();
+        if (panelMix & 16) // with Space open the pad places the sounds, so Pan would not be heard
+            row (0, y1, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
+        else
+            row (0, y1, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) }, { "Pan", slotId ("pan", s) } });
         const bool grains = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", s))->load()) > 0;
         panelGrains = grains;
         if (! grains)
@@ -1189,11 +1197,11 @@ void NektarEditor::rebuildPanel()
             row (2, y2, { { "Reverse", slotId ("grrev", s) }, { "Spread", slotId ("grspread", s) }, { "Gate", slotId ("grgate", s) } });
         }
         else
-            row (1, 590.0f, { { "Start", slotId ("grstart", s) }, { "End", slotId ("grend", s) } });
         {
-            const float cx = colX (1) + kColW - 30.0f;
-            addKnob (cx, grains ? y1 : 590.0f, r, "Backwards", false, 0.0f, slotId ("rev", s).toRawUTF8(), true);
+            row (1, y1, { { "Start", slotId ("grstart", s) }, { "End", slotId ("grend", s) } });
+            addKnob (colX (1) + kColW * 0.5f + 34.0f, y2, r, "Loop", false, 0.0f, slotId ("loop", s).toRawUTF8(), true);
         }
+        addKnob (grains ? colX (1) + kColW - 30.0f : colX (1) + kColW * 0.5f - 34.0f, grains ? y1 : y2, r, "Backwards", false, 0.0f, slotId ("rev", s).toRawUTF8(), true);
     }
     resized();
 }
@@ -1207,7 +1215,7 @@ void NektarEditor::drawOverlay (Graphics& g)
         g.setFont (font (regular, 16));
         if (motionView)
         {
-            g.drawFittedText ("Right-click any knob (in Sample or Master) and choose what moves it: LFO 1, LFO 2, Envelope, Slicer, Velocity, Key, Ramp.\nThen hold Shift and drag that knob to set how far it moves.", kScreen.reduced (20.0f, 4.0f).toNearestInt(), juce::Justification::centred, 2);
+            g.drawFittedText ("Right-click any knob (in Sample or Master) and choose what moves it: LFO 1, LFO 2, Envelope, Joystick X or Y, Velocity, Key, Ramp.\nThen hold Shift and drag that knob to set how far it moves.", kScreen.reduced (20.0f, 4.0f).toNearestInt(), juce::Justification::centred, 2);
             return;
         }
         g.drawText ("The four sounds together", kScreen, juce::Justification::centred);
@@ -1579,12 +1587,13 @@ void NektarEditor::renderDesign (Graphics& g)
         }
 
         // columns (controls come next)
-        const char* motionNames[5] = { "LFO 1", "LFO 2", "LFO fade \xc2\xb7 Spiral", "Envelope \xc2\xb7 Ramp", "Slicer" };
+        const char* motionNames[5] = { "LFO 1", "LFO 2", "LFO fade \xc2\xb7 Spiral", "Envelope \xc2\xb7 Ramp", "Joystick" };
         const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour \xc2\xb7 Clean", "Filter \xc2\xb7 Shift" },
-                                    { "Space", "Filter", "Reverb", "Delay", "Crush" } };
+                                    { "Space", "Filter", "Resonator", "Resonator B", "" } };
         const float cw = kColW;
         for (int c = 0; c < 5; ++c)
         {
+            if (masterView && ! motionView && c == 4) continue; // four columns in the Master view
             const juce::Rectangle<float> col (24.0f + (float) c * (cw + 12.0f), 524.0f, cw, 120.0f);
             g.setColour (juce::Colours::black.withAlpha (0.18f));
             g.fillRoundedRectangle (col, 10);
