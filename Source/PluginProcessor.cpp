@@ -328,6 +328,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph34", 1 }, "Morph 3 > 4 (0 = sound 3, 1 = sound 4 at the pitch of 3)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    for (const char* id : { "vec1x", "vec1y", "vec2x", "vec2y" })
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { id, 1 }, juce::String ("Pair joystick ") + id,
+                                                             NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
                                                           juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
@@ -437,6 +440,8 @@ NektarProcessor::NektarProcessor()
     pairMorphP[1] = apvts.getRawParameterValue ("morph34");
     apvts.addParameterListener ("morph12", this);
     apvts.addParameterListener ("morph34", this);
+    vecXP[0] = apvts.getRawParameterValue ("vec1x"); vecYP[0] = apvts.getRawParameterValue ("vec1y");
+    vecXP[1] = apvts.getRawParameterValue ("vec2x"); vecYP[1] = apvts.getRawParameterValue ("vec2y");
     scaleP = apvts.getRawParameterValue ("scale");
     keyP = apvts.getRawParameterValue ("key");
     for (int i = 0; i < 128; ++i) scaleMap[(size_t) i] = (juce::int8) i;
@@ -539,7 +544,31 @@ void NektarProcessor::scheduleClean (int slot)
     const float blurBase = colP[(size_t) slot][2]->load(), airBase = airP[(size_t) slot]->load();
     ColourMove mv;
     for (auto& c : mv.c) { c.body = bd; c.blur = blurBase; c.air = airBase; }
-    if (grP[(size_t) slot][0]->load() > 0.5f)
+    if (grP[(size_t) slot][0]->load() > 0.5f && vecOn[(size_t) (slot / 2)].load())
+    {   // the pair joystick: one coloured copy per corner, blended by the stick
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        const std::pair<int, const std::atomic<float>*> ks[6] = { { 4, colP[(size_t) slot][4] }, { 5, colP[(size_t) slot][5] }, { 6, colP[(size_t) slot][6] },
+                                                                 { 2, colP[(size_t) slot][2] }, { 7, colP[(size_t) slot][7] }, { 100, airP[(size_t) slot] } };
+        for (const auto& k : ks)
+        {
+            const auto it = modIdxByRaw.find (k.second);
+            if (it == modIdxByRaw.end()) continue;
+            for (const auto& e : vecEntries[(size_t) (slot / 2)])
+                if (e.idx == it->second)
+                    for (int i = 0; i < 4; ++i)
+                        switch (k.first)
+                        {
+                            case 4: mv.c[i].body.tone = e.c[i]; break;
+                            case 5: mv.c[i].body.focus = e.c[i]; break;
+                            case 6: mv.c[i].body.size = e.c[i]; break;
+                            case 2: mv.c[i].blur = e.c[i]; break;
+                            case 7: mv.c[i].body.rough = e.c[i]; break;
+                            default: mv.c[i].air = e.c[i]; break;
+                        }
+        }
+        mv.n = 4; mv.param[0] = 200; mv.param[1] = 201; mv.lo[0] = mv.lo[1] = 0.0f; mv.hi[0] = mv.hi[1] = 1.0f;
+    }
+    else if (grP[(size_t) slot][0]->load() > 0.5f)
     {
         struct K { int id; const std::atomic<float>* raw; float v = 0, amt = 0; int src = 0, axis = 0; };
         K ks[6] = { { 4, colP[(size_t) slot][4] }, { 5, colP[(size_t) slot][5] }, { 6, colP[(size_t) slot][6] },
@@ -854,7 +883,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             const auto smpNow = pl.getSample();
             const bool baked = smpNow->grainSrc.getNumSamples() == smpNow->play.getNumSamples();
             const int nPlay = smpNow->play.getNumSamples();
-            auto knobNow = [&] (int id) { return id == 100 ? modded (airP[(size_t) slot]) : modded (colP[(size_t) slot][(size_t) id]); };
+            auto knobNow = [&] (int id) { return id == 200 ? vecXs[(size_t) (slot / 2)] : id == 201 ? vecYs[(size_t) (slot / 2)] : id == 100 ? modded (airP[(size_t) slot]) : modded (colP[(size_t) slot][(size_t) id]); };
             if (baked && smpNow->moveParam >= 0 && smpNow->grainSrcHi.getNumSamples() == nPlay)
             {
                 g.src2 = &smpNow->grainSrcHi;
@@ -1339,6 +1368,9 @@ void NektarProcessor::buildModTable()
             }
     routeSrc = std::vector<std::atomic<int>> (modIds.size());
     routeAmt = std::vector<std::atomic<float>> (modIds.size());
+    vecVal = std::vector<std::atomic<float>> (modIds.size());
+    vecAct = std::vector<std::atomic<bool>> (modIds.size());
+    for (auto& a : vecAct) a.store (false);
     for (auto& a : routeSrc) a.store (0);
     for (auto& a : routeAmt) a.store (0.0f);
     for (auto& a : modShown) a.store (0.0f);
@@ -1368,17 +1400,109 @@ void NektarProcessor::setModRoute (const juce::String& id, ModRoute r)
     }
 }
 
+void NektarProcessor::setVectorOn (int pair, bool on)
+{
+    vecOn[(size_t) pair].store (on);
+    if (! on)
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
+    }
+    for (int slot = pair * 2; slot < pair * 2 + 2; ++slot)
+    {   // the baked copies for the grains follow the corners
+        cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
+        cleanDirty[(size_t) slot] = true;
+    }
+}
+
+// Four random corner settings for one pair. Pitch, the chosen part of the sound and the grain mode are left alone,
+// so the result stays playable in tune; in every corner at least one of the two sounds is clearly heard.
+void NektarProcessor::randomiseVector (int pair, int seed)
+{
+    juce::Random rnd (seed);
+    std::vector<VecEntry> out;
+    auto add = [&] (const juce::String& id, std::function<float()> f)
+    {
+        const auto it = modIdxById.find (id.toStdString());
+        if (it == modIdxById.end()) return -1;
+        VecEntry e; e.idx = it->second;
+        for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, f());
+        out.push_back (e);
+        return (int) out.size() - 1;
+    };
+    auto range = [&] (float lo, float hi) { return [&rnd, lo, hi] { return lo + (hi - lo) * rnd.nextFloat(); }; };
+    auto maybe = [&] (float chance, float lo, float hi, float off) { return [&rnd, chance, lo, hi, off] { return rnd.nextFloat() < chance ? lo + (hi - lo) * rnd.nextFloat() : off; }; };
+    int levelAt[2] = { -1, -1 };
+    for (int k = 0; k < 2; ++k)
+    {
+        const int slot = pair * 2 + k;
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        levelAt[k] = add ("level" + sfx, range (0.2f, 0.95f));
+        add ("pan" + sfx, range (0.2f, 0.8f));
+        {   // grains are taken from a place where the sound is clearly present (not from a faded-out stretch)
+            std::vector<float> loud;
+            if (const auto smp = getSample (slot); smp != nullptr && smp->play.getNumSamples() > 4096)
+            {
+                const int n = smp->play.getNumSamples(), bins = 32, w = n / bins;
+                float mx = 0.0f;
+                std::vector<float> lv ((size_t) bins);
+                for (int b2 = 0; b2 < bins; ++b2) { lv[(size_t) b2] = smp->play.getRMSLevel (0, b2 * w, w); mx = juce::jmax (mx, lv[(size_t) b2]); }
+                for (int b2 = 0; b2 < bins; ++b2) if (lv[(size_t) b2] >= 0.35f * mx) loud.push_back (((float) b2 + 0.5f) / (float) bins);
+            }
+            add ("grpos" + sfx, [&rnd, loud] { return loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]; });
+        }
+        add ("grscan" + sfx, range (0.5f, 0.55f)); // slow, so the grains stay near the chosen place
+        add ("grspray" + sfx, range (0.0f, 0.6f));
+        add ("grsize" + sfx, range (0.1f, 0.9f));
+        add ("grdens" + sfx, range (0.2f, 0.9f));
+        add ("grjit" + sfx, maybe (0.5f, 0.0f, 0.5f, 0.0f));
+        add ("grrev" + sfx, maybe (0.5f, 0.2f, 1.0f, 0.0f));
+        add ("grspread" + sfx, range (0.3f, 1.0f));
+        add ("grgate" + sfx, range (0.2f, 0.9f));
+        add ("sfiltype" + sfx, range (0.0f, 1.0f));
+        add ("sfilcut" + sfx, range (0.35f, 1.0f));
+        add ("sfilres" + sfx, range (0.1f, 0.7f));
+        add ("fshift" + sfx, maybe (0.5f, 0.15f, 0.85f, 0.5f));
+        add ("ring" + sfx, maybe (0.4f, 0.1f, 0.6f, 0.0f));
+        add ("bodytone" + sfx, range (0.2f, 0.8f));
+        add ("bodyfocus" + sfx, range (0.2f, 0.85f));
+        add ("bodysize" + sfx, range (0.1f, 0.9f));
+        add ("blur" + sfx, maybe (0.5f, 0.1f, 0.7f, 0.0f));
+        add ("srcrough" + sfx, maybe (0.5f, 0.1f, 0.5f, 0.0f));
+        add ("air" + sfx, range (0.25f, 0.9f));
+    }
+    const int crossAt = add (pair == 0 ? "xmorph12" : "xmorph34", range (0.0f, 1.0f));
+    add (pair == 0 ? "imorph12" : "imorph34", maybe (0.5f, 0.1f, 0.6f, 0.0f));
+    if (levelAt[0] >= 0 && levelAt[1] >= 0)
+        for (int c = 0; c < 4; ++c)
+        {   // the sound that Cross favours in this corner is clearly heard
+            const bool second = crossAt >= 0 && out[(size_t) crossAt].c[c] > 0.5f;
+            auto& lv = out[(size_t) levelAt[second ? 1 : 0]].c[c];
+            if (lv < 0.75f) lv = 0.75f + 0.2f * rnd.nextFloat();
+        }
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
+        vecEntries[(size_t) pair] = std::move (out);
+    }
+    setVectorOn (pair, true);
+}
+
 float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
 {
     const float v = raw->load();
     const auto it = modIdxByRaw.find (raw);
     if (it == modIdxByRaw.end())
         return v;
-    const int src = routeSrc[(size_t) it->second].load();
-    if (src <= 0)
+    const size_t i = (size_t) it->second;
+    const bool vec = vecAct[i].load(); // the pair joystick sets this knob
+    const int src = routeSrc[i].load();
+    if (! vec && src <= 0)
         return v;
-    const auto& r = modRanges[(size_t) it->second];
-    const float n = juce::jlimit (0.0f, 1.0f, r.convertTo0to1 (v) + routeAmt[(size_t) it->second].load() * modVal[(size_t) src]);
+    const auto& r = modRanges[i];
+    float n = vec ? vecVal[i].load() : r.convertTo0to1 (v);
+    if (src > 0)
+        n = juce::jlimit (0.0f, 1.0f, n + routeAmt[i].load() * modVal[(size_t) src]);
     return r.convertFrom0to1 (n);
 }
 
@@ -1416,6 +1540,24 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
 {
     const double sr = hostRate.load() > 0.0 ? hostRate.load() : 44100.0;
     const double blockSec = (double) numSamples / sr;
+    // pair joysticks: blend the four corners (the stick is smoothed over about 30 ms, so fast moves do not click)
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        if (! vecOn[(size_t) pair].load()) continue;
+        const float k = 1.0f - std::exp (-(float) blockSec / 0.03f);
+        auto& xs = vecXs[(size_t) pair]; auto& ys = vecYs[(size_t) pair];
+        xs += (juce::jlimit (0.0f, 1.0f, modded (vecXP[(size_t) pair])) - xs) * k;
+        ys += (juce::jlimit (0.0f, 1.0f, modded (vecYP[(size_t) pair])) - ys) * k;
+        vecXShown[(size_t) pair].store (xs); vecYShown[(size_t) pair].store (ys);
+        const juce::SpinLock::ScopedTryLockType lk (vecLock);
+        if (! lk.isLocked()) continue;
+        for (const auto& e : vecEntries[(size_t) pair])
+        {
+            const float a = e.c[0] + (e.c[1] - e.c[0]) * xs, b = e.c[2] + (e.c[3] - e.c[2]) * xs;
+            vecVal[(size_t) e.idx].store (a + (b - a) * ys);
+            vecAct[(size_t) e.idx].store (true);
+        }
+    }
     for (int i = 0; i < 2; ++i)
     {
         const double prev = lfoPhase[i];

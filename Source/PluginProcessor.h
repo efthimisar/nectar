@@ -76,6 +76,10 @@ public:
     bool joyIsArmed() const { return joyRecState.load() == 2; }
     bool joyHasPath() const { return joyLen.load() > 0; }
     void joyClearPath() { joyLen.store (0); }
+    // Pair joystick (pair 0 = samples 1+2, pair 1 = samples 3+4)
+    void randomiseVector (int pair, int seed);  // fills the four corners with random settings and switches the stick on
+    void setVectorOn (int pair, bool on);
+    bool vectorOn (int pair) const { return vecOn[(size_t) pair].load(); }
     float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
 
     // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
@@ -130,6 +134,16 @@ private:
     void buildModTable();
     void addModToState (juce::ValueTree& state);
     void readModFromState (const juce::ValueTree& state);
+    // Pair joystick: each pair (1+2, 3+4) has four corner settings of its knobs; the stick blends between the four, live.
+    struct VecEntry { int idx; float c[4]; };       // knob (index in the modulation table) and its four corner values (0..1 of its range)
+    std::array<std::vector<VecEntry>, 2> vecEntries; // guarded by vecLock
+    juce::SpinLock vecLock;
+    std::array<std::atomic<bool>, 2> vecOn { { { false }, { false } } };
+    std::vector<std::atomic<float>> vecVal;          // per knob: its blended value right now (0..1 of its range)
+    std::vector<std::atomic<bool>> vecAct;           // per knob: the stick is in charge of it
+    std::array<std::atomic<float>*, 2> vecXP {}, vecYP {};
+    std::array<float, 2> vecXs { { 0.5f, 0.5f } }, vecYs { { 0.5f, 0.5f } }; // smoothed stick position (audio thread)
+    std::array<std::atomic<float>, 2> vecXShown { { { 0.5f }, { 0.5f } } }, vecYShown { { { 0.5f }, { 0.5f } } };
     std::vector<std::atomic<int>> routeSrc;
     std::vector<std::atomic<float>> routeAmt;
     std::vector<juce::NormalisableRange<float>> modRanges;
