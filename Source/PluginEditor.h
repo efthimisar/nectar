@@ -143,6 +143,8 @@ private:
     std::map<juce::String, float> lastPanel; // last seen values of the first selected sample (to copy a change to the others)
     juce::String overlayKey;
     bool panelGrains = false;
+    bool panelHum = false;              // the Hum knob is shown only when mains hum was found in the sample
+    bool humFound (int slot) const { const auto sm = proc.getSample (slot); return sm != nullptr && sm->analysis.valid && sm->analysis.humHz > 0.0; }
     int pairIndex() const { if (masterView || selection.size() != 2) return -1; if (selection.count (0) && selection.count (1)) return 0; if (selection.count (2) && selection.count (3)) return 1; return -1; }
     juce::Rectangle<float> screenArea() const;
     void rebuildPanel();
@@ -150,6 +152,7 @@ private:
     juce::String slotId (const char* base, int slot) const { return slot == 0 ? juce::String (base) : juce::String (base) + juce::String (slot + 1); }
     int primarySlot() const { return selection.empty() ? 0 : *selection.begin(); }
     bool masterView = false;
+    bool motionView = false;            // third view: LFOs, envelope, slicer (masterView is also true then)
     int resampleArmedSlot = -1;  // Resample asks once before it replaces a sound
     int resampleArmTicks = 0;
     bool hudWasRecording = false;

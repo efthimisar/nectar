@@ -24,8 +24,8 @@ const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, {
 const juce::Rectangle<float> kScaleBtn[2] = { { 386.0f, 414.0f, 190.0f, 26.0f }, { 582.0f, 414.0f, 80.0f, 26.0f } };
 constexpr float kColW = (992.0f - 48.0f) / 5.0f;
 inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
-const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev" };
-const juce::Rectangle<float> kAllBtn (840.0f, 412.0f, 70.0f, 28.0f), kMasterBtn (920.0f, 412.0f, 96.0f, 28.0f);
+const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev", "noise", "hum", "lowcut" };
+const juce::Rectangle<float> kAllBtn (744.0f, 412.0f, 62.0f, 28.0f), kMasterBtn (920.0f, 412.0f, 96.0f, 28.0f), kMotionBtn (814.0f, 412.0f, 98.0f, 28.0f);
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -746,7 +746,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         {
             if (selection.count (slot) > 0 && selection.size() > 1 && ! masterView) selection.erase (slot);
             else selection.insert (slot);
-            masterView = false;
+            masterView = false; motionView = false;
             selectedSlot = slot;
             cache = juce::Image();
             rebuildPanel();
@@ -756,7 +756,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         {
             const bool changed = masterView || selection.size() != 1 || selection.count (slot) == 0;
             selection = { slot };
-            masterView = false;
+            masterView = false; motionView = false;
             if (changed) { selectedSlot = slot; cache = juce::Image(); rebuildPanel(); repaint(); }
         }
     }
@@ -778,7 +778,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
                 pa->setValueNotifyingHost (pa->convertTo0to1 ((float) pat));
         repaint();
     }
-    else if (masterView && (kScaleBtn[0].contains (p) || kScaleBtn[1].contains (p)))
+    else if (masterView && ! motionView && (kScaleBtn[0].contains (p) || kScaleBtn[1].contains (p)))
     {
         const bool sc = kScaleBtn[0].contains (p);
         if (auto* pa = proc.apvts.getParameter (sc ? "scale" : "key"))
@@ -793,14 +793,23 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
     else if (kAllBtn.contains (p))
     {
         selection = { 0, 1, 2, 3 };
-        masterView = false;
+        masterView = false; motionView = false;
+        cache = juce::Image();
+        rebuildPanel();
+        repaint();
+    }
+    else if (kMotionBtn.contains (p))
+    {
+        motionView = ! motionView;
+        masterView = motionView;
         cache = juce::Image();
         rebuildPanel();
         repaint();
     }
     else if (kMasterBtn.contains (p))
     {
-        masterView = ! masterView;
+        masterView = motionView ? true : ! masterView;
+        motionView = false;
         cache = juce::Image();
         rebuildPanel();
         repaint();
@@ -832,7 +841,7 @@ void NektarEditor::mouseDoubleClick (const juce::MouseEvent& e)
     if (slot >= 0)
     {
         selection = { slot };
-        masterView = false;
+        masterView = false; motionView = false;
         selectedSlot = slot;
         cache = juce::Image();
         rebuildPanel();
@@ -1061,8 +1070,8 @@ void NektarEditor::timerCallback()
         lastPanel[base] = v;
     }
     key << juce::roundToInt (proc.apvts.getRawParameterValue ("scale")->load()) << "k" << juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load());
-    key << prim << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
-    if (! masterView && panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0))
+    key << prim << (motionView ? "o" : "") << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
+    if (! masterView && (panelHum != humFound (prim) || panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0)))
     {
         cache = juce::Image();
         rebuildPanel();
@@ -1099,7 +1108,16 @@ void NektarEditor::rebuildPanel()
             ++i;
         }
     };
-    if (masterView)
+    if (motionView)
+    {
+        row (0, 590.0f, { { "Rate", "lfo1rate" }, { "Shape", "lfo1shape" } });
+        row (1, 590.0f, { { "Rate", "lfo2rate" }, { "Shape", "lfo2shape" } });
+        row (2, 590.0f, { { "Fade in", "lfodelay" }, { "Fade out", "lfofade" }, { "Spiral", "lfospiral" } });
+        row (3, y1, { { "Attack", "envatk" }, { "Decay", "envdec" }, { "Sustain", "envsus" }, { "Release", "envrel" } });
+        row (3, y2, { { "Ramp", "ramptime" } });
+        row (4, 590.0f, { { "Rate", "slrate" }, { "Pattern", "slpattern" }, { "Smooth", "slsmooth" }, { "Depth", "sldepth" } });
+    }
+    else if (masterView)
     {
         row (0, y1, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Width", "width" } });
         row (0, y2, { { "Far", "spfar" }, { "Back", "spback" } });
@@ -1117,7 +1135,11 @@ void NektarEditor::rebuildPanel()
         if (! grains)
             row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
         row (3, y1, { { "Tone", slotId ("bodytone", s) }, { "Focus", slotId ("bodyfocus", s) }, { "Size", slotId ("bodysize", s) }, { "Blur", slotId ("blur", s) } });
-        row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) } });
+        panelHum = humFound (s);
+        if (panelHum)
+            row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) }, { "Clean", slotId ("noise", s) }, { "Hum", slotId ("hum", s) }, { "Low cut", slotId ("lowcut", s) } });
+        else
+            row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) }, { "Clean", slotId ("noise", s) }, { "Low cut", slotId ("lowcut", s) } });
         if (const int pi = pairIndex(); pi >= 0)
         {
             const char* ids[2][3] = { { "imorph12", "xmorph12", "chromo12" }, { "imorph34", "xmorph34", "chromo34" } };
@@ -1153,6 +1175,11 @@ void NektarEditor::drawOverlay (Graphics& g)
     {
         g.setColour (kMuted);
         g.setFont (font (regular, 16));
+        if (motionView)
+        {
+            g.drawFittedText ("Right-click any knob (in Sample or Master) and choose what moves it: LFO 1, LFO 2, Envelope, Slicer, Velocity, Key, Ramp.\nThen hold Shift and drag that knob to set how far it moves.", kScreen.reduced (20.0f, 4.0f).toNearestInt(), juce::Justification::centred, 2);
+            return;
+        }
         g.drawText ("The four sounds together", kScreen, juce::Justification::centred);
         static const char* const keys[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
         const int sc = juce::roundToInt (proc.apvts.getRawParameterValue ("scale")->load());
@@ -1476,7 +1503,7 @@ void NektarEditor::renderDesign (Graphics& g)
         g.setColour (juce::Colours::black.withAlpha (0.35f));
         g.drawRoundedRectangle (plate.reduced (0.5f), 24.0f, 1.2f);
 
-        juce::String title = "Master (all four together)";
+        juce::String title = motionView ? "Motion (what moves the knobs)" : "Master (all four together)";
         if (! masterView)
         {
             title = "Sample ";
@@ -1490,18 +1517,18 @@ void NektarEditor::renderDesign (Graphics& g)
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText (message, juce::Rectangle<float> (386, 412, 444, 30), juce::Justification::centredLeft);
+            g.drawText (message, juce::Rectangle<float> (386, 412, 350, 30), juce::Justification::centredLeft);
         }
         const bool allOn = ! masterView && selection.size() == 4;
-        for (int k = 0; k < 2; ++k)
+        for (int k = 0; k < 3; ++k)
         {
-            const juce::Rectangle<float> r = k == 0 ? kAllBtn : kMasterBtn;
-            const bool on = k == 0 ? allOn : masterView;
+            const juce::Rectangle<float> r = k == 0 ? kAllBtn : (k == 1 ? kMasterBtn : kMotionBtn);
+            const bool on = k == 0 ? allOn : (k == 1 ? masterView && ! motionView : motionView);
             g.setColour (on ? kAcc : Colour (0xff2f2d2b));
             g.fillRoundedRectangle (r, 14);
             g.setColour (on ? kDark : kLight);
             g.setFont (font (reg, 16));
-            g.drawText (k == 0 ? "All" : "Master", r, juce::Justification::centred);
+            g.drawText (k == 0 ? "All" : (k == 1 ? "Master" : "Motion"), r, juce::Justification::centred);
         }
 
         insetBox (g, masterView ? kScreen : screenArea(), 10); // the sound itself is drawn live on top (drawOverlay)
@@ -1518,11 +1545,12 @@ void NektarEditor::renderDesign (Graphics& g)
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText ("Pair tools work on 1 + 2 and on 3 + 4", juce::Rectangle<float> (386, 412, 444, 30), juce::Justification::centredLeft);
+            g.drawText ("Pair tools work on 1 + 2 and on 3 + 4", juce::Rectangle<float> (386, 412, 350, 30), juce::Justification::centredLeft);
         }
 
         // columns (controls come next)
-        const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour", "Filter \xc2\xb7 Shift" },
+        const char* motionNames[5] = { "LFO 1", "LFO 2", "LFO fade \xc2\xb7 Spiral", "Envelope \xc2\xb7 Ramp", "Slicer" };
+        const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour \xc2\xb7 Clean", "Filter \xc2\xb7 Shift" },
                                     { "Space", "Filter", "Reverb", "Delay", "Crush" } };
         const float cw = kColW;
         for (int c = 0; c < 5; ++c)
@@ -1532,7 +1560,7 @@ void NektarEditor::renderDesign (Graphics& g)
             g.fillRoundedRectangle (col, 10);
             g.setColour (kWada[c % 5]);
             g.setFont (font (bld, 15));
-            g.drawText (juce::String (juce::CharPointer_UTF8 (names[masterView ? 1 : 0][c])), col.withHeight (26.0f).translated (0, 4), juce::Justification::centred);
+            g.drawText (juce::String (juce::CharPointer_UTF8 (motionView ? motionNames[c] : names[masterView ? 1 : 0][c])), col.withHeight (26.0f).translated (0, 4), juce::Justification::centred);
         }
     }
 }
