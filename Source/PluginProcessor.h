@@ -5,6 +5,7 @@
 #include <atomic>
 #include "SamplePlayer.h"
 #include "Granular.h"
+#include "Shifter.h"
 #include "TiltFilter.h"
 #include "SlotMixer.h"
 #include "Slicer.h"
@@ -118,7 +119,11 @@ private:
     std::array<std::array<std::atomic<float>*, kCol>, kSlots> colP {};
     std::array<std::array<std::atomic<float>*, 4>, kSlots> sfilP {}; // per-sample filter: type, cutoff, reso, mix
     std::array<CharacterFilter, kSlots> slotFilter;
-    std::array<std::atomic<float>*, kSlots> airP {};
+    std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {}, revP {};
+    std::array<Shifter, kSlots> shifters;
+    std::atomic<float>* scaleP = nullptr;
+    std::atomic<float>* keyP = nullptr;
+    std::array<juce::int8, 128> scaleMap {}; // which note a held key was turned into (for its note-off)
     std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
     TiltFilter tilt;
 

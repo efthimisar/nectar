@@ -7,9 +7,9 @@ class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai, bool rv)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai), reverse (rv) {}
 
     JobStatus runJob() override
     {
@@ -33,11 +33,11 @@ public:
             s->cleaned.setSize (0, 0);
         if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
             return jobHasFinished;
-        s->partA = partA; s->partB = partB;
+        s->partA = partA; s->partB = partB; s->reverse = reverse;
         SamplePlayer::makePlayable (*s, hostRate);
         // the sine-wave description of what is played (kept when the sound itself did not change)
         const bool soundSame = (! params.any() ? base->cleaned.getNumSamples() == 0 : sameClean)
-                               && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f;
+                               && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f && base->reverse == reverse;
         // the colour baked in for the grains
         auto bake = [this] (Sample& smp)
         {
@@ -93,6 +93,7 @@ private:
     bool grains;
     SpectralBody body;
     float blur, modelMix, modelNoise, air;
+    bool reverse;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -134,6 +135,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), defs[i]));
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "air" + sfx, 1 }, "Air" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "fshift" + sfx, 1 }, "Frequency shift" + nm,
+                                                                 NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ring" + sfx, 1 }, "Ring" + nm,
+                                                                 NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+            l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "rev" + sfx, 1 }, "Reverse" + nm, false));
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
             static const char* const fnames[4] = { "Sample filter type", "Sample filter cutoff", "Sample filter reso", "Sample filter mix" };
             static const float fdefs[4] = { 0.0f, 1.0f, 0.3f, 1.0f };
@@ -298,6 +304,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
+                                                          juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
+    l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo width (0 = mono, middle = as it is, 1 = wide)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
@@ -346,6 +355,10 @@ NektarProcessor::NektarProcessor()
             for (int i = 0; i < 4; ++i)
                 sfilP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (fids[i] + sfx);
             airP[(size_t) slot] = apvts.getRawParameterValue ("air" + sfx);
+            fshiftP[(size_t) slot] = apvts.getRawParameterValue ("fshift" + sfx);
+            ringP[(size_t) slot] = apvts.getRawParameterValue ("ring" + sfx);
+            revP[(size_t) slot] = apvts.getRawParameterValue ("rev" + sfx);
+            apvts.addParameterListener ("rev" + sfx, this);
             apvts.addParameterListener ("air" + sfx, this);
         }
         spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
@@ -396,6 +409,9 @@ NektarProcessor::NektarProcessor()
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
     masterP = apvts.getRawParameterValue ("master");
     widthP = apvts.getRawParameterValue ("width");
+    scaleP = apvts.getRawParameterValue ("scale");
+    keyP = apvts.getRawParameterValue ("key");
+    for (int i = 0; i < 128; ++i) scaleMap[(size_t) i] = (juce::int8) i;
     lfoSpiralP = apvts.getRawParameterValue ("lfospiral");
     lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
@@ -461,7 +477,7 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
     if (colour && grP[(size_t) slot][0]->load() < 0.5f)
         return; // without grains the colour is made live
     // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || colour ? 190u : 0u);
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || id.startsWith ("rev") || colour ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -509,7 +525,7 @@ void NektarProcessor::scheduleClean (int slot)
                                     grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
                                     grP[(size_t) slot][0]->load() > 0.5f, bd,
                                     colP[(size_t) slot][2]->load(), colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
-                                    airP[(size_t) slot]->load()), true);
+                                    airP[(size_t) slot]->load(), revP[(size_t) slot]->load() > 0.5f), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
@@ -551,6 +567,8 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         gpl.prepare (sampleRate);
     for (auto& sf : slotFilter)
         sf.prepare (sampleRate, samplesPerBlock);
+    for (auto& sh : shifters)
+        sh.prepare (sampleRate);
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     resonatorB.prepare (sampleRate);
@@ -640,6 +658,38 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
 
+    // Scale lock: a key that is not in the scale plays the nearest note of the scale (the lower one on a tie)
+    {
+        static const int masks[8] = { 0xfff, 0xab5, 0x5ad, 0x295, 0x4a9, 0x6ad, 0x9ad, 0x555 }; // bit n = n semitones above the key note
+        const int sc = juce::jlimit (0, 7, juce::roundToInt (scaleP->load())), key = juce::roundToInt (keyP->load());
+        juce::MidiBuffer mapped;
+        bool changed = false;
+        for (const auto meta : midi)
+        {
+            auto m = meta.getMessage();
+            if (m.isNoteOn())
+            {
+                int n = m.getNoteNumber();
+                if (sc > 0)
+                    for (int d = 0; d < 7; ++d)
+                    {
+                        const int lo = n - d, hi = n + d;
+                        if (lo >= 0 && ((masks[sc] >> (((lo - key) % 12 + 12) % 12)) & 1)) { n = lo; break; }
+                        if (hi <= 127 && ((masks[sc] >> (((hi - key) % 12 + 12) % 12)) & 1)) { n = hi; break; }
+                    }
+                scaleMap[(size_t) m.getNoteNumber()] = (juce::int8) n;
+                if (n != m.getNoteNumber()) { m.setNoteNumber (n); changed = true; }
+            }
+            else if (m.isNoteOff())
+            {
+                const int n = scaleMap[(size_t) m.getNoteNumber()];
+                if (n != m.getNoteNumber()) { m.setNoteNumber (n); changed = true; }
+            }
+            mapped.addEvent (m, meta.samplePosition);
+        }
+        if (changed) midi.swapWith (mapped);
+    }
+
     updateMods (buffer.getNumSamples(), midi);
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
@@ -726,6 +776,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         {
             const auto& f = sfilP[(size_t) slot];
             slotFilter[(size_t) slot].process (view, view.getNumSamples(), modded (f[0]), modded (f[1]), modded (f[2]), modded (f[3]));
+            const float fs = modded (fshiftP[(size_t) slot]), rg = modded (ringP[(size_t) slot]);
+            shifters[(size_t) slot].process (view, view.getNumSamples(), (fs < 0.0f ? -1.0f : 1.0f) * 1000.0f * std::abs (fs * fs * fs),
+                                             rg > 0.005f ? 20.0f * std::pow (100.0f, rg) : 0.0f, juce::jmin (1.0f, rg * 8.0f));
         }
         loadedNow[(size_t) slot] = true;
         pans[(size_t) slot] = modded (panP[(size_t) slot]);
@@ -910,7 +963,7 @@ juce::String NektarProcessor::loadSample (const juce::File& file, int slot)
 
 void NektarProcessor::publishSample (std::shared_ptr<Sample> s, int slot)
 {
-    s->partA = grP[(size_t) slot][1]->load(); s->partB = grP[(size_t) slot][2]->load();
+    s->partA = grP[(size_t) slot][1]->load(); s->partB = grP[(size_t) slot][2]->load(); s->reverse = revP[(size_t) slot]->load() > 0.5f;
     SamplePlayer::makePlayable (*s, hostRate.load());
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);

@@ -128,6 +128,11 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
             }
         }
     }
+    if (s.reverse)
+    {
+        if (part.getNumSamples() == 0) part = whole;
+        part.reverse (0, part.getNumSamples());
+    }
     const auto& src0 = part.getNumSamples() > 0 ? part : whole;
     const int nIn = src0.getNumSamples();
 
