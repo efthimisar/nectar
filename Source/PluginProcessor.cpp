@@ -328,6 +328,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph34", 1 }, "Morph 3 > 4 (0 = sound 3, 1 = sound 4 at the pitch of 3)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character", 1 }, "Joystick character",
+                                                          juce::StringArray { "Cloud", "Rhythm", "Metal", "Air", "Reverse" }, 0));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "wild", 1 }, "Joystick: gentle (0) to wild (1)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     for (const char* id : { "vec1x", "vec1y", "vec2x", "vec2y" })
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { id, 1 }, juce::String ("Pair joystick ") + id,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.5f));
@@ -1415,30 +1419,130 @@ void NektarProcessor::setVectorOn (int pair, bool on)
     }
 }
 
-// Four random corner settings for one pair. Pitch, the chosen part of the sound and the grain mode are left alone,
-// so the result stays playable in tune; in every corner at least one of the two sounds is clearly heard.
-void NektarProcessor::randomiseVector (int pair, int seed)
+NektarProcessor::VecSnapshot NektarProcessor::vectorNow (int pair)
 {
-    juce::Random rnd (seed);
-    std::vector<VecEntry> out;
-    auto add = [&] (const juce::String& id, std::function<float()> f)
+    VecSnapshot snap;
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        snap.entries = vecEntries[(size_t) pair];
+    }
+    for (int k = 0; k < 2; ++k)
+    {
+        snap.grMode[k] = juce::roundToInt (grP[(size_t) (pair * 2 + k)][0]->load());
+        snap.grPat[k] = juce::roundToInt (grP[(size_t) (pair * 2 + k)][12]->load());
+    }
+    return snap;
+}
+
+void NektarProcessor::applyVector (int pair, const VecSnapshot& snap)
+{
+    for (int k = 0; k < 2; ++k)
+    {
+        const int slot = pair * 2 + k;
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        if (auto* pa = apvts.getParameter ("grmode" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grMode[k]));
+        if (auto* pa = apvts.getParameter ("grpat" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grPat[k]));
+    }
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
+        vecEntries[(size_t) pair] = snap.entries;
+    }
+    setVectorOn (pair, ! snap.entries.empty());
+}
+
+bool NektarProcessor::backVector (int pair)
+{
+    auto& h = vecHistory[(size_t) pair];
+    if (h.empty()) return false;
+    const auto snap = h.back();
+    h.pop_back();
+    applyVector (pair, snap);
+    return true;
+}
+
+void NektarProcessor::pinVector (const juce::String& paramId, float value01)
+{
+    const auto it = modIdxById.find (paramId.toStdString());
+    if (it == modIdxById.end()) return;
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        bool hit = false;
+        {
+            const juce::SpinLock::ScopedLockType lk (vecLock);
+            for (auto& e : vecEntries[(size_t) pair])
+                if (e.idx == it->second) { for (auto& c : e.c) c = value01; hit = true; }
+        }
+        if (hit && vecOn[(size_t) pair].load())
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot)
+            {
+                cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
+                cleanDirty[(size_t) slot] = true;
+            }
+    }
+}
+
+// "New": four corner settings for one pair, drawn at random inside the limits of the chosen Character.
+// Pitch and the chosen part of each sound are left alone, so the result stays playable in tune; in every corner the
+// sound that Cross favours is clearly heard, and the grains are taken from places where the sound is present.
+// The limits are our own choices, tuned by ear with the user; they are not taken from any source.
+void NektarProcessor::newVector (int pair, int seed)
+{
+    if (vecOn[(size_t) pair].load())
+    {
+        auto& h = vecHistory[(size_t) pair];
+        h.push_back (vectorNow (pair));
+        if (h.size() > 24) h.erase (h.begin());
+    }
+    juce::Random rnd (seed != 0 ? seed : vecRnd.nextInt());
+    const int character = juce::jlimit (0, 4, juce::roundToInt (apvts.getRawParameterValue ("character")->load()));
+    const float wild = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("wild")->load());
+
+    struct R { const char* id; float lo, hi, chance, off; }; // chance: how often the knob is in use at all; off: its value otherwise
+    static const R cloud[] = { { "grspray", 0.2f, 0.6f, 1, 0 }, { "grsize", 0.45f, 0.8f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grjit", 0.0f, 0.2f, 0.3f, 0 },
+        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.6f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
+        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
+        { "blur", 0.1f, 0.5f, 0.5f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R rhythm[] = { { "grgate", 0.2f, 0.95f, 1, 0 }, { "grspray", 0.0f, 0.15f, 1, 0 }, { "grrev", 0.3f, 1.0f, 0.4f, 0 }, { "grspread", 0.2f, 0.8f, 1, 0 },
+        { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.3f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.7f, 1, 0 }, { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.1f, 0.5f, 0.25f, 0 },
+        { "bodytone", 0.3f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.8f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.5f, 0.4f, 0 },
+        { "air", 0.4f, 0.8f, 1, 0 }, { "grsize", 0.4f, 0.6f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
+    static const R metal[] = { { "grsize", 0.08f, 0.35f, 1, 0 }, { "grdens", 0.5f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.5f, 0 },
+        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.4f, 0.9f, 1, 0 }, { "sfilres", 0.4f, 0.8f, 1, 0 },
+        { "fshift", 0.2f, 0.8f, 0.7f, 0.5f }, { "ring", 0.15f, 0.7f, 0.6f, 0 }, { "bodytone", 0.45f, 0.85f, 1, 0 }, { "bodyfocus", 0.6f, 0.9f, 1, 0 }, { "bodysize", 0.1f, 0.9f, 1, 0 },
+        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.6f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R airy[] = { { "grsize", 0.55f, 0.9f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 }, { "grjit", 0.0f, 0.3f, 0.5f, 0 },
+        { "grrev", 0.2f, 0.6f, 0.3f, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.5f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.3f, 0.8f, 1, 0 },
+        { "blur", 0.3f, 0.8f, 1, 0 }, { "srcrough", 0.1f, 0.4f, 0.5f, 0 }, { "air", 0.72f, 1.0f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R backw[] = { { "grrev", 0.6f, 1.0f, 1, 0 }, { "grsize", 0.5f, 0.9f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 },
+        { "grjit", 0.1f, 0.4f, 1, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
+        { "fshift", 0.35f, 0.65f, 0.2f, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
+        { "blur", 0.1f, 0.4f, 0.4f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    const R* tables[5] = { cloud, rhythm, metal, airy, backw };
+    const R* table = tables[character];
+    const int tableLen = 18;
+
+    VecSnapshot snap;
+    auto& out = snap.entries;
+    // one knob: a centre drawn inside the limits, and four corners spread around it by the Gentle / Wild amount
+    auto add = [&] (const juce::String& id, std::function<float()> draw)
     {
         const auto it = modIdxById.find (id.toStdString());
         if (it == modIdxById.end()) return -1;
         VecEntry e; e.idx = it->second;
-        for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, f());
+        const float centre = draw();
+        for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, centre + (draw() - centre) * wild);
         out.push_back (e);
         return (int) out.size() - 1;
     };
-    auto range = [&] (float lo, float hi) { return [&rnd, lo, hi] { return lo + (hi - lo) * rnd.nextFloat(); }; };
-    auto maybe = [&] (float chance, float lo, float hi, float off) { return [&rnd, chance, lo, hi, off] { return rnd.nextFloat() < chance ? lo + (hi - lo) * rnd.nextFloat() : off; }; };
     int levelAt[2] = { -1, -1 };
     for (int k = 0; k < 2; ++k)
     {
         const int slot = pair * 2 + k;
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
-        levelAt[k] = add ("level" + sfx, range (0.2f, 0.95f));
-        add ("pan" + sfx, range (0.2f, 0.8f));
+        levelAt[k] = add ("level" + sfx, [&rnd] { return 0.2f + 0.75f * rnd.nextFloat(); });
+        add ("pan" + sfx, [&rnd] { return 0.2f + 0.6f * rnd.nextFloat(); });
         {   // grains are taken from a place where the sound is clearly present (not from a faded-out stretch)
             std::vector<float> loud;
             if (const auto smp = getSample (slot); smp != nullptr && smp->play.getNumSamples() > 4096)
@@ -1449,30 +1553,30 @@ void NektarProcessor::randomiseVector (int pair, int seed)
                 for (int b2 = 0; b2 < bins; ++b2) { lv[(size_t) b2] = smp->play.getRMSLevel (0, b2 * w, w); mx = juce::jmax (mx, lv[(size_t) b2]); }
                 for (int b2 = 0; b2 < bins; ++b2) if (lv[(size_t) b2] >= 0.35f * mx) loud.push_back (((float) b2 + 0.5f) / (float) bins);
             }
-            add ("grpos" + sfx, [&rnd, loud] { return loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]; });
+            const auto it = modIdxById.find (("grpos" + sfx).toStdString());
+            if (it != modIdxById.end())
+            {   // positions are picked outright (no spreading around a centre: a place between two loud places may be silent)
+                VecEntry e; e.idx = it->second;
+                const float first = loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())];
+                for (auto& c : e.c) c = rnd.nextFloat() < wild ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
+                out.push_back (e);
+            }
         }
-        add ("grscan" + sfx, range (0.5f, 0.55f)); // slow, so the grains stay near the chosen place
-        add ("grspray" + sfx, range (0.0f, 0.6f));
-        add ("grsize" + sfx, range (0.1f, 0.9f));
-        add ("grdens" + sfx, range (0.2f, 0.9f));
-        add ("grjit" + sfx, maybe (0.5f, 0.0f, 0.5f, 0.0f));
-        add ("grrev" + sfx, maybe (0.5f, 0.2f, 1.0f, 0.0f));
-        add ("grspread" + sfx, range (0.3f, 1.0f));
-        add ("grgate" + sfx, range (0.2f, 0.9f));
-        add ("sfiltype" + sfx, range (0.0f, 1.0f));
-        add ("sfilcut" + sfx, range (0.35f, 1.0f));
-        add ("sfilres" + sfx, range (0.1f, 0.7f));
-        add ("fshift" + sfx, maybe (0.5f, 0.15f, 0.85f, 0.5f));
-        add ("ring" + sfx, maybe (0.4f, 0.1f, 0.6f, 0.0f));
-        add ("bodytone" + sfx, range (0.2f, 0.8f));
-        add ("bodyfocus" + sfx, range (0.2f, 0.85f));
-        add ("bodysize" + sfx, range (0.1f, 0.9f));
-        add ("blur" + sfx, maybe (0.5f, 0.1f, 0.7f, 0.0f));
-        add ("srcrough" + sfx, maybe (0.5f, 0.1f, 0.5f, 0.0f));
-        add ("air" + sfx, range (0.25f, 0.9f));
+        add ("grscan" + sfx, [&rnd] { return 0.5f + 0.05f * rnd.nextFloat(); }); // slow, so the grains stay near the chosen place
+        for (int i = 0; i < tableLen; ++i)
+        {
+            const R r = table[i];
+            add (r.id + sfx, [&rnd, r] { return rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off; });
+        }
+        snap.grMode[k] = character == 1 ? 2 : 1;
+        // rhythm: a pattern with 6 to 11 of the 16 steps on, the first step always on
+        int pat = 1;
+        const int want = 6 + rnd.nextInt (6);
+        for (int tries = 0; tries < 200 && juce::BigInteger (pat).countNumberOfSetBits() < want; ++tries) pat |= 1 << rnd.nextInt (16);
+        snap.grPat[k] = character == 1 ? pat : juce::roundToInt (grP[(size_t) slot][12]->load());
     }
-    const int crossAt = add (pair == 0 ? "xmorph12" : "xmorph34", range (0.0f, 1.0f));
-    add (pair == 0 ? "imorph12" : "imorph34", maybe (0.5f, 0.1f, 0.6f, 0.0f));
+    const int crossAt = add (pair == 0 ? "xmorph12" : "xmorph34", [&rnd] { return rnd.nextFloat(); });
+    add (pair == 0 ? "imorph12" : "imorph34", [&rnd] { return rnd.nextFloat() < 0.5f ? 0.1f + 0.5f * rnd.nextFloat() : 0.0f; });
     if (levelAt[0] >= 0 && levelAt[1] >= 0)
         for (int c = 0; c < 4; ++c)
         {   // the sound that Cross favours in this corner is clearly heard
@@ -1480,12 +1584,7 @@ void NektarProcessor::randomiseVector (int pair, int seed)
             auto& lv = out[(size_t) levelAt[second ? 1 : 0]].c[c];
             if (lv < 0.75f) lv = 0.75f + 0.2f * rnd.nextFloat();
         }
-    {
-        const juce::SpinLock::ScopedLockType lk (vecLock);
-        for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
-        vecEntries[(size_t) pair] = std::move (out);
-    }
-    setVectorOn (pair, true);
+    applyVector (pair, snap);
 }
 
 float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
@@ -1742,6 +1841,22 @@ void NektarProcessor::addModToState (juce::ValueTree& state)
             m.setProperty ("amount", (double) routeAmt[i].load(), nullptr);
             state.appendChild (m, nullptr);
         }
+    // pair joysticks: the four corner values of every knob they set
+    for (int i = state.getNumChildren(); --i >= 0;)
+        if (state.getChild (i).hasType ("VEC"))
+            state.removeChild (i, nullptr);
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        if (! vecOn[(size_t) pair].load() || vecEntries[(size_t) pair].empty()) continue;
+        juce::ValueTree v ("VEC");
+        v.setProperty ("pair", pair, nullptr);
+        juce::String data;
+        for (const auto& e : vecEntries[(size_t) pair])
+            data << modIds[(size_t) e.idx] << ":" << juce::String (e.c[0], 4) << "," << juce::String (e.c[1], 4) << "," << juce::String (e.c[2], 4) << "," << juce::String (e.c[3], 4) << ";";
+        v.setProperty ("corners", data, nullptr);
+        state.appendChild (v, nullptr);
+    }
     // the recorded joystick path (16-bit values, base64)
     const int len = joyLen.load();
     if (len > 1)
@@ -1768,6 +1883,37 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
     {
         routeSrc[i].store (0);
         routeAmt[i].store (0.0f);
+    }
+    {   // pair joysticks
+        std::array<std::vector<VecEntry>, 2> got;
+        for (int i = 0; i < state.getNumChildren(); ++i)
+        {
+            const auto c = state.getChild (i);
+            if (! c.hasType ("VEC")) continue;
+            const int pair = juce::jlimit (0, 1, (int) c.getProperty ("pair"));
+            juce::StringArray items;
+            items.addTokens (c.getProperty ("corners").toString(), ";", "");
+            for (const auto& item : items)
+            {
+                const auto it = modIdxById.find (item.upToFirstOccurrenceOf (":", false, false).toStdString());
+                juce::StringArray vals;
+                vals.addTokens (item.fromFirstOccurrenceOf (":", false, false), ",", "");
+                if (it == modIdxById.end() || vals.size() != 4) continue;
+                VecEntry e; e.idx = it->second;
+                for (int k = 0; k < 4; ++k) e.c[k] = juce::jlimit (0.0f, 1.0f, vals[k].getFloatValue());
+                got[(size_t) pair].push_back (e);
+            }
+        }
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            {
+                const juce::SpinLock::ScopedLockType lk (vecLock);
+                for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
+                vecEntries[(size_t) pair] = got[(size_t) pair];
+            }
+            vecHistory[(size_t) pair].clear();
+            setVectorOn (pair, ! got[(size_t) pair].empty());
+        }
     }
     for (int i = 0; i < state.getNumChildren(); ++i)
     {

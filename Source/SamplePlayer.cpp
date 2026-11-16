@@ -102,7 +102,7 @@ static float measureAutoGain (const juce::AudioBuffer<float>& x, double rate)
     double sum = 0.0; int cnt = 0;
     for (double b : blocks) if (b >= mx * 1.0e-3) { sum += b; ++cnt; }
     const double db = 10.0 * std::log10 (sum / (double) cnt) ;
-    return std::pow (10.0f, (float) juce::jlimit (-24.0, 24.0, -41.0 - db) / 20.0f);
+    return std::pow (10.0f, (float) juce::jlimit (-24.0, 24.0, -31.0 - db) / 20.0f);
 }
 
 void SamplePlayer::makePlayable (Sample& s, double hostRate)

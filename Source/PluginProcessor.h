@@ -77,8 +77,13 @@ public:
     bool joyHasPath() const { return joyLen.load() > 0; }
     void joyClearPath() { joyLen.store (0); }
     // Pair joystick (pair 0 = samples 1+2, pair 1 = samples 3+4)
-    void randomiseVector (int pair, int seed);  // fills the four corners with random settings and switches the stick on
+    void newVector (int pair, int seed = 0);    // "New": four fresh corner settings in the chosen Character (0 = a random seed)
+    bool backVector (int pair);                 // "Back": the corners that were there before the last New
+    int vectorHistory (int pair) const { return (int) vecHistory[(size_t) pair].size(); }
+    void pinVector (const juce::String& paramId, float value01); // a knob moved by hand: the same in all four corners from now on
     void setVectorOn (int pair, bool on);
+    float vectorX (int pair) const { return vecXShown[(size_t) pair].load(); }
+    float vectorY (int pair) const { return vecYShown[(size_t) pair].load(); }
     bool vectorOn (int pair) const { return vecOn[(size_t) pair].load(); }
     float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
 
@@ -138,6 +143,11 @@ private:
     struct VecEntry { int idx; float c[4]; };       // knob (index in the modulation table) and its four corner values (0..1 of its range)
     std::array<std::vector<VecEntry>, 2> vecEntries; // guarded by vecLock
     juce::SpinLock vecLock;
+    struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; };
+    std::array<std::vector<VecSnapshot>, 2> vecHistory; // message thread only
+    VecSnapshot vectorNow (int pair);
+    void applyVector (int pair, const VecSnapshot& snap);
+    juce::Random vecRnd;
     std::array<std::atomic<bool>, 2> vecOn { { { false }, { false } } };
     std::vector<std::atomic<float>> vecVal;          // per knob: its blended value right now (0..1 of its range)
     std::vector<std::atomic<bool>> vecAct;           // per knob: the stick is in charge of it
