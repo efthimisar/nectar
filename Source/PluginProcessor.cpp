@@ -82,6 +82,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spdist" + sfx, 1 }, "Space distance" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
         }
+        {   // v2: every sample has its own time / colour controls (sample 1 keeps the old ids) and its own filter
+            static const char* const ids[kCol] = { "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise" };
+            static const char* const names[kCol] = { "Keep length", "Stretch", "Blur", "Freeze", "Body tone", "Body focus", "Body size", "Grit", "Model", "Model noise" };
+            static const float defs[kCol] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 0.0f };
+            if (slot > 0)
+                for (int i = 0; i < kCol; ++i)
+                    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { ids[i] + sfx, 1 }, names[i] + nm,
+                                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), defs[i]));
+            static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
+            static const char* const fnames[4] = { "Sample filter type", "Sample filter cutoff", "Sample filter reso", "Sample filter mix" };
+            static const float fdefs[4] = { 0.0f, 1.0f, 0.3f, 1.0f };
+            for (int i = 0; i < 4; ++i)
+                l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { fids[i] + sfx, 1 }, fnames[i] + nm,
+                                                                     NormalisableRange<float> (0.0f, 1.0f, 0.001f), fdefs[i]));
+        }
         {   // v2 granular (per sample)
             auto f = [&] (const char* id, const char* name, float lo, float hi, float def, float skew = 1.0f)
             {
@@ -278,6 +293,12 @@ NektarProcessor::NektarProcessor()
             static const char* const ids[kGr] = { "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat" };
             for (int i = 0; i < kGr; ++i)
                 grP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (ids[i] + sfx);
+            static const char* const cids[kCol] = { "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise" };
+            for (int i = 0; i < kCol; ++i)
+                colP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (cids[i] + sfx);
+            static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
+            for (int i = 0; i < 4; ++i)
+                sfilP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (fids[i] + sfx);
         }
         spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
         spDistP[(size_t) slot] = apvts.getRawParameterValue ("spdist" + sfx);
@@ -463,6 +484,8 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         pl.prepare (sampleRate);
     for (auto& gpl : grainPlayers)
         gpl.prepare (sampleRate);
+    for (auto& sf : slotFilter)
+        sf.prepare (sampleRate, samplesPerBlock);
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     resonatorB.prepare (sampleRate);
@@ -574,7 +597,6 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     players[1].setBodyPartner (players[0].getSample());
     players[2].setBodyPartner (players[3].getSample());
     players[3].setBodyPartner (players[2].getSample());
-    const float baseModel = p.model;
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;
@@ -601,7 +623,13 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         p.chromoBack = modded (chromoBackP);
         p.chromoSpeed = modded (chromoSpeedP);
         p.chromoDull = modded (chromoDullP);
-        p.model = juce::jmax (baseModel, p.chromo); // Chromophonic plays the sine model
+        {
+            const auto& c = colP[(size_t) slot];
+            p.keepLength = modded (c[0]); p.stretch = modded (c[1]); p.blur = modded (c[2]); p.freeze = modded (c[3]);
+            p.body.tone = modded (c[4]); p.body.focus = modded (c[5]); p.body.size = modded (c[6]); p.body.rough = modded (c[7]);
+            p.modelNoise = modded (c[9]);
+            p.model = juce::jmax (modded (c[8]), p.chromo); // Chromophonic plays the sine model
+        }
         p.level = modded (levelP[(size_t) slot]);
         p.pitchSemis = modded (pitchP[(size_t) slot]);
         p.releaseSec = modded (tailP[(size_t) slot]);
@@ -627,6 +655,10 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
         if (grMode == 0)
             pl.process (view, midi, p, false);
+        {
+            const auto& f = sfilP[(size_t) slot];
+            slotFilter[(size_t) slot].process (view, view.getNumSamples(), modded (f[0]), modded (f[1]), modded (f[2]), modded (f[3]));
+        }
         loadedNow[(size_t) slot] = true;
         pans[(size_t) slot] = modded (panP[(size_t) slot]);
     }

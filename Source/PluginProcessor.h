@@ -114,6 +114,10 @@ private:
     std::array<SamplePlayer, kSlots> players;
     std::array<GrainPlayer, kSlots> grainPlayers;
     static constexpr int kGr = 13;
+    static constexpr int kCol = 10; // per-sample colour/time: keeplength, stretch, blur, freeze, bodytone, bodyfocus, bodysize, srcrough, model, modelnoise
+    std::array<std::array<std::atomic<float>*, kCol>, kSlots> colP {};
+    std::array<std::array<std::atomic<float>*, 4>, kSlots> sfilP {}; // per-sample filter: type, cutoff, reso, mix
+    std::array<CharacterFilter, kSlots> slotFilter;
     std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
     TiltFilter tilt;
 

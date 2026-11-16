@@ -10,21 +10,21 @@ namespace
 const Colour kLight (0xffc1c494), kMuted (0xffa5a38a), kAcc (0xfffbe6a0), kDark (0xff2a2826);
 const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff78cdd0),
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
-constexpr float kDW = 1360.0f, kDH = 665.0f;   // design space of the editor (wide)
+constexpr float kDW = 1040.0f, kDH = 665.0f;   // design space of the editor (wide)
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f, kSlotR = 135.0f; // the ring and the slot discs are designed at this size...
 constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
 constexpr float kSlotScale = 84.0f / 135.0f;     // slot radius 84
 constexpr float kDotR = 50.0f;                   // v2: radius of the small slot circles
-constexpr float kLibX = 680.0f, kLibY = 250.0f;
-constexpr float kSlotCx[4] = { 300.0f, 420.0f, 940.0f, 1060.0f };
+constexpr float kLibX = 520.0f, kLibY = 250.0f;
+constexpr float kSlotCx[4] = { 140.0f, 260.0f, 780.0f, 900.0f };
 constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
 constexpr float kModR = 56.0f;                   // module radius
-const juce::Rectangle<float> kScreen (24.0f, 450.0f, 1312.0f, 62.0f);
+const juce::Rectangle<float> kScreen (24.0f, 450.0f, 992.0f, 62.0f);
 const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, { 208.0f, 414.0f, 78.0f, 26.0f }, { 290.0f, 414.0f, 84.0f, 26.0f } };
-constexpr float kColW = (1312.0f - 48.0f) / 5.0f;
+constexpr float kColW = (992.0f - 48.0f) / 5.0f;
 inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
-const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat" };
-const juce::Rectangle<float> kAllBtn (1160.0f, 412.0f, 70.0f, 28.0f), kMasterBtn (1240.0f, 412.0f, 96.0f, 28.0f);
+const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix" };
+const juce::Rectangle<float> kAllBtn (840.0f, 412.0f, 70.0f, 28.0f), kMasterBtn (920.0f, 412.0f, 96.0f, 28.0f);
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
 struct ModuleDef { const char* title; const char* sub; juce::uint32 colour; const char* knob[4]; const char* id[4]; };
@@ -44,7 +44,7 @@ const ModuleDef kModules[] = {
     { "SPACE",     "around the head",                0xff7ec8e3, { "Amount", "Speakers", "Far", "Back" },         { "spmix", "spspk", "spfar", "spback" } },
 };
 constexpr int kNumModules = 13;
-constexpr float kSpaceX = 680.0f, kSpaceY = 250.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
+constexpr float kSpaceX = 520.0f, kSpaceY = 250.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
 constexpr int kJoyModule = 11;
 // four pyramids of three: one circle on top, two below. {group, place} per module in the order of kModules
 // (place 0 = top, 1 = bottom left, 2 = bottom right)
@@ -642,7 +642,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     rebuildPanel();
 
     constrainer.setFixedAspectRatio ((double) (kDW / kDH));
-    constrainer.setMinimumSize (660, (int) (660 * kDH / kDW));
+    constrainer.setMinimumSize (620, (int) (620 * kDH / kDW));
     constrainer.setMaximumSize (2600, (int) (2600 * kDH / kDW));
     setConstrainer (&constrainer);
     setResizable (true, true);
@@ -651,7 +651,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     hud = std::make_unique<RecordHud> (proc, regular);
     addAndMakeVisible (*hud);
     startTimerHz (20);
-    setSize (1360, (int) (1360.0f * kDH / kDW));
+    setSize ((int) kDW, (int) kDH);
     grabKeyboardFocus();
 }
 
@@ -1086,7 +1086,11 @@ void NektarEditor::rebuildPanel()
     else
     {
         const int s = primarySlot();
-        row (0, 590.0f, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
+        row (0, y1, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
+        row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
+        row (3, y1, { { "Tone", slotId ("bodytone", s) }, { "Focus", slotId ("bodyfocus", s) }, { "Size", slotId ("bodysize", s) }, { "Blur", slotId ("blur", s) } });
+        row (3, y2, { { "Model", slotId ("model", s) }, { "Noise", slotId ("modelnoise", s) }, { "Grit", slotId ("srcrough", s) } });
+        row (4, 590.0f, { { "Type", slotId ("sfiltype", s) }, { "Cutoff", slotId ("sfilcut", s) }, { "Reso", slotId ("sfilres", s) }, { "Mix", slotId ("sfilmix", s) } });
         row (1, 590.0f, { { "Start", slotId ("grstart", s) }, { "End", slotId ("grend", s) }, { "Position", slotId ("grpos", s) }, { "Scan", slotId ("grscan", s) } });
         row (2, y1, { { "Size", slotId ("grsize", s) }, { "Density", slotId ("grdens", s) }, { "Spray", slotId ("grspray", s) }, { "Jitter", slotId ("grjit", s) } });
         row (2, y2, { { "Reverse", slotId ("grrev", s) }, { "Spread", slotId ("grspread", s) }, { "Gate", slotId ("grgate", s) } });
@@ -1329,7 +1333,7 @@ void NektarEditor::renderDesign (Graphics& g)
     {
         const char* chips[] = { "All", "Glass", "Metal", "Wood", "Paper", "Water", "Voice" };
         const Colour cc[] = { kLight, kWada[0], kWada[1], kWada[2], kWada[3], kWada[2], kWada[0] };
-        float x = 433;
+        float x = 273;
         for (int i = 0; i < 7; ++i)
         {
             const juce::Rectangle<float> r (x, 77, 62, 26);
@@ -1420,7 +1424,7 @@ void NektarEditor::renderDesign (Graphics& g)
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText (message, juce::Rectangle<float> (400, 412, 740, 30), juce::Justification::centredLeft);
+            g.drawText (message, juce::Rectangle<float> (386, 412, 444, 30), juce::Justification::centredLeft);
         }
         const bool allOn = ! masterView && selection.size() == 4;
         for (int k = 0; k < 2; ++k)
@@ -1437,7 +1441,7 @@ void NektarEditor::renderDesign (Graphics& g)
         insetBox (g, kScreen, 10); // the sound itself is drawn live on top (drawOverlay)
 
         // columns (controls come next)
-        const char* names[2][5] = { { "Level \xc2\xb7 Pitch", "Part of the sound", "Granular", "Colour (next)", "Filter (next)" },
+        const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour (grains off)", "Filter" },
                                     { "Space", "Filter", "Reverb", "Delay", "Crush" } };
         const float cw = kColW;
         for (int c = 0; c < 5; ++c)
