@@ -304,6 +304,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph12", 1 }, "Morph 1 > 2 (0 = sound 1, 1 = sound 2 at the pitch of 1)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph34", 1 }, "Morph 3 > 4 (0 = sound 3, 1 = sound 4 at the pitch of 3)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
                                                           juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
@@ -409,6 +413,8 @@ NektarProcessor::NektarProcessor()
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
     masterP = apvts.getRawParameterValue ("master");
     widthP = apvts.getRawParameterValue ("width");
+    pairMorphP[0] = apvts.getRawParameterValue ("morph12");
+    pairMorphP[1] = apvts.getRawParameterValue ("morph34");
     scaleP = apvts.getRawParameterValue ("scale");
     keyP = apvts.getRawParameterValue ("key");
     for (int i = 0; i < 128; ++i) scaleMap[(size_t) i] = (juce::int8) i;
@@ -745,7 +751,21 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             p.modelNoise = modded (c[9]);
             p.model = juce::jmax (modded (c[8]), p.chromo); // Chromophonic plays the sine model
         }
+        {   // Morph of the pair: the first sound of the pair turns into the second (partials paired and moved, MorphVoice);
+            // the second sound itself steps back, because it is now heard inside the morph
+            const float m = modded (pairMorphP[(size_t) (slot / 2)]);
+            const float in = juce::jmin (1.0f, m * 50.0f);
+            if (slot % 2 == 0)
+            {
+                p.morph = m;
+                if (m > 0.01f) { p.model = juce::jmax (p.model, in); p.modelNoise = juce::jmax (p.modelNoise, in); }
+            }
+            else
+                p.morph = 0.0f;
+        }
         p.level = modded (levelP[(size_t) slot]);
+        if (slot % 2 == 1)
+            p.level *= std::sqrt (1.0f - juce::jmin (1.0f, modded (pairMorphP[(size_t) (slot / 2)]) * 50.0f)); // heard inside the morph of its pair
         p.pitchSemis = modded (pitchP[(size_t) slot]);
         p.releaseSec = modded (tailP[(size_t) slot]);
         pl.setVoiceLimit (limit);

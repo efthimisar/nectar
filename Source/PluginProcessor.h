@@ -121,6 +121,7 @@ private:
     std::array<CharacterFilter, kSlots> slotFilter;
     std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {}, revP {};
     std::array<Shifter, kSlots> shifters;
+    std::array<std::atomic<float>*, 2> pairMorphP {};
     std::atomic<float>* scaleP = nullptr;
     std::atomic<float>* keyP = nullptr;
     std::array<juce::int8, 128> scaleMap {}; // which note a held key was turned into (for its note-off)

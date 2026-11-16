@@ -1142,12 +1142,13 @@ void NektarEditor::rebuildPanel()
             row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) }, { "Clean", slotId ("noise", s) }, { "Low cut", slotId ("lowcut", s) } });
         if (const int pi = pairIndex(); pi >= 0)
         {
-            const char* ids[2][3] = { { "imorph12", "xmorph12", "chromo12" }, { "imorph34", "xmorph34", "chromo34" } };
-            const float x0 = kScreen.getRight() - 330.0f + 104.0f, yk = kScreen.getY() + 21.0f;
-            addKnob (x0, yk, r, "Inter", false, 0.0f, ids[pi][0]);
-            addKnob (x0 + 62.0f, yk, r, "Cross", false, 0.0f, ids[pi][1]);
-            addKnob (x0 + 124.0f, yk, r, "Chroma", false, 0.0f, ids[pi][2]);
-            addKnob (x0 + 186.0f, yk, r, "Move", false, 0.0f, "chromomove");
+            const char* ids[2][4] = { { "morph12", "imorph12", "xmorph12", "chromo12" }, { "morph34", "imorph34", "xmorph34", "chromo34" } };
+            const float x0 = kScreen.getRight() - 330.0f + 92.0f, yk = kScreen.getY() + 21.0f;
+            addKnob (x0, yk, r, "Morph", false, 0.0f, ids[pi][0]);
+            addKnob (x0 + 52.0f, yk, r, "Inter", false, 0.0f, ids[pi][1]);
+            addKnob (x0 + 104.0f, yk, r, "Cross", false, 0.0f, ids[pi][2]);
+            addKnob (x0 + 156.0f, yk, r, "Chroma", false, 0.0f, ids[pi][3]);
+            addKnob (x0 + 208.0f, yk, r, "Move", false, 0.0f, "chromomove");
         }
         row (4, y1, { { "Type", slotId ("sfiltype", s) }, { "Cutoff", slotId ("sfilcut", s) }, { "Reso", slotId ("sfilres", s) }, { "Mix", slotId ("sfilmix", s) } });
         row (4, y2, { { "Shift", slotId ("fshift", s) }, { "Ring", slotId ("ring", s) } });

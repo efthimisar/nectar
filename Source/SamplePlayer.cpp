@@ -476,7 +476,7 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
     const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
     const double advance = (1.0 - (double) p.freeze) / factor;
     const float gain = p.level * p.level * p.autoGain * v.velocity;
-    const float mix = v.modelMix;
+    const float mix = v.morphAdd ? p.model : v.modelMix; // the pair morph can move while the note is held
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
 
@@ -491,7 +491,15 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
             // the partner can be swapped or removed while the note plays: then this voice simply goes on silent
             const auto pm = partner != nullptr ? partner->model : nullptr;
             if (pm != nullptr && std::abs (partner->modelRate - sr) < 0.5)
+            {
                 morphs[(size_t) index].process (*sample->model, *pm, advance, R, p.morph, p.modelNoise, addL.data(), addR.data(), chunk);
+                // Auto level: the partner has its own level correction, so the morph moves from this sound's to the partner's
+                if (std::abs (p.autoGain - sample->autoGain) < 1.0e-6f && sample->autoGain > 1.0e-6f)
+                {
+                    const float g = std::pow (juce::jlimit (0.06f, 16.0f, partner->autoGain / sample->autoGain), p.morph);
+                    for (int i = 0; i < chunk; ++i) { addL[(size_t) i] *= g; addR[(size_t) i] *= g; }
+                }
+            }
         }
         else
             {
