@@ -1,14 +1,15 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "BodyBake.h"
 
 // Cleans one slot in the background: analysis once per sound, then low cut, hum and noise reduction.
 class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate, float pa, float pb)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd) {}
 
     JobStatus runJob() override
     {
@@ -20,11 +21,14 @@ public:
             s->analysis = SampleCleaner::analyse (s->data, s->rate);
             s->autoProfile = SampleCleaner::estimateProfile (s->data, s->rate, true);
         }
-        if (params.any())
+        const bool sameClean = s->cleaned.getNumSamples() > 0 && s->cleanN == params.noise && s->cleanH == params.hum && s->cleanL == params.lowCut;
+        if (params.any() && ! sameClean)
         {
             const auto& prof = roomCopy.valid ? roomCopy : s->autoProfile;
             s->cleaned = SampleCleaner::clean (s->data, s->rate, params, prof, s->analysis.humHz, s->analysis.humHarmonics);
+            s->cleanN = params.noise; s->cleanH = params.hum; s->cleanL = params.lowCut;
         }
+        else if (params.any()) {}
         else
             s->cleaned.setSize (0, 0);
         if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
@@ -32,8 +36,12 @@ public:
         s->partA = partA; s->partB = partB;
         SamplePlayer::makePlayable (*s, hostRate);
         // the sine-wave description of what is played (kept when the sound itself did not change)
-        if (! (! params.any() && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5 && base->cleaned.getNumSamples() == 0
-               && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f))
+        const bool soundSame = (! params.any() ? base->cleaned.getNumSamples() == 0 : sameClean)
+                               && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f;
+        // the colour baked in for the grains
+        if (grains && body.shapeActive()) s->grainSrc = bakeBody (s->play, hostRate, body);
+        else s->grainSrc.setSize (0, 0);
+        if (! (soundSame && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5))
         {
             {   // the sound itself is ready: hand it over now, the sine-wave description follows when it is done
                 auto quick = std::make_shared<Sample> (*s);
@@ -60,6 +68,8 @@ private:
     SampleCleaner::NoiseProfile roomCopy;
     double hostRate;
     float partA, partB;
+    bool grains;
+    SpectralBody body;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -319,6 +329,8 @@ NektarProcessor::NektarProcessor()
         apvts.addParameterListener ("lowcut" + sfx, this);
         apvts.addParameterListener ("grstart" + sfx, this);
         apvts.addParameterListener ("grend" + sfx, this);
+        for (auto* extra : { "grmode", "bodytone", "bodyfocus", "bodysize" })
+            apvts.addParameterListener (extra + sfx, this);
         cleanDirty[(size_t) slot] = false;
         latestJob[(size_t) slot] = 0;
     }
@@ -415,8 +427,10 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 {
     const juce::juce_wchar last = id.getLastCharacter();
     const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
+    if (id.startsWith ("body") && grP[(size_t) slot][0]->load() < 0.5f)
+        return; // without grains the colour is made live
     // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") ? 190u : 0u);
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("body") ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -457,9 +471,12 @@ void NektarProcessor::scheduleClean (int slot)
         const juce::ScopedLock sl (roomLock);
         room = roomProfile;
     }
+    SpectralBody bd;
+    bd.tone = colP[(size_t) slot][4]->load(); bd.focus = colP[(size_t) slot][5]->load(); bd.size = colP[(size_t) slot][6]->load();
     const int gen = ++latestJob[(size_t) slot];
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
-                                    grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load()), true);
+                                    grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
+                                    grP[(size_t) slot][0]->load() > 0.5f, bd), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
@@ -667,7 +684,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             g.pitchSemis = p.pitchSemis;
             g.releaseSec = p.releaseSec;
             g.gain = p.level * p.level * p.autoGain;
-            grPl.process (view, grMode > 0 ? midi : emptyMidi, pl.getSample()->play, g);
+            const auto smpNow = pl.getSample();
+            const bool baked = smpNow->grainSrc.getNumSamples() == smpNow->play.getNumSamples();
+            grPl.process (view, grMode > 0 ? midi : emptyMidi, baked ? smpNow->grainSrc : smpNow->play, g);
         }
         if (grMode == 0)
             pl.process (view, midi, p, false);

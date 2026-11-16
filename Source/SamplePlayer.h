@@ -21,6 +21,8 @@ struct Sample
     double rate = 44100.0;         // file sample rate
     juce::String name;
     juce::String path;
+    juce::AudioBuffer<float> grainSrc;  // `play` with the colour (Tone / Focus / Size) baked in, for the grains (0 samples = use play)
+    float cleanN = -1.0f, cleanH = -1.0f, cleanL = -1.0f; // the cleaning settings `cleaned` was made with
     float partA = 0.0f, partB = 1.0f; // chosen part of the sound (0..1); everything that is played is made from this part only
 
     juce::AudioBuffer<float> play;     // data converted to the host sample rate
