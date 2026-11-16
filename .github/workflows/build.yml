@@ -1,9 +1,9 @@
 name: Build Nektar (macOS, Apple Silicon)
 
-# Builds on every push to main (the repository is public, so the minutes are free) and can also be started by hand.
+# Builds on every push to main or v2 (the repository is public, so the minutes are free) and can also be started by hand.
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   workflow_dispatch:
 
 jobs:
