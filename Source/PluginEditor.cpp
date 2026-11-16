@@ -1448,7 +1448,7 @@ void NektarEditor::renderDesign (Graphics& g)
         insetBox (g, kScreen, 10); // the sound itself is drawn live on top (drawOverlay)
 
         // columns (controls come next)
-        const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour (grains off)", "Filter" },
+        const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour", "Filter" },
                                     { "Space", "Filter", "Reverb", "Delay", "Crush" } };
         const float cw = kColW;
         for (int c = 0; c < 5; ++c)
