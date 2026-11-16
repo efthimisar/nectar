@@ -7,9 +7,9 @@ class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai) {}
 
     JobStatus runJob() override
     {
@@ -69,8 +69,14 @@ public:
                 return jobHasFinished;
             s->model = std::move (model);
             s->modelRate = hostRate;
-            if (modelMix > 0.01f) bake (*s);
         }
+        if (std::abs (air - 0.5f) >= 0.01f && s->model != nullptr)
+        {
+            applyAir (s->play, *s->model, air);
+            bake (*s);
+        }
+        else if (modelMix > 0.01f)
+            bake (*s);
         const juce::ScopedLock sl (owner.resultLock);
         owner.results[(size_t) slot] = s;
         return jobHasFinished;
@@ -86,7 +92,7 @@ private:
     float partA, partB;
     bool grains;
     SpectralBody body;
-    float blur, modelMix, modelNoise;
+    float blur, modelMix, modelNoise, air;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -126,6 +132,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                 for (int i = 0; i < kCol; ++i)
                     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { ids[i] + sfx, 1 }, names[i] + nm,
                                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), defs[i]));
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "air" + sfx, 1 }, "Air" + nm,
+                                                                 NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
             static const char* const fnames[4] = { "Sample filter type", "Sample filter cutoff", "Sample filter reso", "Sample filter mix" };
             static const float fdefs[4] = { 0.0f, 1.0f, 0.3f, 1.0f };
@@ -335,6 +343,8 @@ NektarProcessor::NektarProcessor()
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
             for (int i = 0; i < 4; ++i)
                 sfilP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (fids[i] + sfx);
+            airP[(size_t) slot] = apvts.getRawParameterValue ("air" + sfx);
+            apvts.addParameterListener ("air" + sfx, this);
         }
         spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
         spDistP[(size_t) slot] = apvts.getRawParameterValue ("spdist" + sfx);
@@ -448,7 +458,7 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
     if (colour && grP[(size_t) slot][0]->load() < 0.5f)
         return; // without grains the colour is made live
     // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || colour ? 190u : 0u);
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || colour ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -495,7 +505,8 @@ void NektarProcessor::scheduleClean (int slot)
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
                                     grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
                                     grP[(size_t) slot][0]->load() > 0.5f, bd,
-                                    colP[(size_t) slot][2]->load(), colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load()), true);
+                                    colP[(size_t) slot][2]->load(), colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
+                                    airP[(size_t) slot]->load()), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)

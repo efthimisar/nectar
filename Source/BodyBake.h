@@ -147,3 +147,38 @@ inline juce::AudioBuffer<float> bakeModel (const juce::AudioBuffer<float>& play,
         out.addFrom (c, 0, play, juce::jmin (c, play.getNumChannels() - 1), 0, n, 1.0f - mix);
     return out;
 }
+
+// Air: the part of a sound that is not notes (what the sine-wave description leaves over: breath, hiss, texture).
+// air 0 = without it (only the notes), 0.5 = the sound as it is, towards 1 the air gets louder until it is as loud
+// as the sound (0.75), and at 1 only the air is left, at the loudness of the sound.
+inline void applyAir (juce::AudioBuffer<float>& play, const SineModel& model, float air)
+{
+    const int n = play.getNumSamples();
+    if (n < 64 || std::abs (air - 0.5f) < 0.01f) return;
+    const bool less = air < 0.5f;
+    juce::AudioBuffer<float> r (2, n);
+    r.clear();
+    AdditiveVoice v;
+    v.prepare (less);
+    v.start (7);
+    for (int done = 0; done < n; done += 256)
+        v.process (model, 1.0, 1.0, r.getWritePointer (0) + done, r.getWritePointer (1) + done, juce::jmin (256, n - done), less ? 0.0f : 1.0f);
+    float gSound, gOther;
+    if (less) { const float t = (0.5f - air) * 2.0f; gSound = 1.0f - t; gOther = t; }
+    else
+    {
+        const float t = (air - 0.5f) * 2.0f;
+        double a = 0.0, b = 0.0;
+        for (int c = 0; c < play.getNumChannels(); ++c) { const float x = play.getRMSLevel (c, 0, n); a += (double) x * x; }
+        for (int c = 0; c < 2; ++c) { const float x = r.getRMSLevel (c, 0, n); b += (double) x * x; }
+        a /= (double) play.getNumChannels(); b /= 2.0;
+        const float eq = b > 1.0e-20 ? (float) juce::jmin (63.0, std::sqrt (a / b)) : 0.0f; // air as loud as the sound (at most +36 dB)
+        gSound = t < 0.5f ? 1.0f : 2.0f - 2.0f * t;
+        gOther = eq * juce::jmin (1.0f, 2.0f * t);
+    }
+    for (int c = 0; c < play.getNumChannels(); ++c)
+    {
+        play.applyGain (c, 0, n, gSound);
+        play.addFrom (c, 0, r, juce::jmin (c, 1), 0, n, gOther);
+    }
+}

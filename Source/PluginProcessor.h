@@ -118,6 +118,7 @@ private:
     std::array<std::array<std::atomic<float>*, kCol>, kSlots> colP {};
     std::array<std::array<std::atomic<float>*, 4>, kSlots> sfilP {}; // per-sample filter: type, cutoff, reso, mix
     std::array<CharacterFilter, kSlots> slotFilter;
+    std::array<std::atomic<float>*, kSlots> airP {};
     std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
     TiltFilter tilt;
 
