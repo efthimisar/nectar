@@ -26,12 +26,16 @@ public:
         juce::uint32 pattern = 0xffffu; // 16 steps, bit 0 = first step
         float gate = 0.8f;              // rhythmic: grain length as part of one step
         float pitchSemis = 0.0f;
+        float releaseSec = 0.25f;
+        float gain = 1.0f;
     };
 
     void prepare (double sr) { rate = sr; reset(); }
     void reset() { for (auto& g : grains) g.on = false; untilNext = 0.0; scanPos = 0.0; step = 0; }
     void noteOn (int midiNote, float vel) { note = midiNote; velocity = vel; held = true; env = juce::jmax (env, 0.0f); reset(); }
     void noteOff() { held = false; }
+    int getNote() const { return note; }
+    bool isHeld() const { return held; }
     bool active() const { if (held || env > 1.0e-4f) return true; for (auto& g : grains) if (g.on) return true; return false; }
 
     // adds to out
@@ -51,9 +55,10 @@ public:
         auto* L = out.getWritePointer (0);
         auto* R = out.getNumChannels() > 1 ? out.getWritePointer (1) : L;
 
+        const float relC = 1.0f - std::exp (-1.0f / (juce::jmax (0.01f, p.releaseSec) * (float) rate));
         for (int i = 0; i < num; ++i)
         {
-            env += ((held ? 1.0f : 0.0f) - env) * (held ? 0.002f : 0.0004f);
+            env += ((held ? 1.0f : 0.0f) - env) * (held ? 0.002f : relC);
             if (held && untilNext <= 0.0)
             {
                 const bool fire = ! p.rhythmic || ((p.pattern >> (step & 15)) & 1u) != 0;
@@ -103,7 +108,7 @@ public:
                 g.pos += g.inc;
                 g.t += 1.0;
             }
-            const float gn = env * velocity * norm;
+            const float gn = env * velocity * norm * p.gain;
             L[startSample + i] += l * gn;
             if (R != L) R[startSample + i] += r * gn;
         }
@@ -117,4 +122,50 @@ private:
     int note = 60, step = 0;
     float velocity = 1.0f, env = 0.0f;
     bool held = false;
+};
+
+// Polyphonic granular player for one slot.
+class GrainPlayer
+{
+public:
+    void prepare (double sr) { for (auto& v : voices) v.prepare (sr); }
+    bool active() const { for (auto& v : voices) if (v.active()) return true; return false; }
+    void allOff() { for (auto& v : voices) v.noteOff(); }
+
+    void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const juce::AudioBuffer<float>& src, const GrainVoice::Params& p)
+    {
+        const int n = out.getNumSamples();
+        int pos = 0;
+        auto render = [&] (int upTo)
+        {
+            if (upTo > pos)
+                for (auto& v : voices)
+                    if (v.active()) v.process (out, pos, upTo - pos, src, p);
+            pos = juce::jmax (pos, upTo);
+        };
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            render (juce::jlimit (0, n, meta.samplePosition));
+            if (m.isNoteOn())
+            {
+                GrainVoice* use = nullptr;
+                for (auto& v : voices) if (! v.active()) { use = &v; break; }
+                if (use == nullptr) for (auto& v : voices) if (! v.isHeld()) { use = &v; break; }
+                if (use == nullptr) { use = &voices[(size_t) next]; next = (next + 1) % (int) voices.size(); }
+                use->noteOn (m.getNoteNumber(), m.getFloatVelocity());
+            }
+            else if (m.isNoteOff())
+            {
+                for (auto& v : voices) if (v.isHeld() && v.getNote() == m.getNoteNumber()) v.noteOff();
+            }
+            else if (m.isAllNotesOff() || m.isAllSoundOff())
+                allOff();
+        }
+        render (n);
+    }
+
+private:
+    std::array<GrainVoice, 10> voices;
+    int next = 0;
 };

@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include "SamplePlayer.h"
+#include "Granular.h"
 #include "TiltFilter.h"
 #include "SlotMixer.h"
 #include "Slicer.h"
@@ -111,6 +112,9 @@ private:
     friend class CleanJob;
 
     std::array<SamplePlayer, kSlots> players;
+    std::array<GrainPlayer, kSlots> grainPlayers;
+    static constexpr int kGr = 13;
+    std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
     TiltFilter tilt;
 
     // modulation (audio thread reads the routes; the message thread writes them)

@@ -82,6 +82,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spdist" + sfx, 1 }, "Space distance" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
         }
+        {   // v2 granular (per sample)
+            auto f = [&] (const char* id, const char* name, float lo, float hi, float def, float skew = 1.0f)
+            {
+                l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { id + sfx, 1 }, name + nm,
+                                                                     NormalisableRange<float> (lo, hi, 0.0001f, skew), def));
+            };
+            l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "grmode" + sfx, 1 }, "Granular" + nm,
+                                                                  juce::StringArray { "Off", "Melodic", "Rhythmic" }, 0));
+            f ("grstart", "Start", 0.0f, 1.0f, 0.0f);
+            f ("grend", "End", 0.0f, 1.0f, 1.0f);
+            f ("grpos", "Position", 0.0f, 1.0f, 0.0f);
+            f ("grscan", "Scan", -1.0f, 1.0f, 0.15f);
+            f ("grspray", "Spray", 0.0f, 1.0f, 0.15f);
+            f ("grsize", "Grain size", 10.0f, 1000.0f, 140.0f, 0.4f);
+            f ("grdens", "Density", 1.0f, 16.0f, 6.0f, 0.6f);
+            f ("grjit", "Jitter", 0.0f, 1.0f, 0.0f);
+            f ("grrev", "Reverse", 0.0f, 1.0f, 0.0f);
+            f ("grspread", "Grain spread", 0.0f, 1.0f, 0.8f);
+            f ("grgate", "Gate", 0.1f, 2.0f, 0.7f);
+            l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "grpat" + sfx, 1 }, "Pattern" + nm, 0, 65535, 0xb6b5));
+        }
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
@@ -253,6 +274,11 @@ NektarProcessor::NektarProcessor()
         pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
         tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
         panP[(size_t) slot] = apvts.getRawParameterValue ("pan" + sfx);
+        {
+            static const char* const ids[kGr] = { "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat" };
+            for (int i = 0; i < kGr; ++i)
+                grP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (ids[i] + sfx);
+        }
         spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
         spDistP[(size_t) slot] = apvts.getRawParameterValue ("spdist" + sfx);
         noiseP[(size_t) slot] = apvts.getRawParameterValue ("noise" + sfx);
@@ -435,6 +461,8 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     mixer.prepare (sampleRate, samplesPerBlock);
     for (auto& pl : players)
         pl.prepare (sampleRate);
+    for (auto& gpl : grainPlayers)
+        gpl.prepare (sampleRate);
     tilt.prepare (sampleRate);
     resonator.prepare (sampleRate);
     resonatorB.prepare (sampleRate);
@@ -555,6 +583,11 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     const int limit = juce::jmax (8, 32 / juce::jmax (1, loaded));
 
     buffer.clear();
+    double hostBpm = 120.0;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto b = pos->getBpm()) hostBpm = *b;
+    const juce::MidiBuffer emptyMidi;
     std::array<bool, kSlots> loadedNow {};
     std::array<float, kSlots> pans {};
     for (int slot = 0; slot < kSlots; ++slot)
@@ -574,7 +607,26 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         p.releaseSec = modded (tailP[(size_t) slot]);
         pl.setVoiceLimit (limit);
         auto view = mixer.scratchFor (slot, buffer.getNumSamples());
-        pl.process (view, midi, p, false);
+        const auto& gp = grP[(size_t) slot];
+        const int grMode = juce::roundToInt (gp[0]->load());
+        auto& grPl = grainPlayers[(size_t) slot];
+        if (grMode > 0 || grPl.active())
+        {
+            if (grMode == 0) grPl.allOff(); // switched off while sounding: let it fade
+            GrainVoice::Params g;
+            g.rhythmic = grMode == 2;
+            g.start = modded (gp[1]); g.end = modded (gp[2]); g.position = modded (gp[3]); g.scan = modded (gp[4]);
+            g.spray = modded (gp[5]); g.sizeMs = modded (gp[6]); g.density = modded (gp[7]); g.jitter = modded (gp[8]);
+            g.reverse = modded (gp[9]); g.spread = modded (gp[10]); g.gate = modded (gp[11]);
+            g.pattern = (juce::uint32) juce::roundToInt (gp[12]->load());
+            g.bpm = hostBpm;
+            g.pitchSemis = p.pitchSemis;
+            g.releaseSec = p.releaseSec;
+            g.gain = p.level * p.level * p.autoGain;
+            grPl.process (view, grMode > 0 ? midi : emptyMidi, pl.getSample()->play, g);
+        }
+        if (grMode == 0)
+            pl.process (view, midi, p, false);
         loadedNow[(size_t) slot] = true;
         pans[(size_t) slot] = modded (panP[(size_t) slot]);
     }

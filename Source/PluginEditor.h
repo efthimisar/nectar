@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <map>
 #include "PluginProcessor.h"
 
 namespace nektar
@@ -138,6 +139,13 @@ private:
     int octaveShift = 0;
     int selectedSlot = 0;
     std::set<int> selection { 0 };
+    int fixedKnobs = 0;                 // knobs that are always there (top bar); the rest belong to the panel
+    std::map<juce::String, float> lastPanel; // last seen values of the first selected sample (to copy a change to the others)
+    juce::String overlayKey;
+    void rebuildPanel();
+    void drawOverlay (juce::Graphics&);
+    juce::String slotId (const char* base, int slot) const { return slot == 0 ? juce::String (base) : juce::String (base) + juce::String (slot + 1); }
+    int primarySlot() const { return selection.empty() ? 0 : *selection.begin(); }
     bool masterView = false;
     int resampleArmedSlot = -1;  // Resample asks once before it replaces a sound
     int resampleArmTicks = 0;

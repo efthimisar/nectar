@@ -19,6 +19,11 @@ constexpr float kLibX = 680.0f, kLibY = 250.0f;
 constexpr float kSlotCx[4] = { 300.0f, 420.0f, 940.0f, 1060.0f };
 constexpr float kSlotCy[4] = { 250.0f, 250.0f, 250.0f, 250.0f };
 constexpr float kModR = 56.0f;                   // module radius
+const juce::Rectangle<float> kScreen (24.0f, 450.0f, 1312.0f, 62.0f);
+const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, { 208.0f, 414.0f, 78.0f, 26.0f }, { 290.0f, 414.0f, 84.0f, 26.0f } };
+constexpr float kColW = (1312.0f - 48.0f) / 5.0f;
+inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
+const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat" };
 const juce::Rectangle<float> kAllBtn (1160.0f, 412.0f, 70.0f, 28.0f), kMasterBtn (1240.0f, 412.0f, 96.0f, 28.0f);
 
 // The nine modules of the bottom panel. A knob without a parameter id is not built yet (shown dim).
@@ -633,6 +638,8 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
 
     addKnob (845, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
+    fixedKnobs = knobs.size();
+    rebuildPanel();
 
     constrainer.setFixedAspectRatio ((double) (kDW / kDH));
     constrainer.setMinimumSize (660, (int) (660 * kDH / kDW));
@@ -669,7 +676,7 @@ void NektarEditor::addKnob (float cx, float cy, float r, const juce::String& lab
 void NektarEditor::resized()
 {
     const float s = (float) getWidth() / kDW;
-    hud->setBounds (getLocalBounds());
+    if (hud != nullptr) hud->setBounds (getLocalBounds());
     for (int i = 0; i < knobs.size(); ++i)
     {
         auto* k = knobs[i];
@@ -707,6 +714,8 @@ void NektarEditor::paint (Graphics& g)
         addGrain (cache);
     }
     g.drawImage (cache, getLocalBounds().toFloat());
+    g.addTransform (juce::AffineTransform::scale ((float) getWidth() / kDW));
+    drawOverlay (g);
 }
 
 void NektarEditor::addGrain (juce::Image& img)
@@ -739,6 +748,7 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
             masterView = false;
             selectedSlot = slot;
             cache = juce::Image();
+            rebuildPanel();
             repaint();
         }
         else
@@ -746,20 +756,40 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
             const bool changed = masterView || selection.size() != 1 || selection.count (slot) == 0;
             selection = { slot };
             masterView = false;
-            if (changed) { selectedSlot = slot; cache = juce::Image(); repaint(); }
+            if (changed) { selectedSlot = slot; cache = juce::Image(); rebuildPanel(); repaint(); }
         }
+    }
+    else if (! masterView && (kModeBtn[0].contains (p) || kModeBtn[1].contains (p) || kModeBtn[2].contains (p)))
+    {
+        const int mode = kModeBtn[0].contains (p) ? 0 : (kModeBtn[1].contains (p) ? 1 : 2);
+        for (int sl : selection)
+            if (auto* pa = proc.apvts.getParameter (slotId ("grmode", sl)))
+                pa->setValueNotifyingHost (pa->convertTo0to1 ((float) mode));
+        repaint();
+    }
+    else if (! masterView && kScreen.withTop (kScreen.getBottom() - 16.0f).contains (p)
+             && juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", primarySlot()))->load()) == 2)
+    {
+        const int step = juce::jlimit (0, 15, (int) ((p.x - kScreen.getX()) / kScreen.getWidth() * 16.0f));
+        const int pat = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grpat", primarySlot()))->load()) ^ (1 << step);
+        for (int sl : selection)
+            if (auto* pa = proc.apvts.getParameter (slotId ("grpat", sl)))
+                pa->setValueNotifyingHost (pa->convertTo0to1 ((float) pat));
+        repaint();
     }
     else if (kAllBtn.contains (p))
     {
         selection = { 0, 1, 2, 3 };
         masterView = false;
         cache = juce::Image();
+        rebuildPanel();
         repaint();
     }
     else if (kMasterBtn.contains (p))
     {
         masterView = ! masterView;
         cache = juce::Image();
+        rebuildPanel();
         repaint();
     }
     else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
@@ -792,6 +822,7 @@ void NektarEditor::mouseDoubleClick (const juce::MouseEvent& e)
         masterView = false;
         selectedSlot = slot;
         cache = juce::Image();
+        rebuildPanel();
         repaint();
         chooseFile (slot);
     }
@@ -998,6 +1029,143 @@ void NektarEditor::timerCallback()
         joyPad->repaint();
     if (spacePad != nullptr)
         spacePad->repaint();
+
+    // a change on the first selected sample is copied to the other selected samples (only the knob that moved)
+    juce::String key;
+    const int prim = primarySlot();
+    for (auto* base : kSlotIds)
+    {
+        auto* src = proc.apvts.getParameter (slotId (base, prim));
+        if (src == nullptr) continue;
+        const float v = src->getValue();
+        key << juce::String (v, 4) << ";";
+        auto it = lastPanel.find (base);
+        if (it != lastPanel.end() && std::abs (it->second - v) > 1.0e-6f && ! masterView)
+            for (int sl : selection)
+                if (sl != prim)
+                    if (auto* dst = proc.apvts.getParameter (slotId (base, sl)))
+                        dst->setValueNotifyingHost (v);
+        lastPanel[base] = v;
+    }
+    key << prim << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
+    if (key != overlayKey)
+    {
+        overlayKey = key;
+        repaint();
+    }
+}
+
+void NektarEditor::rebuildPanel()
+{
+    while (knobs.size() > fixedKnobs)
+    {
+        knobs.removeLast();
+        knobPos.removeLast();
+    }
+    lastPanel.clear();
+    const float y1 = 568.0f, y2 = 612.0f, r = 10.0f;
+    auto row = [&] (int col, float y, std::initializer_list<std::pair<const char*, juce::String>> ks)
+    {
+        const float cx = colX (col) + kColW * 0.5f, sp = juce::jmin (54.0f, (kColW - 30.0f) / (float) juce::jmax (1, (int) ks.size()));
+        int i = 0;
+        for (auto& k : ks)
+        {
+            addKnob (cx + ((float) i - 0.5f * (float) (ks.size() - 1)) * sp, y, r, k.first, false, 0.0f, k.second.toRawUTF8(),
+                     k.second == "spspk");
+            ++i;
+        }
+    };
+    if (masterView)
+    {
+        row (0, 590.0f, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Far", "spfar" }, { "Back", "spback" } });
+        row (1, 590.0f, { { "Type", "filtype" }, { "Cutoff", "filcut" }, { "Reso", "filres" }, { "Mix", "filmix" } });
+        row (2, 590.0f, { { "Note", "revsize" }, { "Decay", "revdecay" }, { "Mix", "revmix" } });
+        row (3, 590.0f, { { "Time", "deltime" }, { "Feedback", "delfb" }, { "Pitch", "delpitch" }, { "Mix", "delmix" } });
+        row (4, 590.0f, { { "Bits", "crbits" }, { "Rate", "crrate" }, { "Mix", "crmix" } });
+    }
+    else
+    {
+        const int s = primarySlot();
+        row (0, 590.0f, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
+        row (1, 590.0f, { { "Start", slotId ("grstart", s) }, { "End", slotId ("grend", s) }, { "Position", slotId ("grpos", s) }, { "Scan", slotId ("grscan", s) } });
+        row (2, y1, { { "Size", slotId ("grsize", s) }, { "Density", slotId ("grdens", s) }, { "Spray", slotId ("grspray", s) }, { "Jitter", slotId ("grjit", s) } });
+        row (2, y2, { { "Reverse", slotId ("grrev", s) }, { "Spread", slotId ("grspread", s) }, { "Gate", slotId ("grgate", s) } });
+    }
+    resized();
+}
+
+// Live parts of the panel (drawn in design units on top of the cached picture).
+void NektarEditor::drawOverlay (Graphics& g)
+{
+    if (masterView)
+    {
+        g.setColour (kMuted);
+        g.setFont (font (regular, 16));
+        g.drawText ("The four sounds together", kScreen, juce::Justification::centred);
+        return;
+    }
+    const int prim = primarySlot();
+    auto val = [&] (const char* base) { return proc.apvts.getRawParameterValue (slotId (base, prim))->load(); };
+    const int mode = juce::roundToInt (val ("grmode"));
+    const char* modeNames[3] = { "Off", "Melodic", "Rhythmic" };
+    for (int i = 0; i < 3; ++i)
+    {
+        g.setColour (i == mode ? kWada[2] : Colour (0xff2f2d2b));
+        g.fillRoundedRectangle (kModeBtn[i], 13);
+        g.setColour (i == mode ? kDark : kLight);
+        g.setFont (font (regular, 14));
+        g.drawText (i == 0 ? "Grains off" : modeNames[i], kModeBtn[i], juce::Justification::centred);
+    }
+    const auto smp = proc.getSample (prim);
+    const auto inner = kScreen.reduced (16.0f, 4.0f);
+    if (smp == nullptr)
+    {
+        g.setColour (kMuted);
+        g.setFont (font (regular, 16));
+        g.drawText ("Empty: double-click the circle or drop a WAV", kScreen, juce::Justification::centred);
+        return;
+    }
+    const bool rhythmic = mode == 2;
+    const auto wr = rhythmic ? inner.withTrimmedBottom (16.0f) : inner;
+    const auto pk = peaksOf (smp.get(), 220);
+    const float a = juce::jmin (val ("grstart"), val ("grend")), b = juce::jmax (val ("grstart"), val ("grend"));
+    const float xa = wr.getX() + a * wr.getWidth(), xb = wr.getX() + b * wr.getWidth();
+    for (int i = 0; i < pk.size(); ++i)
+    {
+        const float x = wr.getX() + wr.getWidth() * ((float) i + 0.5f) / (float) pk.size();
+        const float h = juce::jmax (1.2f, wr.getHeight() * 0.46f * pk[i]);
+        const bool in = mode == 0 || (x >= xa && x <= xb);
+        g.setColour (in ? kLight : kMuted.withAlpha (0.35f));
+        g.drawLine (x, wr.getCentreY() - h, x, wr.getCentreY() + h, 2.0f);
+    }
+    if (mode > 0)
+    {
+        g.setColour (kAcc.withAlpha (0.10f));
+        g.fillRect (juce::Rectangle<float> (xa, wr.getY(), xb - xa, wr.getHeight()));
+        g.setColour (kAcc);
+        g.drawLine (xa, wr.getY(), xa, wr.getBottom(), 2.0f);
+        g.drawLine (xb, wr.getY(), xb, wr.getBottom(), 2.0f);
+        if (! rhythmic)
+        {
+            float pos = val ("grpos"); pos -= std::floor (pos);
+            const float xp = xa + pos * (xb - xa), sw = 0.5f * val ("grspray") * (xb - xa);
+            g.setColour (kWada[2].withAlpha (0.25f));
+            g.fillRect (juce::Rectangle<float> (juce::jmax (xa, xp - sw), wr.getY(), juce::jmin (xb, xp + sw) - juce::jmax (xa, xp - sw), wr.getHeight()));
+            g.setColour (kWada[2]);
+            g.drawLine (xp, wr.getY(), xp, wr.getBottom(), 2.0f);
+        }
+    }
+    if (rhythmic)
+    {
+        const int pat = juce::roundToInt (val ("grpat"));
+        const float sw = inner.getWidth() / 16.0f;
+        for (int i = 0; i < 16; ++i)
+        {
+            const juce::Rectangle<float> r (inner.getX() + (float) i * sw + 2.0f, inner.getBottom() - 13.0f, sw - 4.0f, 11.0f);
+            g.setColour (((pat >> i) & 1) != 0 ? kWada[i % 4 == 0 ? 0 : 2] : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 3.0f);
+        }
+    }
 }
 
 void NektarEditor::chooseFile (int slot)
@@ -1247,12 +1415,12 @@ void NektarEditor::renderDesign (Graphics& g)
         }
         g.setColour (kAcc);
         g.setFont (font (bld, 20));
-        g.drawText (title, juce::Rectangle<float> (28, 412, 360, 30), juce::Justification::centredLeft);
+        g.drawText (title, juce::Rectangle<float> (28, 412, masterView ? 360.0f : 120.0f, 30), juce::Justification::centredLeft);
         if (message.isNotEmpty())
         {
             g.setColour (kMuted);
             g.setFont (font (reg, 15));
-            g.drawText (message, juce::Rectangle<float> (390, 412, 700, 30), juce::Justification::centredLeft);
+            g.drawText (message, juce::Rectangle<float> (400, 412, 740, 30), juce::Justification::centredLeft);
         }
         const bool allOn = ! masterView && selection.size() == 4;
         for (int k = 0; k < 2; ++k)
@@ -1266,33 +1434,12 @@ void NektarEditor::renderDesign (Graphics& g)
             g.drawText (k == 0 ? "All" : "Master", r, juce::Justification::centred);
         }
 
-        // screen: the sound of the first selected sample (grains, rhythm and selection will be drawn here)
-        const juce::Rectangle<float> screen (24.0f, 450.0f, kDW - 48.0f, 62.0f);
-        insetBox (g, screen, 10);
-        if (masterView)
-        {
-            g.setColour (kMuted);
-            g.setFont (font (reg, 16));
-            g.drawText ("The four sounds together", screen, juce::Justification::centred);
-        }
-        else if (! selection.empty())
-        {
-            const auto smp = proc.getSample (*selection.begin());
-            const auto pk = peaksOf (smp.get(), 220);
-            if (pk.size() > 0)
-                realWave (g, screen.getCentreX(), screen.getCentreY(), screen.getWidth() - 40.0f, 24.0f, pk);
-            else
-            {
-                g.setColour (kMuted);
-                g.setFont (font (reg, 16));
-                g.drawText ("Empty: double-click the circle or drop a WAV", screen, juce::Justification::centred);
-            }
-        }
+        insetBox (g, kScreen, 10); // the sound itself is drawn live on top (drawOverlay)
 
         // columns (controls come next)
-        const char* names[2][5] = { { "Position", "Time", "Granular", "Colour", "Filter" },
-                                    { "Space", "Width", "Filter", "Reverb \xc2\xb7 Delay", "Crush \xc2\xb7 Out" } };
-        const float cw = (kDW - 48.0f - 4 * 12.0f) / 5.0f;
+        const char* names[2][5] = { { "Level \xc2\xb7 Pitch", "Part of the sound", "Granular", "Colour (next)", "Filter (next)" },
+                                    { "Space", "Filter", "Reverb", "Delay", "Crush" } };
+        const float cw = kColW;
         for (int c = 0; c < 5; ++c)
         {
             const juce::Rectangle<float> col (24.0f + (float) c * (cw + 12.0f), 524.0f, cw, 120.0f);
