@@ -21,6 +21,7 @@ struct Sample
     double rate = 44100.0;         // file sample rate
     juce::String name;
     juce::String path;
+    float modelGain = 1.0f;             // makes the sine description (with its noise part) as loud as the sound itself
     std::vector<float> hitGate;         // 0..1 per sample: how much of `play` counts as a hit at that moment
     juce::AudioBuffer<float> transient; // only the sudden hits of `play` (same length); laid back over the morph, which smooths them
     juce::AudioBuffer<float> grainSrcHi; // second coloured copy: the other end of a colour knob that is being moved (LFO etc.)

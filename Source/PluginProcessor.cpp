@@ -47,7 +47,8 @@ public:
             if (! grains || ! (body.active() || blur > 0.01f || useModel || useMorph)) { smp.grainSrc.setSize (0, 0); return; }
             if (useMorph)
                 smp.grainSrc = bakeMorph (smp.play, *smp.model, *partner->model, pairMorph, smp.transient, smp.hitGate,
-                                          partner->transient, partner->hitGate, autoLevel && smp.autoGain > 1.0e-6f ? partner->autoGain / smp.autoGain : 1.0f);
+                                          partner->transient, partner->hitGate, autoLevel && smp.autoGain > 1.0e-6f ? partner->autoGain / smp.autoGain : 1.0f,
+                                          smp.modelGain, partner->modelGain);
             if (useModel) smp.grainSrc = bakeModel (smp.play, *smp.model, modelMix, modelNoise);
             if (body.active() || blur > 0.01f) smp.grainSrc = bakeBody (useModel || useMorph ? smp.grainSrc : smp.play, hostRate, body, blur);
             if (useMorph && ! (body.active() || blur > 0.01f)) return; // the morph already carries its own level
@@ -93,6 +94,14 @@ public:
                 return jobHasFinished;
             s->model = std::move (model);
             s->modelRate = hostRate;
+            {   // measured once per sound: how loud the description plays compared with the sound
+                const auto r = bakeModel (s->play, *s->model, 1.0f, 1.0f);
+                double a = 0.0, b = 0.0;
+                for (int c = 0; c < s->play.getNumChannels(); ++c) { const float x = s->play.getRMSLevel (c, 0, s->play.getNumSamples()); a += (double) x * x; }
+                for (int c = 0; c < 2; ++c) { const float x = r.getRMSLevel (c, 0, r.getNumSamples()); b += (double) x * x; }
+                a /= (double) juce::jmax (1, s->play.getNumChannels()); b /= 2.0;
+                s->modelGain = b > 1.0e-20 ? (float) juce::jlimit (0.25, 4.0, std::sqrt (a / b)) : 1.0f;
+            }
         }
         if (std::abs (air - 0.5f) >= 0.01f && s->model != nullptr)
         {

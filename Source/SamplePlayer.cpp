@@ -519,14 +519,20 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
                 {
                     const auto& ta = sample->transient; const auto& tb = partner->transient;
                     const int na = ta.getNumSamples(), nb2 = tb.getNumSamples();
-                    const float wa = 1.0f - p.morph, wb = p.morph;
+                    // every held key lays back the same hits, so together they would add up louder than separate notes do:
+                    // with N keys each one gets 1 / sqrt (N)
+                    int keys = 0;
+                    for (const auto& o : voices) if (o.active && o.morphAdd) ++keys;
+                    const float hs = 1.0f / std::sqrt ((float) juce::jmax (1, keys));
+                    const float wa = (1.0f - p.morph), wb = p.morph;
+                    const float mg = wa * sample->modelGain + wb * partner->modelGain; // the description as loud as the sounds themselves
                     for (int i = 0; i < chunk; ++i)
                     {
                         const int q = (int) (tp0 + advance * (double) i);
                         const float gm = wa * (q < na ? sample->hitGate[(size_t) q] : 0.0f) + wb * (q < nb2 ? partner->hitGate[(size_t) q] : 0.0f);
-                        addL[(size_t) i] *= 1.0f - gm; addR[(size_t) i] *= 1.0f - gm; // where a hit is laid back, the smoothed copy steps aside
-                        if (q < na) { addL[(size_t) i] += wa * ta.getSample (0, q); addR[(size_t) i] += wa * ta.getSample (juce::jmin (1, ta.getNumChannels() - 1), q); }
-                        if (q < nb2) { addL[(size_t) i] += wb * tb.getSample (0, q); addR[(size_t) i] += wb * tb.getSample (juce::jmin (1, tb.getNumChannels() - 1), q); }
+                        addL[(size_t) i] *= mg * (1.0f - gm); addR[(size_t) i] *= mg * (1.0f - gm); // where a hit is laid back, the smoothed copy steps aside
+                        if (q < na) { addL[(size_t) i] += hs * wa * ta.getSample (0, q); addR[(size_t) i] += hs * wa * ta.getSample (juce::jmin (1, ta.getNumChannels() - 1), q); }
+                        if (q < nb2) { addL[(size_t) i] += hs * wb * tb.getSample (0, q); addR[(size_t) i] += hs * wb * tb.getSample (juce::jmin (1, tb.getNumChannels() - 1), q); }
                     }
                 }
                 // Auto level: the partner has its own level correction, so the morph moves from this sound's to the partner's

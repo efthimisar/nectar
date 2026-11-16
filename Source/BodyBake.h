@@ -188,7 +188,8 @@ inline void applyAir (juce::AudioBuffer<float>& play, const SineModel& model, fl
 // with the hits of both sounds laid back over it and the level moved towards B's auto level, like the live voice does.
 inline juce::AudioBuffer<float> bakeMorph (const juce::AudioBuffer<float>& play, const SineModel& A, const SineModel& B, float morph,
                                            const juce::AudioBuffer<float>& hitsA, const std::vector<float>& gateA,
-                                           const juce::AudioBuffer<float>& hitsB, const std::vector<float>& gateB, float levelRatio)
+                                           const juce::AudioBuffer<float>& hitsB, const std::vector<float>& gateB, float levelRatio,
+                                           float modelGainA = 1.0f, float modelGainB = 1.0f)
 {
     const int n = play.getNumSamples();
     juce::AudioBuffer<float> out (2, n);
@@ -199,6 +200,7 @@ inline juce::AudioBuffer<float> bakeMorph (const juce::AudioBuffer<float>& play,
     for (int done = 0; done < n; done += 256)
         v.process (A, B, 1.0, 1.0, morph, 1.0f, out.getWritePointer (0) + done, out.getWritePointer (1) + done, juce::jmin (256, n - done));
     const float wa = 1.0f - morph, wb = morph, g = std::pow (juce::jlimit (0.06f, 16.0f, levelRatio), morph);
+    const float mg = wa * modelGainA + wb * modelGainB;
     const int na = juce::jmin (hitsA.getNumSamples(), (int) gateA.size()), nb = juce::jmin (hitsB.getNumSamples(), (int) gateB.size());
     for (int c = 0; c < 2; ++c)
     {
@@ -206,7 +208,7 @@ inline juce::AudioBuffer<float> bakeMorph (const juce::AudioBuffer<float>& play,
         for (int i = 0; i < n; ++i)
         {
             const float gm = wa * (i < na ? gateA[(size_t) i] : 0.0f) + wb * (i < nb ? gateB[(size_t) i] : 0.0f);
-            float x = d[i] * (1.0f - gm);
+            float x = d[i] * mg * (1.0f - gm);
             if (i < na) x += wa * hitsA.getSample (juce::jmin (c, hitsA.getNumChannels() - 1), i);
             if (i < nb) x += wb * hitsB.getSample (juce::jmin (c, hitsB.getNumChannels() - 1), i);
             d[i] = x * g;
