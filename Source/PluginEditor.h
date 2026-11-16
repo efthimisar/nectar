@@ -143,6 +143,10 @@ private:
     std::map<juce::String, float> lastPanel; // last seen values of the first selected sample (to copy a change to the others)
     juce::String overlayKey;
     bool panelGrains = false;
+    bool panelClean = false;            // the Clean knob is shown only when the recording has a background noise to learn
+    bool noiseFound (int slot) const { const auto sm = proc.getSample (slot); return sm != nullptr && sm->analysis.valid && sm->analysis.noiseFloorDb > -95.0f; }
+    int panelMix = -1;                  // which Master effects are open (bit per effect); a closed one shows only its Mix knob
+    int mixMask() const;
     bool panelHum = false;              // the Hum knob is shown only when mains hum was found in the sample
     bool humFound (int slot) const { const auto sm = proc.getSample (slot); return sm != nullptr && sm->analysis.valid && sm->analysis.humHz > 0.0; }
     int pairIndex() const { if (masterView || selection.size() != 2) return -1; if (selection.count (0) && selection.count (1)) return 0; if (selection.count (2) && selection.count (3)) return 1; return -1; }

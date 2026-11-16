@@ -1071,7 +1071,12 @@ void NektarEditor::timerCallback()
     }
     key << juce::roundToInt (proc.apvts.getRawParameterValue ("scale")->load()) << "k" << juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load());
     key << prim << (motionView ? "o" : "") << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
-    if (! masterView && (panelHum != humFound (prim) || panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0)))
+    if (masterView && ! motionView && panelMix != mixMask())
+    {
+        cache = juce::Image();
+        rebuildPanel();
+    }
+    if (! masterView && (panelHum != humFound (prim) || panelClean != noiseFound (prim) || panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0)))
     {
         cache = juce::Image();
         rebuildPanel();
@@ -1081,6 +1086,15 @@ void NektarEditor::timerCallback()
         overlayKey = key;
         repaint();
     }
+}
+
+int NektarEditor::mixMask() const
+{
+    const char* ids[5] = { "filmix", "revmix", "delmix", "crmix", "spmix" };
+    int m = 0;
+    for (int i = 0; i < 5; ++i)
+        if (proc.apvts.getRawParameterValue (ids[i])->load() > 0.001f) m |= 1 << i;
+    return m;
 }
 
 juce::Rectangle<float> NektarEditor::screenArea() const
@@ -1119,12 +1133,23 @@ void NektarEditor::rebuildPanel()
     }
     else if (masterView)
     {
-        row (0, y1, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Width", "width" } });
-        row (0, y2, { { "Far", "spfar" }, { "Back", "spback" } });
-        row (1, 590.0f, { { "Type", "filtype" }, { "Cutoff", "filcut" }, { "Reso", "filres" }, { "Mix", "filmix" } });
-        row (2, 590.0f, { { "Note", "revsize" }, { "Decay", "revdecay" }, { "Mix", "revmix" } });
-        row (3, 590.0f, { { "Time", "deltime" }, { "Feedback", "delfb" }, { "Pitch", "delpitch" }, { "Mix", "delmix" } });
-        row (4, 590.0f, { { "Bits", "crbits" }, { "Rate", "crrate" }, { "Mix", "crmix" } });
+        if (mixMask() & 16)
+        {
+            row (0, y1, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Width", "width" } });
+            row (0, y2, { { "Far", "spfar" }, { "Back", "spback" } });
+        }
+        else
+            row (0, 590.0f, { { "Amount", "spmix" }, { "Width", "width" } });
+        // an effect whose Mix is at zero shows only its Mix knob: no knob on screen that cannot be heard
+        panelMix = mixMask();
+        if (panelMix & 1) row (1, 590.0f, { { "Type", "filtype" }, { "Cutoff", "filcut" }, { "Reso", "filres" }, { "Mix", "filmix" } });
+        else              row (1, 590.0f, { { "Mix", "filmix" } });
+        if (panelMix & 2) row (2, 590.0f, { { "Note", "revsize" }, { "Decay", "revdecay" }, { "Mix", "revmix" } });
+        else              row (2, 590.0f, { { "Mix", "revmix" } });
+        if (panelMix & 4) row (3, 590.0f, { { "Time", "deltime" }, { "Feedback", "delfb" }, { "Pitch", "delpitch" }, { "Mix", "delmix" } });
+        else              row (3, 590.0f, { { "Mix", "delmix" } });
+        if (panelMix & 8) row (4, 590.0f, { { "Bits", "crbits" }, { "Rate", "crrate" }, { "Mix", "crmix" } });
+        else              row (4, 590.0f, { { "Mix", "crmix" } });
     }
     else
     {
@@ -1136,10 +1161,14 @@ void NektarEditor::rebuildPanel()
             row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
         row (3, y1, { { "Tone", slotId ("bodytone", s) }, { "Focus", slotId ("bodyfocus", s) }, { "Size", slotId ("bodysize", s) }, { "Blur", slotId ("blur", s) } });
         panelHum = humFound (s);
-        if (panelHum)
-            row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) }, { "Clean", slotId ("noise", s) }, { "Hum", slotId ("hum", s) }, { "Low cut", slotId ("lowcut", s) } });
-        else
-            row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) }, { "Clean", slotId ("noise", s) }, { "Low cut", slotId ("lowcut", s) } });
+        panelClean = noiseFound (s);
+        {
+            const juce::String air = slotId ("air", s), grit = slotId ("srcrough", s), cln = slotId ("noise", s), hum = slotId ("hum", s), lc = slotId ("lowcut", s);
+            if (panelClean && panelHum) row (3, y2, { { "Air", air }, { "Grit", grit }, { "Clean", cln }, { "Hum", hum }, { "Low cut", lc } });
+            else if (panelClean)        row (3, y2, { { "Air", air }, { "Grit", grit }, { "Clean", cln }, { "Low cut", lc } });
+            else if (panelHum)          row (3, y2, { { "Air", air }, { "Grit", grit }, { "Hum", hum }, { "Low cut", lc } });
+            else                        row (3, y2, { { "Air", air }, { "Grit", grit }, { "Low cut", lc } });
+        }
         if (const int pi = pairIndex(); pi >= 0)
         {
             const char* ids[2][4] = { { "morph12", "imorph12", "xmorph12", "chromo12" }, { "morph34", "imorph34", "xmorph34", "chromo34" } };
