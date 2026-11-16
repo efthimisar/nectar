@@ -149,6 +149,8 @@ private:
     std::atomic<float>* lfoFadeP = nullptr;
     std::atomic<float>* lfoSpiralP = nullptr;
     std::atomic<float>* masterP = nullptr;
+    std::atomic<float>* widthP = nullptr;
+    float lastWidth = 1.0f;
     float lastMaster = 1.0f;
     float rampLevel = 1.0f;                // 0 -> 1 over the Ramp time after a note starts with no key held
     std::atomic<float>* rampTimeP = nullptr;

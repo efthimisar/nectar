@@ -298,6 +298,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo width (0 = mono, middle = as it is, 1 = wide)",
+                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
                                                          NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfospiral", 1 }, "LFO spiral (rate sweeps slow to fast over the Ramp time, 0 = off)",
@@ -393,6 +395,7 @@ NektarProcessor::NektarProcessor()
     chromoMoveP = apvts.getRawParameterValue ("chromomove");
     lfoDelayP = apvts.getRawParameterValue ("lfodelay");
     masterP = apvts.getRawParameterValue ("master");
+    widthP = apvts.getRawParameterValue ("width");
     lfoSpiralP = apvts.getRawParameterValue ("lfospiral");
     lfoFadeP = apvts.getRawParameterValue ("lfofade");
     chromoBackP = apvts.getRawParameterValue ("chromoback");
@@ -809,6 +812,25 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
+
+    // Stereo width: the side part (left minus right) is turned down to mono or up to twice (mid / side)
+    if (buffer.getNumChannels() > 1)
+    {
+        const float w = modded (widthP) * 2.0f;
+        if (std::abs (w - 1.0f) > 1.0e-3f || std::abs (lastWidth - 1.0f) > 1.0e-3f)
+        {
+            auto* L = buffer.getWritePointer (0);
+            auto* R = buffer.getWritePointer (1);
+            const int n = buffer.getNumSamples();
+            for (int i = 0; i < n; ++i)
+            {
+                const float ww = lastWidth + (w - lastWidth) * (float) i / (float) n;
+                const float m = 0.5f * (L[i] + R[i]), sd = 0.5f * (L[i] - R[i]) * ww;
+                L[i] = m + sd; R[i] = m - sd;
+            }
+            lastWidth = w;
+        }
+    }
 
     // Master out: the last gain, before the safety knee (smoothed over the block)
     {

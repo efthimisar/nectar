@@ -767,10 +767,10 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
                 pa->setValueNotifyingHost (pa->convertTo0to1 ((float) mode));
         repaint();
     }
-    else if (! masterView && kScreen.withTop (kScreen.getBottom() - 16.0f).contains (p)
+    else if (! masterView && screenArea().withTop (kScreen.getBottom() - 16.0f).contains (p)
              && juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", primarySlot()))->load()) == 2)
     {
-        const int step = juce::jlimit (0, 15, (int) ((p.x - kScreen.getX()) / kScreen.getWidth() * 16.0f));
+        const int step = juce::jlimit (0, 15, (int) ((p.x - (screenArea().getX() + 16.0f)) / (screenArea().getWidth() - 32.0f) * 16.0f));
         const int pat = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grpat", primarySlot()))->load()) ^ (1 << step);
         for (int sl : selection)
             if (auto* pa = proc.apvts.getParameter (slotId ("grpat", sl)))
@@ -1060,6 +1060,11 @@ void NektarEditor::timerCallback()
     }
 }
 
+juce::Rectangle<float> NektarEditor::screenArea() const
+{
+    return pairIndex() >= 0 ? kScreen.withTrimmedRight (342.0f) : kScreen;
+}
+
 void NektarEditor::rebuildPanel()
 {
     while (knobs.size() > fixedKnobs)
@@ -1082,7 +1087,8 @@ void NektarEditor::rebuildPanel()
     };
     if (masterView)
     {
-        row (0, 590.0f, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Far", "spfar" }, { "Back", "spback" } });
+        row (0, y1, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Width", "width" } });
+        row (0, y2, { { "Far", "spfar" }, { "Back", "spback" } });
         row (1, 590.0f, { { "Type", "filtype" }, { "Cutoff", "filcut" }, { "Reso", "filres" }, { "Mix", "filmix" } });
         row (2, 590.0f, { { "Note", "revsize" }, { "Decay", "revdecay" }, { "Mix", "revmix" } });
         row (3, 590.0f, { { "Time", "deltime" }, { "Feedback", "delfb" }, { "Pitch", "delpitch" }, { "Mix", "delmix" } });
@@ -1098,6 +1104,15 @@ void NektarEditor::rebuildPanel()
             row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
         row (3, y1, { { "Tone", slotId ("bodytone", s) }, { "Focus", slotId ("bodyfocus", s) }, { "Size", slotId ("bodysize", s) }, { "Blur", slotId ("blur", s) } });
         row (3, y2, { { "Air", slotId ("air", s) }, { "Grit", slotId ("srcrough", s) } });
+        if (const int pi = pairIndex(); pi >= 0)
+        {
+            const char* ids[2][3] = { { "imorph12", "xmorph12", "chromo12" }, { "imorph34", "xmorph34", "chromo34" } };
+            const float x0 = kScreen.getRight() - 330.0f + 104.0f, yk = kScreen.getY() + 21.0f;
+            addKnob (x0, yk, r, "Inter", false, 0.0f, ids[pi][0]);
+            addKnob (x0 + 62.0f, yk, r, "Cross", false, 0.0f, ids[pi][1]);
+            addKnob (x0 + 124.0f, yk, r, "Chroma", false, 0.0f, ids[pi][2]);
+            addKnob (x0 + 186.0f, yk, r, "Move", false, 0.0f, "chromomove");
+        }
         row (4, 590.0f, { { "Type", slotId ("sfiltype", s) }, { "Cutoff", slotId ("sfilcut", s) }, { "Reso", slotId ("sfilres", s) }, { "Mix", slotId ("sfilmix", s) } });
         row (1, 590.0f, { { "Start", slotId ("grstart", s) }, { "End", slotId ("grend", s) }, { "Position", slotId ("grpos", s) }, { "Scan", slotId ("grscan", s) } });
         row (2, y1, { { "Size", slotId ("grsize", s) }, { "Density", slotId ("grdens", s) }, { "Spray", slotId ("grspray", s) }, { "Jitter", slotId ("grjit", s) } });
@@ -1129,12 +1144,13 @@ void NektarEditor::drawOverlay (Graphics& g)
         g.drawText (i == 0 ? "Grains off" : modeNames[i], kModeBtn[i], juce::Justification::centred);
     }
     const auto smp = proc.getSample (prim);
-    const auto inner = kScreen.reduced (16.0f, 4.0f);
+    const auto scr = screenArea();
+    const auto inner = scr.reduced (16.0f, 4.0f);
     if (smp == nullptr)
     {
         g.setColour (kMuted);
         g.setFont (font (regular, 16));
-        g.drawText ("Empty: double-click the circle or drop a WAV", kScreen, juce::Justification::centred);
+        g.drawText ("Empty: double-click the circle or drop a WAV", scr, juce::Justification::centred);
         return;
     }
     const bool rhythmic = mode == 2;
@@ -1445,7 +1461,22 @@ void NektarEditor::renderDesign (Graphics& g)
             g.drawText (k == 0 ? "All" : "Master", r, juce::Justification::centred);
         }
 
-        insetBox (g, kScreen, 10); // the sound itself is drawn live on top (drawOverlay)
+        insetBox (g, masterView ? kScreen : screenArea(), 10); // the sound itself is drawn live on top (drawOverlay)
+        if (pairIndex() >= 0)
+        {
+            const juce::Rectangle<float> pr (kScreen.getRight() - 330.0f, kScreen.getY(), 330.0f, kScreen.getHeight());
+            g.setColour (juce::Colours::black.withAlpha (0.18f));
+            g.fillRoundedRectangle (pr, 10);
+            g.setColour (kWada[1]);
+            g.setFont (font (bld, 15));
+            g.drawFittedText (pairIndex() == 0 ? "Pair\n1 + 2" : "Pair\n3 + 4", pr.withWidth (70.0f).toNearestInt(), juce::Justification::centred, 2);
+        }
+        else if (! masterView && selection.size() == 2 && message.isEmpty())
+        {
+            g.setColour (kMuted);
+            g.setFont (font (reg, 15));
+            g.drawText ("Pair tools work on 1 + 2 and on 3 + 4", juce::Rectangle<float> (386, 412, 444, 30), juce::Justification::centredLeft);
+        }
 
         // columns (controls come next)
         const char* names[2][5] = { { "Level \xc2\xb7 Time", "Part of the sound", "Granular", "Colour", "Filter" },
