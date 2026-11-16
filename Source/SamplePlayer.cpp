@@ -237,6 +237,27 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
         }
     }
     s.autoGain = measureAutoGain (s.play, hostRate);
+
+    // the sudden hits: where a fast level follower (2 ms) rises well above a slow one (60 ms)
+    {
+        const int n = s.play.getNumSamples(), chs = s.play.getNumChannels();
+        s.transient.setSize (chs, n);
+        s.hitGate.assign ((size_t) n, 0.0f);
+        const float cf = 1.0f - std::exp (-1.0f / (0.002f * (float) hostRate)), cs = 1.0f - std::exp (-1.0f / (0.060f * (float) hostRate));
+        const float cg = 1.0f - std::exp (-1.0f / (0.004f * (float) hostRate));
+        float fast = 0.0f, slow = 0.0f, g = 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            float a = 0.0f;
+            for (int c = 0; c < chs; ++c) a = juce::jmax (a, std::abs (s.play.getSample (c, i)));
+            fast += (a - fast) * (a > fast ? 1.0f : cf);
+            slow += (a - slow) * cs;
+            const float want = juce::jlimit (0.0f, 1.0f, (fast / (slow + 1.0e-6f) - 2.0f) * 0.5f);
+            g += (want - g) * (want > g ? 1.0f : cg);
+            s.hitGate[(size_t) i] = g;
+            for (int c = 0; c < chs; ++c) s.transient.setSample (c, i, s.play.getSample (c, i) * g);
+        }
+    }
 }
 
 // ---------------------------------------------------------------- player
@@ -492,7 +513,22 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
             const auto pm = partner != nullptr ? partner->model : nullptr;
             if (pm != nullptr && std::abs (partner->modelRate - sr) < 0.5)
             {
+                const double tp0 = morphs[(size_t) index].position();
                 morphs[(size_t) index].process (*sample->model, *pm, advance, R, p.morph, p.modelNoise, addL.data(), addR.data(), chunk);
+                // the hits of both sounds, which the sine description smooths away, are laid back over the morph
+                {
+                    const auto& ta = sample->transient; const auto& tb = partner->transient;
+                    const int na = ta.getNumSamples(), nb2 = tb.getNumSamples();
+                    const float wa = 1.0f - p.morph, wb = p.morph;
+                    for (int i = 0; i < chunk; ++i)
+                    {
+                        const int q = (int) (tp0 + advance * (double) i);
+                        const float gm = wa * (q < na ? sample->hitGate[(size_t) q] : 0.0f) + wb * (q < nb2 ? partner->hitGate[(size_t) q] : 0.0f);
+                        addL[(size_t) i] *= 1.0f - gm; addR[(size_t) i] *= 1.0f - gm; // where a hit is laid back, the smoothed copy steps aside
+                        if (q < na) { addL[(size_t) i] += wa * ta.getSample (0, q); addR[(size_t) i] += wa * ta.getSample (juce::jmin (1, ta.getNumChannels() - 1), q); }
+                        if (q < nb2) { addL[(size_t) i] += wb * tb.getSample (0, q); addR[(size_t) i] += wb * tb.getSample (juce::jmin (1, tb.getNumChannels() - 1), q); }
+                    }
+                }
                 // Auto level: the partner has its own level correction, so the morph moves from this sound's to the partner's
                 if (std::abs (p.autoGain - sample->autoGain) < 1.0e-6f && sample->autoGain > 1.0e-6f)
                 {

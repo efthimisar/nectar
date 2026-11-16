@@ -7,9 +7,9 @@ class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai, bool rv)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb, bool gr, SpectralBody bd, float bl, float mm, float mn, float ai, bool rv, std::shared_ptr<const Sample> pt, float pm, bool al, SpectralBody bh, float blh, int mvp, float mlo, float mhi)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai), reverse (rv) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb), grains (gr), body (bd), blur (bl), modelMix (mm), modelNoise (mn), air (ai), reverse (rv), partner (std::move (pt)), pairMorph (pm), autoLevel (al), bodyHi (bh), blurHi (blh), moveParam (mvp), moveLo (mlo), moveHi (mhi) {}
 
     JobStatus runJob() override
     {
@@ -39,12 +39,18 @@ public:
         const bool soundSame = (! params.any() ? base->cleaned.getNumSamples() == 0 : sameClean)
                                && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f && base->reverse == reverse;
         // the colour baked in for the grains
-        auto bake = [this] (Sample& smp)
+        auto bakeOne = [this] (Sample& smp, const SpectralBody& body, float blur)
         {
-            const bool useModel = modelMix > 0.01f && smp.model != nullptr;
-            if (! grains || ! (body.active() || blur > 0.01f || useModel)) { smp.grainSrc.setSize (0, 0); return; }
+            const bool useMorph = pairMorph > 0.01f && smp.model != nullptr && partner != nullptr && partner->model != nullptr
+                                  && std::abs (partner->modelRate - hostRate) < 0.5;
+            const bool useModel = ! useMorph && modelMix > 0.01f && smp.model != nullptr;
+            if (! grains || ! (body.active() || blur > 0.01f || useModel || useMorph)) { smp.grainSrc.setSize (0, 0); return; }
+            if (useMorph)
+                smp.grainSrc = bakeMorph (smp.play, *smp.model, *partner->model, pairMorph, smp.transient, smp.hitGate,
+                                          partner->transient, partner->hitGate, autoLevel && smp.autoGain > 1.0e-6f ? partner->autoGain / smp.autoGain : 1.0f);
             if (useModel) smp.grainSrc = bakeModel (smp.play, *smp.model, modelMix, modelNoise);
-            if (body.active() || blur > 0.01f) smp.grainSrc = bakeBody (useModel ? smp.grainSrc : smp.play, hostRate, body, blur);
+            if (body.active() || blur > 0.01f) smp.grainSrc = bakeBody (useModel || useMorph ? smp.grainSrc : smp.play, hostRate, body, blur);
+            if (useMorph && ! (body.active() || blur > 0.01f)) return; // the morph already carries its own level
             // same overall loudness as the sound itself, so the colour knobs do not act as volume knobs
             double a = 0.0, b = 0.0;
             for (int c = 0; c < smp.play.getNumChannels(); ++c)
@@ -54,6 +60,24 @@ public:
                 a += (double) ra * ra; b += (double) rb * rb;
             }
             if (b > 1.0e-20) smp.grainSrc.applyGain ((float) juce::jlimit (0.25, 4.0, std::sqrt (a / b)));
+        };
+        auto bake = [this, &bakeOne] (Sample& smp)
+        {
+            smp.moveParam = -1;
+            smp.grainSrcHi.setSize (0, 0);
+            if (moveParam >= 0 && grains)
+            {
+                bakeOne (smp, bodyHi, blurHi);
+                if (smp.grainSrc.getNumSamples() == 0) smp.grainSrc = smp.play;
+                smp.grainSrcHi = std::move (smp.grainSrc);
+                smp.grainSrc.setSize (0, 0);
+            }
+            bakeOne (smp, body, blur);
+            if (smp.grainSrcHi.getNumSamples() > 0)
+            {
+                if (smp.grainSrc.getNumSamples() == 0) smp.grainSrc = smp.play;
+                smp.moveParam = moveParam; smp.moveLo = moveLo; smp.moveHi = moveHi;
+            }
         };
         bake (*s);
         if (! (soundSame && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5))
@@ -75,7 +99,7 @@ public:
             applyAir (s->play, *s->model, air);
             bake (*s);
         }
-        else if (modelMix > 0.01f)
+        else if (modelMix > 0.01f || pairMorph > 0.01f)
             bake (*s);
         const juce::ScopedLock sl (owner.resultLock);
         owner.results[(size_t) slot] = s;
@@ -94,6 +118,13 @@ private:
     SpectralBody body;
     float blur, modelMix, modelNoise, air;
     bool reverse;
+    std::shared_ptr<const Sample> partner;
+    float pairMorph;
+    bool autoLevel;
+    SpectralBody bodyHi;
+    float blurHi;
+    int moveParam;
+    float moveLo, moveHi;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -415,6 +446,8 @@ NektarProcessor::NektarProcessor()
     widthP = apvts.getRawParameterValue ("width");
     pairMorphP[0] = apvts.getRawParameterValue ("morph12");
     pairMorphP[1] = apvts.getRawParameterValue ("morph34");
+    apvts.addParameterListener ("morph12", this);
+    apvts.addParameterListener ("morph34", this);
     scaleP = apvts.getRawParameterValue ("scale");
     keyP = apvts.getRawParameterValue ("key");
     for (int i = 0; i < 128; ++i) scaleMap[(size_t) i] = (juce::int8) i;
@@ -478,12 +511,15 @@ NektarProcessor::~NektarProcessor()
 void NektarProcessor::parameterChanged (const juce::String& id, float)
 {
     const juce::juce_wchar last = id.getLastCharacter();
-    const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
+    const bool pairId = id.startsWith ("morph");
+    const int slot = pairId ? (id.endsWith ("34") ? 2 : 0) : ((last >= '2' && last <= '4') ? (int) (last - '1') : 0);
+    if (pairId && grP[(size_t) slot][0]->load() < 0.5f)
+        return; // without grains the morph is made live
     const bool colour = id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough") || id.startsWith ("model");
     if (colour && grP[(size_t) slot][0]->load() < 0.5f)
         return; // without grains the colour is made live
     // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || id.startsWith ("rev") || colour ? 190u : 0u);
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || id.startsWith ("rev") || pairId || colour ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -526,16 +562,44 @@ void NektarProcessor::scheduleClean (int slot)
     }
     SpectralBody bd;
     bd.tone = colP[(size_t) slot][4]->load(); bd.focus = colP[(size_t) slot][5]->load(); bd.size = colP[(size_t) slot][6]->load(); bd.rough = colP[(size_t) slot][7]->load();
+    // colour knobs that something moves (LFO, envelope ...): the colour is baked at both ends of the movement
+    SpectralBody bdHi = bd;
+    float blurLo = colP[(size_t) slot][2]->load(), blurHi = blurLo, mvLo = 0.0f, mvHi = 1.0f;
+    int mvParam = -1;
+    {
+        const int order[5] = { 4, 5, 6, 2, 7 };
+        float* lo[5] = { &bd.tone, &bd.focus, &bd.size, &blurLo, &bd.rough };
+        float* hi[5] = { &bdHi.tone, &bdHi.focus, &bdHi.size, &blurHi, &bdHi.rough };
+        for (int k = 0; k < 5; ++k)
+        {
+            const auto it = modIdxByRaw.find (colP[(size_t) slot][(size_t) order[k]]);
+            if (it == modIdxByRaw.end()) continue;
+            const float amt = std::abs (routeAmt[(size_t) it->second].load());
+            if (routeSrc[(size_t) it->second].load() <= 0 || amt < 0.01f) continue;
+            const float v = colP[(size_t) slot][(size_t) order[k]]->load();
+            *lo[k] = juce::jlimit (0.0f, 1.0f, v - amt);
+            *hi[k] = juce::jlimit (0.0f, 1.0f, v + amt);
+            if (mvParam < 0 && *hi[k] - *lo[k] > 0.01f) { mvParam = order[k]; mvLo = *lo[k]; mvHi = *hi[k]; }
+        }
+    }
     const int gen = ++latestJob[(size_t) slot];
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
                                     grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
                                     grP[(size_t) slot][0]->load() > 0.5f, bd,
-                                    colP[(size_t) slot][2]->load(), colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
-                                    airP[(size_t) slot]->load(), revP[(size_t) slot]->load() > 0.5f), true);
+                                    blurLo, colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
+                                    airP[(size_t) slot]->load(), revP[(size_t) slot]->load() > 0.5f,
+                                    slot % 2 == 0 ? getSample (slot + 1) : nullptr, slot % 2 == 0 ? pairMorphP[(size_t) (slot / 2)]->load() : 0.0f,
+                                    apvts.getRawParameterValue ("autolevel")->load() > 0.5f, bdHi, blurHi, mvParam, mvLo, mvHi), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
 {
+    if (slot % 2 == 1 && pairMorphP[(size_t) (slot / 2)]->load() > 0.01f && grP[(size_t) (slot - 1)][0]->load() > 0.5f && s->model != nullptr
+        && (getSample (slot) == nullptr || getSample (slot)->model != s->model))
+    {
+        cleanChangedAt[(size_t) (slot - 1)] = juce::Time::getMillisecondCounter();
+        cleanDirty[(size_t) (slot - 1)] = true; // the partner changed: the baked morph of the first sound is made again
+    }
     if (s->serial != serials[(size_t) slot])
         return; // another sound was loaded in the meantime
     if (std::abs (s->playRate - hostRate.load()) > 0.5)
@@ -789,6 +853,11 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             g.gain = p.level * p.level * p.autoGain;
             const auto smpNow = pl.getSample();
             const bool baked = smpNow->grainSrc.getNumSamples() == smpNow->play.getNumSamples();
+            if (baked && smpNow->moveParam >= 0 && smpNow->grainSrcHi.getNumSamples() == smpNow->play.getNumSamples())
+            {
+                g.src2 = &smpNow->grainSrcHi;
+                g.mix2 = (modded (colP[(size_t) slot][(size_t) smpNow->moveParam]) - smpNow->moveLo) / juce::jmax (0.001f, smpNow->moveHi - smpNow->moveLo);
+            }
             grPl.process (view, grMode > 0 ? midi : emptyMidi, baked ? smpNow->grainSrc : smpNow->play, g);
         }
         if (grMode == 0)
@@ -1320,6 +1389,13 @@ void NektarProcessor::setModRoute (const juce::String& id, ModRoute r)
         return;
     routeAmt[(size_t) it->second].store (juce::jlimit (-1.0f, 1.0f, r.amount));
     routeSrc[(size_t) it->second].store (juce::jlimit (0, (int) kModCount - 1, r.src));
+    if (id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough"))
+    {   // a colour knob got (or lost) something that moves it: the colour for the grains is baked again
+        const juce::juce_wchar last = id.getLastCharacter();
+        const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
+        cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
+        cleanDirty[(size_t) slot] = true;
+    }
 }
 
 float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept

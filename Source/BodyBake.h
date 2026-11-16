@@ -4,6 +4,7 @@
 #include <vector>
 #include "SpectralStretch.h"
 #include "AdditiveVoice.h"
+#include "MorphVoice.h"
 
 // "Bakes" the colour (Tone / Focus / Size) into a copy of a sound, so that the grains can be cut from the coloured copy.
 // Same envelope maths as SpectralStretch::applyBody, but here the phases of the sound are kept (short-time Fourier
@@ -181,4 +182,35 @@ inline void applyAir (juce::AudioBuffer<float>& play, const SineModel& model, fl
         play.applyGain (c, 0, n, gSound);
         play.addFrom (c, 0, r, juce::jmin (c, 1), 0, n, gOther);
     }
+}
+
+// The morph of a pair rendered into a copy of the sound (for the grains): sound A turning into B by the amount `morph`,
+// with the hits of both sounds laid back over it and the level moved towards B's auto level, like the live voice does.
+inline juce::AudioBuffer<float> bakeMorph (const juce::AudioBuffer<float>& play, const SineModel& A, const SineModel& B, float morph,
+                                           const juce::AudioBuffer<float>& hitsA, const std::vector<float>& gateA,
+                                           const juce::AudioBuffer<float>& hitsB, const std::vector<float>& gateB, float levelRatio)
+{
+    const int n = play.getNumSamples();
+    juce::AudioBuffer<float> out (2, n);
+    out.clear();
+    MorphVoice v;
+    v.prepare();
+    v.start (4242);
+    for (int done = 0; done < n; done += 256)
+        v.process (A, B, 1.0, 1.0, morph, 1.0f, out.getWritePointer (0) + done, out.getWritePointer (1) + done, juce::jmin (256, n - done));
+    const float wa = 1.0f - morph, wb = morph, g = std::pow (juce::jlimit (0.06f, 16.0f, levelRatio), morph);
+    const int na = juce::jmin (hitsA.getNumSamples(), (int) gateA.size()), nb = juce::jmin (hitsB.getNumSamples(), (int) gateB.size());
+    for (int c = 0; c < 2; ++c)
+    {
+        float* d = out.getWritePointer (c);
+        for (int i = 0; i < n; ++i)
+        {
+            const float gm = wa * (i < na ? gateA[(size_t) i] : 0.0f) + wb * (i < nb ? gateB[(size_t) i] : 0.0f);
+            float x = d[i] * (1.0f - gm);
+            if (i < na) x += wa * hitsA.getSample (juce::jmin (c, hitsA.getNumChannels() - 1), i);
+            if (i < nb) x += wb * hitsB.getSample (juce::jmin (c, hitsB.getNumChannels() - 1), i);
+            d[i] = x * g;
+        }
+    }
+    return out;
 }
