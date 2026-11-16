@@ -1048,6 +1048,11 @@ void NektarEditor::timerCallback()
         lastPanel[base] = v;
     }
     key << prim << (masterView ? "m" : "s") << (int) selection.size() << (proc.getSample (prim) != nullptr ? proc.getSample (prim)->serial : -1);
+    if (! masterView && panelGrains != (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", prim))->load()) > 0))
+    {
+        cache = juce::Image();
+        rebuildPanel();
+    }
     if (key != overlayKey)
     {
         overlayKey = key;
@@ -1087,7 +1092,10 @@ void NektarEditor::rebuildPanel()
     {
         const int s = primarySlot();
         row (0, y1, { { "Level", slotId ("level", s) }, { "Pitch", slotId ("pitch", s) }, { "Tail", slotId ("tail", s) } });
-        row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
+        const bool grains = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", s))->load()) > 0;
+        panelGrains = grains;
+        if (! grains)
+            row (0, y2, { { "Stretch", slotId ("stretch", s) }, { "Freeze", slotId ("freeze", s) }, { "Keep", slotId ("keeplength", s) } });
         row (3, y1, { { "Tone", slotId ("bodytone", s) }, { "Focus", slotId ("bodyfocus", s) }, { "Size", slotId ("bodysize", s) }, { "Blur", slotId ("blur", s) } });
         row (3, y2, { { "Model", slotId ("model", s) }, { "Noise", slotId ("modelnoise", s) }, { "Grit", slotId ("srcrough", s) } });
         row (4, 590.0f, { { "Type", slotId ("sfiltype", s) }, { "Cutoff", slotId ("sfilcut", s) }, { "Reso", slotId ("sfilres", s) }, { "Mix", slotId ("sfilmix", s) } });
@@ -1138,18 +1146,17 @@ void NektarEditor::drawOverlay (Graphics& g)
     {
         const float x = wr.getX() + wr.getWidth() * ((float) i + 0.5f) / (float) pk.size();
         const float h = juce::jmax (1.2f, wr.getHeight() * 0.46f * pk[i]);
-        const bool in = mode == 0 || (x >= xa && x <= xb);
+        const bool in = x >= xa && x <= xb;
         g.setColour (in ? kLight : kMuted.withAlpha (0.35f));
         g.drawLine (x, wr.getCentreY() - h, x, wr.getCentreY() + h, 2.0f);
     }
-    if (mode > 0)
     {
         g.setColour (kAcc.withAlpha (0.10f));
         g.fillRect (juce::Rectangle<float> (xa, wr.getY(), xb - xa, wr.getHeight()));
         g.setColour (kAcc);
         g.drawLine (xa, wr.getY(), xa, wr.getBottom(), 2.0f);
         g.drawLine (xb, wr.getY(), xb, wr.getBottom(), 2.0f);
-        if (! rhythmic)
+        if (mode == 1)
         {
             float pos = val ("grpos"); pos -= std::floor (pos);
             const float xp = xa + pos * (xb - xa), sw = 0.5f * val ("grspray") * (xb - xa);

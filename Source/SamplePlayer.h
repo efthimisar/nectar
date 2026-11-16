@@ -21,6 +21,7 @@ struct Sample
     double rate = 44100.0;         // file sample rate
     juce::String name;
     juce::String path;
+    float partA = 0.0f, partB = 1.0f; // chosen part of the sound (0..1); everything that is played is made from this part only
 
     juce::AudioBuffer<float> play;     // data converted to the host sample rate
     float autoGain = 1.0f;             // gain that brings the loud parts of this sound to a common A-weighted level (Auto level)

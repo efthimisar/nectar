@@ -107,8 +107,28 @@ static float measureAutoGain (const juce::AudioBuffer<float>& x, double rate)
 
 void SamplePlayer::makePlayable (Sample& s, double hostRate)
 {
-    const auto& src0 = s.cleaned.getNumSamples() > 0 ? s.cleaned : s.data; // the cleaned sound, if there is one
-    const int ch = src0.getNumChannels();
+    const auto& whole = s.cleaned.getNumSamples() > 0 ? s.cleaned : s.data; // the cleaned sound, if there is one
+    const int ch = whole.getNumChannels();
+    // the chosen part of the sound (short fades at cut edges, so it never clicks)
+    juce::AudioBuffer<float> part;
+    {
+        const int nW = whole.getNumSamples();
+        const float lo = juce::jlimit (0.0f, 1.0f, juce::jmin (s.partA, s.partB)), hi = juce::jlimit (0.0f, 1.0f, juce::jmax (s.partA, s.partB));
+        if ((lo > 0.0005f || hi < 0.9995f) && nW > 4096)
+        {
+            int a = (int) (lo * (float) nW), b = (int) (hi * (float) nW);
+            if (b - a < 2048) { b = juce::jmin (nW, a + 2048); a = juce::jmax (0, b - 2048); }
+            part.setSize (ch, b - a);
+            const int fade = juce::jmin ((b - a) / 4, (int) (0.005 * s.rate));
+            for (int c = 0; c < ch; ++c)
+            {
+                part.copyFrom (c, 0, whole, c, a, b - a);
+                if (a > 0) part.applyGainRamp (c, 0, fade, 0.0f, 1.0f);
+                if (b < nW) part.applyGainRamp (c, b - a - fade, fade, 1.0f, 0.0f);
+            }
+        }
+    }
+    const auto& src0 = part.getNumSamples() > 0 ? part : whole;
     const int nIn = src0.getNumSamples();
 
     // 1. convert to the host sample rate (so everything after this is simple)

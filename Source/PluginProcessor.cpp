@@ -6,9 +6,9 @@ class CleanJob : public juce::ThreadPoolJob
 {
 public:
     CleanJob (NektarProcessor& o, int slotIn, int gen, std::shared_ptr<const Sample> b, SampleCleaner::CleanParams p,
-              SampleCleaner::NoiseProfile room, double rate)
+              SampleCleaner::NoiseProfile room, double rate, float pa, float pb)
         : juce::ThreadPoolJob ("clean"), owner (o), slot (slotIn), generation (gen), base (std::move (b)), params (p),
-          roomCopy (std::move (room)), hostRate (rate) {}
+          roomCopy (std::move (room)), hostRate (rate), partA (pa), partB (pb) {}
 
     JobStatus runJob() override
     {
@@ -29,10 +29,18 @@ public:
             s->cleaned.setSize (0, 0);
         if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
             return jobHasFinished;
+        s->partA = partA; s->partB = partB;
         SamplePlayer::makePlayable (*s, hostRate);
         // the sine-wave description of what is played (kept when the sound itself did not change)
-        if (! (! params.any() && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5 && base->cleaned.getNumSamples() == 0))
+        if (! (! params.any() && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5 && base->cleaned.getNumSamples() == 0
+               && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f))
         {
+            {   // the sound itself is ready: hand it over now, the sine-wave description follows when it is done
+                auto quick = std::make_shared<Sample> (*s);
+                quick->model = nullptr;
+                const juce::ScopedLock sl (owner.resultLock);
+                owner.results[(size_t) slot] = quick;
+            }
             auto model = SineModel::analyse (s->play, hostRate);
             if (model == nullptr || shouldExit() || generation != owner.latestJob[(size_t) slot].load())
                 return jobHasFinished;
@@ -51,6 +59,7 @@ private:
     SampleCleaner::CleanParams params;
     SampleCleaner::NoiseProfile roomCopy;
     double hostRate;
+    float partA, partB;
 };
 
 juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayout()
@@ -308,6 +317,8 @@ NektarProcessor::NektarProcessor()
         apvts.addParameterListener ("noise" + sfx, this);
         apvts.addParameterListener ("hum" + sfx, this);
         apvts.addParameterListener ("lowcut" + sfx, this);
+        apvts.addParameterListener ("grstart" + sfx, this);
+        apvts.addParameterListener ("grend" + sfx, this);
         cleanDirty[(size_t) slot] = false;
         latestJob[(size_t) slot] = 0;
     }
@@ -404,7 +415,8 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 {
     const juce::juce_wchar last = id.getLastCharacter();
     const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
+    // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -446,7 +458,8 @@ void NektarProcessor::scheduleClean (int slot)
         room = roomProfile;
     }
     const int gen = ++latestJob[(size_t) slot];
-    cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load()), true);
+    cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
+                                    grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load()), true);
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
@@ -454,8 +467,10 @@ void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
     if (s->serial != serials[(size_t) slot])
         return; // another sound was loaded in the meantime
     if (std::abs (s->playRate - hostRate.load()) > 0.5)
+    {
         s->serial = ++serials[(size_t) slot];
-    SamplePlayer::makePlayable (*s, hostRate.load());
+        SamplePlayer::makePlayable (*s, hostRate.load());
+    }
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);
         currentSamples[(size_t) slot] = s;
@@ -643,7 +658,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             if (grMode == 0) grPl.allOff(); // switched off while sounding: let it fade
             GrainVoice::Params g;
             g.rhythmic = grMode == 2;
-            g.start = modded (gp[1]); g.end = modded (gp[2]); g.position = modded (gp[3]); g.scan = modded (gp[4]);
+            g.start = 0.0f; g.end = 1.0f; // the sound that is played is already the chosen part
+             g.position = modded (gp[3]); g.scan = modded (gp[4]);
             g.spray = modded (gp[5]); g.sizeMs = modded (gp[6]); g.density = modded (gp[7]); g.jitter = modded (gp[8]);
             g.reverse = modded (gp[9]); g.spread = modded (gp[10]); g.gate = modded (gp[11]);
             g.pattern = (juce::uint32) juce::roundToInt (gp[12]->load());
@@ -823,6 +839,7 @@ juce::String NektarProcessor::loadSample (const juce::File& file, int slot)
 
 void NektarProcessor::publishSample (std::shared_ptr<Sample> s, int slot)
 {
+    s->partA = grP[(size_t) slot][1]->load(); s->partB = grP[(size_t) slot][2]->load();
     SamplePlayer::makePlayable (*s, hostRate.load());
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);

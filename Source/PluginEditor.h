@@ -142,6 +142,7 @@ private:
     int fixedKnobs = 0;                 // knobs that are always there (top bar); the rest belong to the panel
     std::map<juce::String, float> lastPanel; // last seen values of the first selected sample (to copy a change to the others)
     juce::String overlayKey;
+    bool panelGrains = false;
     void rebuildPanel();
     void drawOverlay (juce::Graphics&);
     juce::String slotId (const char* base, int slot) const { return slot == 0 ? juce::String (base) : juce::String (base) + juce::String (slot + 1); }
