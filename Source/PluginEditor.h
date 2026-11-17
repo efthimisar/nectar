@@ -51,7 +51,7 @@ private:
 class PairPad : public juce::Component
 {
 public:
-    static constexpr float kHalf = 70.0f; // radius of the round pad in design units
+    static constexpr float kHalf = 60.0f; // radius of the round pad in design units
     std::vector<juce::Point<float>> trail; // the last places of the stick (disc, -1..1), for its trail
     PairPad (NektarProcessor& p, int pairIn) : proc (p), pair (pairIn) { setMouseCursor (juce::MouseCursor::CrosshairCursor); }
     void paint (juce::Graphics&) override;
@@ -112,6 +112,10 @@ class SpacePad : public juce::Component
 public:
     explicit SpacePad (NektarProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::DraggingHandCursor); }
     std::function<void (int)> onPick;   // a dot was clicked (its sound becomes the one the Space controls show)
+    std::function<void (const juce::String&)> onSay;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    bool overHead = false, overPhones = false;
     int chosen = 0;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -194,6 +198,24 @@ private:
     int octaveShift = 0;
     int selectedSlot = 0;
     void drawFace (juce::Graphics& g);
+    void drawSpaceOval (juce::Graphics& g, juce::Rectangle<float> r);
+    void spaceOvalClick (const juce::MouseEvent& e);
+    void mouseMove (const juce::MouseEvent&) override;
+    struct Overlay : juce::Component
+    {
+        std::function<void (juce::Graphics&)> draw;
+        std::function<void (const juce::MouseEvent&)> down;
+        void paint (juce::Graphics& g) override { if (draw) draw (g); }
+        void mouseDown (const juce::MouseEvent& e) override { if (down) down (e); }
+    };
+    std::unique_ptr<Overlay> spaceOval;
+    std::array<std::array<float, 4>, 300> river {};  // the four sounds' levels, newest last (about 10 s)
+    std::array<bool, 300> riverBeat {};
+    int riverAt = 0;
+    float lastBeat = 0.0f;
+    int arcDrag = -1;                   // which of Motion / Weight / Light is being dragged
+    float arcFrom = 0.5f, arcY = 0.0f;
+    juce::String hoverSaid;
     void faceClick (const juce::MouseEvent& e, juce::Point<float> p);
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
