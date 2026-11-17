@@ -91,7 +91,7 @@ public:
     bool slotLocked (int slot) const { return slotLock[(size_t) slot].load(); }
     void setBlendLock (int pair, bool on) { blendLock[(size_t) pair].store (on); }
     bool blendLocked (int pair) const { return blendLock[(size_t) pair].load(); }
-    juce::String makeAll();          // returns a message
+    juce::String makeAll (int target = -1);          // returns a message
     bool backAll();                  // the corners before the last Make
     juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked
     void newSpace();                 // a random place and movement for each of the four sounds
@@ -124,6 +124,11 @@ public:
     std::array<std::atomic<float>, 4> slotLevel {};
     std::atomic<float> mixLevel { 0.0f }, beatNow { 0.0f };
     std::atomic<bool> beatOn { false };
+    std::atomic<float> outPeak { 0.0f };               // the editor reads and lowers it
+    float chordRing = 0.3f;                            // how much the strings ring with Harmony -> Chord (our own choice)
+    float resMixNow() const noexcept;
+    double hostBpmShown() const { return hostBpmAtomic.load(); }
+    std::atomic<double> hostBpmAtomic { 0.0 };          // 0 = the host gives no tempo
     float playheadOf (int slot) const { return players[(size_t) slot].playhead.load(); }
     bool baking() { return cleanPool.getNumJobs() > 0; }
     float knobNow01 (const juce::String& id) const   // a knob as the joystick has it now (0..1 of its range)
@@ -136,6 +141,7 @@ public:
     }
     double spaceAdvance (int slot, int numSamples, float motion);  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
     bool keyOf (int slot, int& tonic, bool& minor) const;
+    float harmonyShiftOf (int slot) const { return harmonyShift[(size_t) juce::jlimit (0, kSlots - 1, slot)]; }
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
     int solo() const { return soloSlot.load(); }
     float spaceAzNow (int slot) const { return spAzShown[(size_t) slot].load(); }     // where the sound is right now (with its movement)

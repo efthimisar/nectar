@@ -243,6 +243,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             f ("grgate", "Gate", 0.1f, 2.0f, 0.7f);
             l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "grpat" + sfx, 1 }, "Pattern" + nm, 0, 65535, 0xb6b5));
         }
+        // how much Make changes this sound: its rhythm, its colour, its texture (0 = untouched, 1 = drawn anew)
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkrhy" + sfx, 1 }, "Make rhythm" + nm, 0.0f, 1.0f, 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Make colour" + nm, 0.0f, 1.0f, 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mktex" + sfx, 1 }, "Make texture" + nm, 0.0f, 1.0f, 0.5f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
@@ -875,6 +879,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 if (auto q = pos->getPpqPosition()) { hostNow.ppq = *q; hostNow.hasPpq = pos->getIsPlaying(); }
             }
     }
+    hostBpmAtomic.store (hostNow.has ? hostNow.bpm : 0.0);
     updateMods (buffer.getNumSamples(), midi);
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
@@ -1093,7 +1098,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             for (int c = 0; c < chs; ++c) { dryScratch.copyFrom (c, 0, buffer, c, 0, n); resBScratch.copyFrom (c, 0, buffer, c, 0, n); }
             juce::AudioBuffer<float> viewB (resBScratch.getArrayOfWritePointers(), chs, n); // only the first n samples
             resonatorB.process (viewB, midi, modded (resTuneBP), decaySec, mat, mixB);
-            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, modded (resMixP));
+            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, resMixNow());
             for (int c = 0; c < juce::jmin (2, buffer.getNumChannels()); ++c)
                 juce::FloatVectorOperations::add (buffer.getWritePointer (c), resBScratch.getReadPointer (c), buffer.getNumSamples()),
                 juce::FloatVectorOperations::subtract (buffer.getWritePointer (c), dryScratch.getReadPointer (c), buffer.getNumSamples());
@@ -1101,7 +1106,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         else
         {
             resonatorB.process (buffer, midi, 0.0f, decaySec, mat, 0.0f); // off: lets its strings go
-            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, modded (resMixP));
+            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, resMixNow());
         }
     }
 
@@ -1142,6 +1147,11 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
     }
 
+    {   // the output level before the safety knee (shown at the river's edge; red when the knee is working)
+        float pk = 0.0f;
+        for (int ch = 0; ch < juce::jmin (2, buffer.getNumChannels()); ++ch) pk = juce::jmax (pk, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
+        if (pk > outPeak.load()) outPeak.store (pk);
+    }
     // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps peaks below 1.0; identical below 0.9
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
@@ -1728,7 +1738,24 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         if (auto* pa = apvts.getParameter (chId)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) opposite[c1]));
     }
     const int character = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (chId)->load()));
-    const float wild = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue (pair == 0 ? "wild1" : "wild2")->load());
+    // what Make may change, per sound: rhythm (0), colour (1), texture (2), each by its own amount
+    auto groupOf = [] (const juce::String& id)
+    {
+        for (auto* r : { "grgate", "grsize", "grdens", "grrev", "grpos" }) if (id.startsWith (r)) return 0;
+        for (auto* t : { "grspray", "grjit", "grspread", "blur", "srcrough", "grscan" }) if (id.startsWith (t)) return 2;
+        return 1; // filter, body, air, frequency shift, ring
+    };
+    float amount[2][3];
+    for (int k = 0; k < 2; ++k)
+    {
+        const int slot = pair * 2 + k;
+        const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+        amount[k][0] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mkrhy" + sfx)->load());
+        amount[k][1] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mkcol" + sfx)->load());
+        amount[k][2] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mktex" + sfx)->load());
+    }
+    // the first corner stays near the sound as it is, the others go further (our own choice, to be judged by ear)
+    static const float reach[4] = { 0.3f, 0.7f, 0.85f, 1.0f };
 
     struct R { const char* id; float lo, hi, chance, off; }; // chance: how often the knob is in use at all; off: its value otherwise
     static const R cloud[] = { { "grspray", 0.2f, 0.6f, 1, 0 }, { "grsize", 0.45f, 0.8f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grjit", 0.0f, 0.2f, 0.3f, 0 },
@@ -1787,14 +1814,34 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
     {
     VecSnapshot snap;
     auto& out = snap.entries;
-    // one knob: a centre drawn inside the limits, and four corners spread around it by the Gentle / Wild amount
-    auto add = [&] (const juce::String& id, std::function<float()> draw)
+    // what a knob is now, corner by corner (the corners it has, or the knob itself when it has none)
+    auto nowOf = [&] (int idx, float* c4)
+    {
+        for (const auto& e : cur.entries) if (e.idx == idx) { for (int c = 0; c < 4; ++c) c4[c] = e.c[c]; return; }
+        const float v = modRanges[(size_t) idx].convertTo0to1 (apvts.getRawParameterValue (modIds[(size_t) idx])->load());
+        for (int c = 0; c < 4; ++c) c4[c] = v;
+    };
+    // one knob: a new place drawn inside the character's limits, and each corner moves from where it is towards it,
+    // as far as the sound's amount for that part allows (k: which sound of the pair; group -1: drawn freely)
+    auto add = [&] (const juce::String& id, std::function<float()> draw, int k = -1, int group = -1)
     {
         const auto it = modIdxById.find (id.toStdString());
         if (it == modIdxById.end()) return -1;
         VecEntry e; e.idx = it->second;
-        const float centre = draw();
-        for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, centre + (draw() - centre) * wild);
+        if (k < 0 || group < 0)
+            for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, draw());
+        else
+        {
+            float now4[4];
+            nowOf (e.idx, now4);
+            const float a = amount[k][group];
+            const float centre = draw();
+            for (int c = 0; c < 4; ++c)
+            {
+                const float target = centre + (draw() - centre) * a;
+                e.c[c] = juce::jlimit (0.0f, 1.0f, now4[c] + a * reach[c] * (target - now4[c]));
+            }
+        }
         out.push_back (e);
         return (int) out.size() - 1;
     };
@@ -1803,7 +1850,16 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
     {
         const int slot = pair * 2 + k;
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
-        levelAt[k] = add ("level" + sfx, [&rnd] { return 0.2f + 0.75f * rnd.nextFloat(); });
+        {   // the level stays as it is: Make does not make a sound quieter or louder than its neighbours
+            const auto it = modIdxById.find (("level" + sfx).toStdString());
+            if (it != modIdxById.end())
+            {
+                VecEntry e; e.idx = it->second;
+                nowOf (e.idx, e.c);
+                out.push_back (e);
+                levelAt[k] = (int) out.size() - 1;
+            }
+        }
         {   // grains are taken from a place where the sound is clearly present (not from a faded-out stretch)
             std::vector<float> loud;
             if (const auto smp = getSample (slot); smp != nullptr && smp->play.getNumSamples() > 4096)
@@ -1818,25 +1874,34 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
             if (it != modIdxById.end())
             {   // positions are picked outright (no spreading around a centre: a place between two loud places may be silent)
                 VecEntry e; e.idx = it->second;
+                float now4[4];
+                nowOf (e.idx, now4);
+                const float a = amount[k][0];
                 const float first = loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())];
-                for (auto& c : e.c) c = (character == 7 || rnd.nextFloat() < wild) ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
+                for (int c = 0; c < 4; ++c)
+                {   // with the rhythm amount, a corner may take the grains from another place
+                    if (rnd.nextFloat() >= a * reach[c]) { e.c[c] = now4[c]; continue; }
+                    e.c[c] = (character == 7 || rnd.nextFloat() < a) ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
+                }
                 out.push_back (e);
             }
         }
-        add ("grscan" + sfx, [&rnd] { return 0.5f + 0.05f * rnd.nextFloat(); }); // slow, so the grains stay near the chosen place
+        add ("grscan" + sfx, [&rnd] { return 0.5f + 0.05f * rnd.nextFloat(); }, k, 2); // slow, so the grains stay near the chosen place
         for (int i = 0; i < tableLen; ++i)
         {
             const R r = table[i];
-            add (r.id + sfx, [&rnd, r] { return rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off; });
+            add (r.id + sfx, [&rnd, r] { return rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off; }, k, groupOf (r.id));
         }
+        const bool hadCorners = ! cur.entries.empty();
         snap.grMode[k] = rhythmic ? 2 : 1;
         snap.grOct[k] = character == 10 && (k == 0 || rnd.nextFloat() < 0.5f) ? 1 : 0;
-        snap.grArp[k] = character == 12 ? 1 + rnd.nextInt (9999) : 0;
-        // rhythm: a pattern with 6 to 11 of the 16 steps on, the first step always on
+        snap.grArp[k] = character == 12 ? (hadCorners && cur.grArp[k] != 0 && rnd.nextFloat() >= amount[k][0] ? cur.grArp[k] : 1 + rnd.nextInt (9999)) : 0;
+        // rhythm: a pattern with 6 to 11 of the 16 steps on, the first step always on; a new one only as often as the rhythm amount says
         int pat = 1;
         const int want = 6 + rnd.nextInt (6);
         for (int tries = 0; tries < 200 && juce::BigInteger (pat).countNumberOfSetBits() < want; ++tries) pat |= 1 << rnd.nextInt (16);
-        snap.grPat[k] = rhythmic ? (character == 12 ? 0xffff : pat) : juce::roundToInt (grP[(size_t) slot][12]->load());
+        const bool keepPat = hadCorners && cur.grMode[k] == 2 && rnd.nextFloat() >= amount[k][0];
+        snap.grPat[k] = rhythmic ? (character == 12 ? 0xffff : (keepPat ? cur.grPat[k] : pat)) : juce::roundToInt (grP[(size_t) slot][12]->load());
     }
     snap.swell = character == 6;
     if (character == 11) // Melt: the Morph of the pair moves with the stick
@@ -2318,7 +2383,7 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
 }
 
 // ---- the main screen: Make / Back / random sounds / random space
-juce::String NektarProcessor::makeAll()
+juce::String NektarProcessor::makeAll (int target)
 {
     int parts[2] = { 0, 0 };
     bool anySound = false;
@@ -2328,10 +2393,12 @@ juce::String NektarProcessor::makeAll()
         anySound = anySound || have;
         if (! have) continue;
         for (int k = 0; k < 2; ++k)
-            if (! slotLock[(size_t) (pair * 2 + k)].load()) parts[pair] |= 1 << k;
-        if (! blendLock[(size_t) pair].load()) parts[pair] |= 4;
+            if (! slotLock[(size_t) (pair * 2 + k)].load() && (target < 0 || target == pair * 2 + k)) parts[pair] |= 1 << k;
+        if (! blendLock[(size_t) pair].load() && target < 0) parts[pair] |= 4;
     }
     if (! anySound) return "Put sounds into the circles first (Random sounds, or double-click a circle).";
+    if (target >= 0 && getSample (target) == nullptr) return "Sound " + juce::String (target + 1) + " is empty.";
+    if (target >= 0 && slotLock[(size_t) target].load()) return "Sound " + juce::String (target + 1) + " is locked. Unlock it to change it.";
     if (parts[0] == 0 && parts[1] == 0) return "Everything is locked. Unlock something to change it.";
     for (int pair = 0; pair < 2; ++pair)
     {
@@ -2339,6 +2406,12 @@ juce::String NektarProcessor::makeAll()
         h.push_back (vectorNow (pair));
         if (h.size() > 24) h.erase (h.begin());
         if (parts[pair] != 0) newVector (pair, 0, parts[pair], false);
+    }
+    if (target >= 0)
+    {
+        const juce::String sfx = target == 0 ? juce::String() : juce::String (target + 1);
+        auto pc = [this, &sfx] (const char* id) { return juce::String (juce::roundToInt (100.0f * apvts.getRawParameterValue (id + sfx)->load())); };
+        return "Sound " + juce::String (target + 1) + " changed: rhythm " + pc ("mkrhy") + ", colour " + pc ("mkcol") + ", texture " + pc ("mktex") + ".";
     }
     return "Made. Hold a key and move the joysticks. Lock what you like, then Make again.";
 }
@@ -2590,4 +2663,12 @@ void NektarProcessor::updateArpSteps()
             arpSteps[(size_t) sl][(size_t) st] = seed > 0 ? (float) (minor[sl] ? minP[last] : majP[last]) : 0.0f;
         }
     }
+}
+
+// Harmony -> Chord also opens the key-tuned strings, so the chord sings through noisy sounds too (amount: our own choice, to be judged by ear)
+float NektarProcessor::resMixNow() const noexcept
+{
+    const float own = modded (resMixP);
+    const bool chord = juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) == 2;
+    return juce::jlimit (0.0f, 1.0f, own + (chord ? chordRing : 0.0f));
 }

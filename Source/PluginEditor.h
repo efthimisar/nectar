@@ -209,7 +209,9 @@ private:
         void mouseDown (const juce::MouseEvent& e) override { if (down) down (e); }
     };
     std::unique_ptr<Overlay> spaceOval;
-    std::array<std::array<float, 4>, 300> river {};  // the four sounds' levels, newest last (about 10 s)
+    std::array<std::array<float, 4>, 300> river {};
+    std::array<std::array<float, 4>, 300> riverPan {}; // -1 right .. 1 left, per sound
+    float outShown = 0.0f; int clipHold = 0;  // the four sounds' levels, newest last (about 10 s)
     std::array<bool, 300> riverBeat {};
     int riverAt = 0;
     float lastBeat = 0.0f;
@@ -219,7 +221,8 @@ private:
     void faceClick (const juce::MouseEvent& e, juce::Point<float> p);
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
-    bool recAll = false; // all four chosen: Rec and Resample make a new sound in the library
+    int hoverRing = -1; // which of the six rings the mouse is on (0..2 whole sound, 3..5 chosen sound)
+    bool recAll = true; // all four chosen: Rec and Resample make a new sound in the library
     int partDrag = -1;                  // the sample screen: the slot whose part is being dragged
     float partFrom = 0.0f;
     std::vector<float> scrPeaks;        // the sample screen's waveform (whole file), and which sound it is
