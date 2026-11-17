@@ -184,8 +184,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spdist" + sfx, 1 }, "Space distance" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
             // movement of the sound around the listener: 0 still, 1 round and round, 2 left - right, 3 front - back
+            // 0 still, 1 round the listener, 2 left - right, 3 front - back, 4.. a shape (MotionShapes.h) around the dot's place
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spmove" + sfx, 1 }, "Space movement" + nm,
-                                                                 NormalisableRange<float> (0.0f, 3.0f, 1.0f), 0.0f));
+                                                                 NormalisableRange<float> (0.0f, (float) (3 + motionshapes::count), 1.0f), 0.0f));
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spspeed" + sfx, 1 }, "Space movement speed" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.35f));
         }
@@ -351,6 +352,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "wild", 1 }, "Joystick: gentle (0) to wild (1)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+    // the joysticks can move by themselves: a shape (0 = none, 1.. = shape) around the place where the stick was left, at one of
+    // five speeds (16, 8, 4, 2, 1 s per round, as the Orb of Flow)
+    for (const char* id : { "vec1shape", "vec2shape" })
+        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { id, 1 }, juce::String ("Joystick movement ") + (id[3] == '1' ? "1" : "2"), 0, motionshapes::count, 0));
+    for (const char* id : { "vec1speed", "vec2speed" })
+        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { id, 1 }, juce::String ("Joystick movement speed ") + (id[3] == '1' ? "1" : "2"), 0, motionshapes::speedSteps - 1, 1));
     for (const char* id : { "vec1x", "vec1y", "vec2x", "vec2y" })
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { id, 1 }, juce::String ("Pair joystick ") + id,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.5f));
@@ -468,6 +475,10 @@ NektarProcessor::NektarProcessor()
     pairMorphP[1] = apvts.getRawParameterValue ("morph34");
     apvts.addParameterListener ("morph12", this);
     apvts.addParameterListener ("morph34", this);
+    vecShapeP[0] = apvts.getRawParameterValue ("vec1shape"); vecShapeP[1] = apvts.getRawParameterValue ("vec2shape");
+    vecSpeedP[0] = apvts.getRawParameterValue ("vec1speed"); vecSpeedP[1] = apvts.getRawParameterValue ("vec2speed");
+    for (auto& a : vecPh) for (auto& v : a) v = vecMoveRnd.nextFloat() * juce::MathConstants<float>::twoPi;
+    for (auto& a : spPh) for (auto& v : a) v = vecMoveRnd.nextFloat() * juce::MathConstants<float>::twoPi;
     vecXP[0] = apvts.getRawParameterValue ("vec1x"); vecYP[0] = apvts.getRawParameterValue ("vec1y");
     vecXP[1] = apvts.getRawParameterValue ("vec2x"); vecYP[1] = apvts.getRawParameterValue ("vec2y");
     scaleP = apvts.getRawParameterValue ("scale");
@@ -956,8 +967,22 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     {
         // the place on the pad, and its movement around it (our own design, no source)
         float az = modded (spAzP[(size_t) slot]), di = juce::jlimit (0.0f, 1.0f, modded (spDistP[(size_t) slot]));
-        const int move = juce::jlimit (0, 3, juce::roundToInt (spMoveP[(size_t) slot]->load()));
-        if (move > 0)
+        const int move = juce::jlimit (0, 3 + motionshapes::count, juce::roundToInt (spMoveP[(size_t) slot]->load()));
+        if (move >= 4)
+        {   // a shape around the dot's own place (it is kept a little away from the head, where left and right swap)
+            const double hz = 0.02 * std::pow (100.0, (double) juce::jlimit (0.0f, 1.0f, modded (spSpeedP[(size_t) slot]))) * (double) motion;
+            auto& ph = spPhase[(size_t) slot];
+            ph += hz * (double) buffer.getNumSamples() / (hostRate.load() > 0.0 ? hostRate.load() : 44100.0);
+            if (ph >= 1.0) { ph -= std::floor (ph); for (auto& t : spTg[(size_t) slot]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f }; }
+            const float a0 = juce::degreesToRadians (az), rr = 0.12f + 0.88f * di;
+            const auto q = motionshapes::point (move - 4, (float) ph, spPh[(size_t) slot].data(), spTg[(size_t) slot].data());
+            float x = rr * std::sin (a0) + 0.5f * q.x, y = rr * std::cos (a0) - 0.5f * q.y; // pad: y up = in front
+            float len = std::sqrt (x * x + y * y);
+            if (len < 0.15f) { const float f = 0.15f / juce::jmax (1.0e-4f, len); x *= f; y *= f; len = 0.15f; }
+            az = juce::radiansToDegrees (std::atan2 (x, y));
+            di = juce::jlimit (0.0f, 1.0f, (juce::jmin (1.0f, len) - 0.12f) / 0.88f);
+        }
+        else if (move > 0)
         {
             const double hz = 0.02 * std::pow (100.0, (double) juce::jlimit (0.0f, 1.0f, modded (spSpeedP[(size_t) slot]))) * (double) motion; // 50 s .. 0.5 s per round, times the Motion knob
             auto& ph = spPhase[(size_t) slot];
@@ -1212,7 +1237,7 @@ juce::String NektarProcessor::saveToLibrary (int slot)
         return "Could not create the library folder.";
 
     auto file = dir.getChildFile (juce::File::createLegalFileName (s->name) + ".wav").getNonexistentSibling();
-    if (juce::File (s->path).getParentDirectory() == dir)
+    if (juce::File (s->path).isAChildOf (dir))
         return "Already in the library.";
 
     juce::WavAudioFormat wav;
@@ -1798,8 +1823,19 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
         if (! vecOn[(size_t) pair].load()) continue;
         const float k = 1.0f - std::exp (-(float) blockSec / 0.03f);
         auto& xs = vecXs[(size_t) pair]; auto& ys = vecYs[(size_t) pair];
-        xs += (juce::jlimit (0.0f, 1.0f, modded (vecXP[(size_t) pair])) - xs) * k;
-        ys += (juce::jlimit (0.0f, 1.0f, modded (vecYP[(size_t) pair])) - ys) * k;
+        float tx = modded (vecXP[(size_t) pair]), ty = modded (vecYP[(size_t) pair]);
+        const int shape = juce::roundToInt (vecShapeP[(size_t) pair]->load());
+        if (shape > 0)
+        {   // the stick travels the shape around the place where it was left (the Motion knob makes it slower or faster)
+            const double mot = std::pow (2.0, 4.0 * ((double) juce::jlimit (0.0f, 1.0f, mSpeedP->load()) - 0.5));
+            auto& ph = vecMovePhase[(size_t) pair];
+            ph += blockSec * mot / motionshapes::periodSeconds (juce::roundToInt (vecSpeedP[(size_t) pair]->load()));
+            if (ph >= 1.0) { ph -= std::floor (ph); for (auto& t : vecTg[(size_t) pair]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f }; }
+            const auto q = motionshapes::point (shape - 1, (float) ph, vecPh[(size_t) pair].data(), vecTg[(size_t) pair].data());
+            tx += 0.45f * q.x; ty -= 0.45f * q.y; // screen y points down, the stick's y up
+        }
+        xs += (juce::jlimit (0.0f, 1.0f, tx) - xs) * k;
+        ys += (juce::jlimit (0.0f, 1.0f, ty) - ys) * k;
         vecXShown[(size_t) pair].store (xs); vecYShown[(size_t) pair].store (ys);
         const juce::SpinLock::ScopedTryLockType lk (vecLock);
         if (! lk.isLocked()) continue;
@@ -2194,7 +2230,7 @@ void NektarProcessor::newSpace()
         set ("spaz", -180.0f + 360.0f * vecRnd.nextFloat());
         set ("spdist", 0.1f + 0.55f * vecRnd.nextFloat());
         const float r = vecRnd.nextFloat();
-        set ("spmove", r < 0.4f ? 0.0f : (r < 0.6f ? 1.0f : (r < 0.8f ? 2.0f : 3.0f)));
+        set ("spmove", r < 0.25f ? 0.0f : (float) (1 + vecRnd.nextInt (3 + motionshapes::count)));
         set ("spspeed", 0.1f + 0.4f * vecRnd.nextFloat());
     }
 }
@@ -2273,4 +2309,10 @@ juce::String NektarProcessor::keyText (int slot) const
     if (juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) != 0 && std::abs (sh) > 0.01f)
         r << " " << (sh > 0 ? "+" : "") << juce::roundToInt (sh);
     return r;
+}
+
+void NektarProcessor::randomMovement (int pair)
+{
+    if (auto* pa = apvts.getParameter (pair == 0 ? "vec1shape" : "vec2shape")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) (1 + vecRnd.nextInt (motionshapes::count))));
+    if (auto* pa = apvts.getParameter (pair == 0 ? "vec1speed" : "vec2speed")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) vecRnd.nextInt (4)));
 }

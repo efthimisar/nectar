@@ -28,13 +28,18 @@ const juce::Rectangle<float> kFaceBtn (644.0f, 412.0f, 94.0f, 28.0f);      // de
 const juce::Rectangle<float> kDetailsBtn (892.0f, 498.0f, 120.0f, 32.0f);  // main screen: open the panel with all the knobs
 // the main screen (design units): sounds, Make, Back, Keep; Character and Gentle - Wild; the three big knobs and Space
 const juce::Rectangle<float> kRandBtn (28.0f, 420.0f, 160.0f, 40.0f), kMakeBtn (420.0f, 416.0f, 200.0f, 48.0f),
-                             kBackBtn (632.0f, 420.0f, 86.0f, 40.0f), kKeepBtn (880.0f, 420.0f, 132.0f, 40.0f);
-const juce::Rectangle<float> kSpkBtn (788.0f, 582.0f, 116.0f, 30.0f), kNewSpaceBtn (912.0f, 582.0f, 100.0f, 30.0f);
+                             kBackBtn (632.0f, 420.0f, 86.0f, 40.0f), kKeepBtn (300.0f, 420.0f, 108.0f, 40.0f);
+const juce::Rectangle<float> kSpkBtn (816.0f, 582.0f, 112.0f, 30.0f), kNewSpaceBtn (938.0f, 582.0f, 52.0f, 30.0f);
+// Space: 32 movements as symbols in two rows (still, round the listener, left - right, front - back, then the shapes)
+inline juce::Rectangle<float> moveCell (int i) { return { 330.0f + (float) (i % 16) * 26.0f, 572.0f + (float) (i / 16) * 28.0f, 24.0f, 26.0f }; }
+// beside each joystick: its movement (shape), a dice, its speed
+inline juce::Point<float> joyBtn (int pair, int which) { return { pair == 0 ? 52.0f : 988.0f, 170.0f + 44.0f * (float) which }; }
+inline juce::Rectangle<float> pickCell (int pair, int i) { return { kPadCx[pair] - 78.0f + (float) (i % 6) * 26.0f, kPadCy - 78.0f + (float) (i / 6) * 31.0f, 26.0f, 31.0f }; }
 inline juce::Rectangle<float> charChip (int i) { return { 28.0f + (float) i * 100.0f, 498.0f, 92.0f, 32.0f }; }
 inline juce::Rectangle<float> harmChip (int i) { const float x[3] = { 612.0f, 674.0f, 750.0f }, w[3] = { 58.0f, 72.0f, 56.0f }; return { x[i], 498.0f, w[i], 32.0f }; }
 const juce::Rectangle<float> kKeyBtn (810.0f, 498.0f, 74.0f, 32.0f);
 inline juce::Rectangle<float> keyLabel (int slot) { return { kSlotCx[slot] - 42.0f, 392.0f, 84.0f, 14.0f }; }
-inline juce::Rectangle<float> moveChip (int i) { return { 340.0f + (float) i * 90.0f, 582.0f, 84.0f, 30.0f }; }
+
 // small round buttons on each sound circle: lock (top right) and solo (top left); between the two circles of a pair: the blend lock
 inline juce::Point<float> lockAt (int slot) { return { kSlotCx[slot] + 24.0f, kSlotCy[slot] - 26.0f }; }
 inline juce::Point<float> soloAt (int slot) { return { kSlotCx[slot] - 24.0f, kSlotCy[slot] - 26.0f }; }
@@ -529,6 +534,13 @@ void PairPad::paint (Graphics& g)
         g.setColour (tint.withAlpha (0.35f));
         g.fillEllipse (cx - 4 * u, cy - 4 * u, 8 * u, 8 * u);
     }
+    if (proc.apvts.getRawParameterValue (pair == 0 ? "vec1shape" : "vec2shape")->load() > 0.5f)
+    {   // it moves by itself: a ring where it was left
+        const float hx = in.getX() + proc.apvts.getRawParameterValue (pair == 0 ? "vec1x" : "vec2x")->load() * in.getWidth();
+        const float hy = in.getBottom() - proc.apvts.getRawParameterValue (pair == 0 ? "vec1y" : "vec2y")->load() * in.getHeight();
+        g.setColour (tint.withAlpha (0.55f));
+        g.drawEllipse (hx - 6 * u, hy - 6 * u, 12 * u, 12 * u, 1.3f * u);
+    }
     const float x = in.getX() + proc.vectorX (pair) * in.getWidth(), y = in.getBottom() - proc.vectorY (pair) * in.getHeight();
     g.setColour (tint.withAlpha (0.25f));
     g.fillEllipse (x - 15 * u, y - 15 * u, 30 * u, 30 * u);
@@ -853,8 +865,41 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / kDW);
+    if (topBarClick (p)) return;
     if (! detailsView)
     {   // the main screen
+        if (picking >= 0)
+        {   // choosing a movement for a joystick: a cell picks it, anything else closes the choice
+            const int pair = picking;
+            picking = -1;
+            if (pairPads[pair] != nullptr) pairPads[pair]->setVisible (true);
+            for (int i = 0; i <= motionshapes::count; ++i)
+                if (pickCell (pair, i).contains (p))
+                    if (auto* pa = proc.apvts.getParameter (pair == 0 ? "vec1shape" : "vec2shape")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) i));
+            repaint();
+            return;
+        }
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            if (p.getDistanceFrom (joyBtn (pair, 0)) <= 18.0f)
+            {
+                picking = pair;
+                if (pairPads[pair] != nullptr) pairPads[pair]->setVisible (false);
+                repaint();
+                return;
+            }
+            if (p.getDistanceFrom (joyBtn (pair, 1)) <= 18.0f) { proc.randomMovement (pair); repaint(); return; }
+            if (p.getDistanceFrom (joyBtn (pair, 2)) <= 18.0f)
+            {
+                if (auto* pa = proc.apvts.getParameter (pair == 0 ? "vec1speed" : "vec2speed"))
+                {
+                    const int cur = juce::roundToInt (proc.apvts.getRawParameterValue (pair == 0 ? "vec1speed" : "vec2speed")->load());
+                    pa->setValueNotifyingHost (pa->convertTo0to1 ((float) ((cur + (e.mods.isShiftDown() ? 4 : 1)) % 5)));
+                }
+                repaint();
+                return;
+            }
+        }
         if (kRandBtn.contains (p)) { say (proc.randomSounds()); repaint(); return; }
         if (kMakeBtn.contains (p)) { say (proc.makeAll()); repaint(); return; }
         if (kBackBtn.contains (p)) { if (proc.backAll()) say ("Back to what was there before the last Make."); repaint(); return; }
@@ -885,8 +930,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
                 repaint();
                 return;
             }
-        for (int i = 0; i < 4; ++i)
-            if (moveChip (i).contains (p))
+        for (int i = 0; i < 4 + motionshapes::count; ++i)
+            if (moveCell (i).contains (p))
             {
                 if (auto* pa = proc.apvts.getParameter (slotId ("spmove", spaceSlot))) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) i));
                 repaint();
@@ -1042,17 +1087,34 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
         rebuildPanel();
         repaint();
     }
-    else if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f)
-        toggleRecording();
-    else if (p.getDistanceFrom ({ 447.0f, 30.0f }) <= 22.0f)
-        toggleRoomTone();
-    else if (p.getDistanceFrom ({ 497.0f, 30.0f }) <= 22.0f)
-        toggleResample();
-    else if (juce::Rectangle<float> (316, 15, 56, 30).contains (p))
-        showPresetMenu();
+}
 
-    else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p))
-        say (proc.saveToLibrary (selectedSlot));
+// the bar at the top works the same on both screens
+bool NektarEditor::topBarClick (juce::Point<float> p)
+{
+    if (p.getDistanceFrom ({ 398.0f, 30.0f }) <= 22.0f) toggleRecording();
+    else if (p.getDistanceFrom ({ 447.0f, 30.0f }) <= 22.0f) toggleRoomTone();
+    else if (p.getDistanceFrom ({ 497.0f, 30.0f }) <= 22.0f) toggleResample();
+    else if (juce::Rectangle<float> (316, 15, 56, 30).contains (p)) showPresetMenu();
+    else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p)) say (proc.saveToLibrary (selectedSlot));
+    else return false;
+    return true;
+}
+
+void NektarEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{   // the wheel on a joystick's movement button: the next / previous shape
+    const auto p = e.position / ((float) getWidth() / kDW);
+    if (detailsView) return;
+    for (int pair = 0; pair < 2; ++pair)
+        if (p.getDistanceFrom (joyBtn (pair, 0)) <= 18.0f)
+        {
+            const char* id = pair == 0 ? "vec1shape" : "vec2shape";
+            const int cur = juce::roundToInt (proc.apvts.getRawParameterValue (id)->load());
+            const int n = motionshapes::count + 1;
+            if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) (((cur + (w.deltaY < 0 ? 1 : -1)) % n + n) % n)));
+            repaint();
+            return;
+        }
 }
 
 void NektarEditor::pressNew (int pair)
@@ -1380,7 +1442,7 @@ void NektarEditor::rebuildPanel()
         addKnob (164.0f, 600.0f, 22.0f, "Weight", false, 0.0f, "mweight");
         addKnob (258.0f, 600.0f, 22.0f, "Light", false, 0.0f, "mlight");
         spaceSpeedId = slotId ("spspeed", spaceSlot);
-        addKnob (742.0f, 597.0f, 13.0f, "Speed", false, 0.0f, spaceSpeedId.toRawUTF8());
+        addKnob (782.0f, 597.0f, 13.0f, "Speed", false, 0.0f, spaceSpeedId.toRawUTF8());
         resized();
         return;
     }
@@ -1479,6 +1541,90 @@ void NektarEditor::rebuildPanel()
 }
 
 // Live parts of the panel (drawn in design units on top of the cached picture).
+namespace
+{
+// symbols instead of words: the five Characters, the dice, and the first four Space movements
+void characterSymbol (juce::Graphics& g, int i, juce::Point<float> c, float r, juce::Colour col)
+{
+    g.setColour (col);
+    const float w = juce::jmax (1.2f, r * 0.13f);
+    juce::Path p;
+    switch (i)
+    {
+        case 0: // Cloud: a few soft dots
+        {
+            const float d[6][3] { { -0.55f, 0.15f, 0.28f }, { -0.15f, -0.2f, 0.36f }, { 0.3f, -0.05f, 0.32f }, { 0.65f, 0.25f, 0.22f }, { 0.05f, 0.35f, 0.25f }, { -0.35f, 0.45f, 0.16f } };
+            for (auto& q : d) g.fillEllipse (c.x + q[0] * r - q[2] * r, c.y + q[1] * r - q[2] * r, 2 * q[2] * r, 2 * q[2] * r);
+            return;
+        }
+        case 1: // Rhythm: bars of different heights
+        {
+            const float h[5] { 0.9f, 0.4f, 0.65f, 0.3f, 0.8f };
+            for (int k = 0; k < 5; ++k) g.fillRoundedRectangle (c.x + (-0.8f + 0.4f * (float) k) * r - 0.11f * r, c.y + r * 0.6f - h[k] * 1.2f * r, 0.22f * r, h[k] * 1.2f * r, 0.08f * r);
+            return;
+        }
+        case 2: // Metal: a struck triangle
+            p.addTriangle (c.x, c.y - 0.8f * r, c.x + 0.75f * r, c.y + 0.6f * r, c.x - 0.75f * r, c.y + 0.6f * r);
+            g.strokePath (p, juce::PathStrokeType (w));
+            g.drawLine (c.x + 0.45f * r, c.y - 0.9f * r, c.x + 0.95f * r, c.y - 0.4f * r, w);
+            return;
+        case 3: // Air: three waves
+            for (int k = 0; k < 3; ++k)
+            {
+                juce::Path wv;
+                const float y0 = c.y + (-0.5f + 0.5f * (float) k) * r;
+                for (int t = 0; t <= 24; ++t)
+                {
+                    const float x = c.x - 0.85f * r + 1.7f * r * (float) t / 24.0f, y = y0 + 0.14f * r * std::sin ((float) t / 24.0f * 6.283f * 1.5f + (float) k);
+                    if (t == 0) wv.startNewSubPath (x, y); else wv.lineTo (x, y);
+                }
+                g.strokePath (wv, juce::PathStrokeType (w, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            return;
+        default: // Reverse: an arrow going back
+            p.startNewSubPath (c.x + 0.8f * r, c.y);
+            p.lineTo (c.x - 0.7f * r, c.y);
+            g.strokePath (p, juce::PathStrokeType (w, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            {
+                juce::Path h; h.addTriangle (c.x - 0.85f * r, c.y, c.x - 0.35f * r, c.y - 0.4f * r, c.x - 0.35f * r, c.y + 0.4f * r);
+                g.fillPath (h);
+            }
+            g.drawLine (c.x + 0.8f * r, c.y - 0.5f * r, c.x + 0.8f * r, c.y + 0.5f * r, w);
+            return;
+    }
+}
+void diceSymbol (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col)
+{
+    g.setColour (col);
+    g.drawRoundedRectangle (c.x - 0.8f * r, c.y - 0.8f * r, 1.6f * r, 1.6f * r, 0.3f * r, juce::jmax (1.2f, 0.12f * r));
+    const float d = 0.42f * r, s = 0.24f * r;
+    for (auto q : { juce::Point<float> (-d, -d), juce::Point<float> (d, d), juce::Point<float> (0, 0), juce::Point<float> (d, -d), juce::Point<float> (-d, d) })
+        g.fillEllipse (c.x + q.x - s * 0.5f, c.y + q.y - s * 0.5f, s, s);
+}
+// Space movement i: 0 still, 1 round the listener, 2 left - right, 3 front - back (those three go round / through the listener's
+// space: drawn with the head in the middle), 4.. the shapes around the dot's own place
+void spaceSymbol (juce::Graphics& g, int i, juce::Point<float> c, float r, juce::Colour col)
+{
+    const float w = juce::jmax (1.1f, r * 0.11f);
+    g.setColour (col);
+    if (i == 0) { g.fillEllipse (c.x - 0.25f * r, c.y - 0.25f * r, 0.5f * r, 0.5f * r); return; }
+    if (i >= 4) { motionshapes::drawSymbol (g, i - 4, c, r, col); return; }
+    g.fillEllipse (c.x - 0.18f * r, c.y - 0.18f * r, 0.36f * r, 0.36f * r); // the listener
+    if (i == 1) { g.drawEllipse (c.x - 0.8f * r, c.y - 0.8f * r, 1.6f * r, 1.6f * r, w); return; }
+    const bool h = i == 2;
+    const float L = 0.85f * r;
+    auto arrow = [&] (float sx, float sy)
+    {
+        juce::Path a; const float tx = c.x + sx * L, ty = c.y + sy * L;
+        if (h) a.addTriangle (tx, ty, tx - sx * 0.35f * r, ty - 0.25f * r, tx - sx * 0.35f * r, ty + 0.25f * r);
+        else   a.addTriangle (tx, ty, tx - 0.25f * r, ty - sy * 0.35f * r, tx + 0.25f * r, ty - sy * 0.35f * r);
+        g.fillPath (a);
+    };
+    if (h) { g.drawLine (c.x - L, c.y, c.x - 0.3f * r, c.y, w); g.drawLine (c.x + 0.3f * r, c.y, c.x + L, c.y, w); arrow (-1, 0); arrow (1, 0); }
+    else   { g.drawLine (c.x, c.y - L, c.x, c.y - 0.3f * r, w); g.drawLine (c.x, c.y + 0.3f * r, c.x, c.y + L, w); arrow (0, -1); arrow (0, 1); }
+}
+}
+
 void NektarEditor::drawOverlay (Graphics& g)
 {
     if (! detailsView)
@@ -1540,16 +1686,13 @@ void NektarEditor::drawOverlay (Graphics& g)
         for (int pair = 0; pair < 2; ++pair)
             badge (blendAt (pair), proc.blendLocked (pair), 2);
 
-        const char* chars[5] = { "Cloud", "Rhythm", "Metal", "Air", "Reverse" };
         const int cur = juce::roundToInt (proc.apvts.getRawParameterValue ("character")->load());
         for (int i = 0; i < 5; ++i)
         {
             const auto r = charChip (i);
             g.setColour (i == cur ? kAcc : Colour (0xff2f2d2b));
             g.fillRoundedRectangle (r, 16);
-            g.setColour (i == cur ? kDark : kLight);
-            g.setFont (font (regular, 15));
-            g.drawText (chars[i], r, juce::Justification::centred);
+            characterSymbol (g, i, r.getCentre(), 11.0f, i == cur ? kDark : kLight);
         }
 
         g.setColour (kMuted.withAlpha (0.8f));
@@ -1587,23 +1730,65 @@ void NektarEditor::drawOverlay (Graphics& g)
         // Space: the movement of the chosen sound, headphones or speakers, a new placement
         g.setColour (kMuted);
         g.setFont (font (regular, 14));
-        g.drawText ("Space - sound " + juce::String (spaceSlot + 1) + " (pick a dot above)", juce::Rectangle<float> (340.0f, 556.0f, 440.0f, 20.0f),
+        g.drawText ("Space - sound " + juce::String (spaceSlot + 1) + " (pick a dot above)", juce::Rectangle<float> (330.0f, 552.0f, 440.0f, 18.0f),
                     juce::Justification::centredLeft);
         g.drawText ("Change the whole sound", juce::Rectangle<float> (28.0f, 556.0f, 290.0f, 20.0f), juce::Justification::centredLeft);
-        const char* moves[4] = { "Still", "Round", "Left - right", "Front - back" };
         const int mv = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("spmove", spaceSlot))->load());
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 4 + motionshapes::count; ++i)
         {
-            const auto r = moveChip (i);
-            g.setColour (i == mv ? kWada[spaceSlot % 5] : Colour (0xff2f2d2b));
-            g.fillRoundedRectangle (r, 15);
-            g.setColour (i == mv ? kDark : kLight);
-            g.setFont (font (regular, 14));
-            g.drawText (moves[i], r, juce::Justification::centred);
+            const auto r = moveCell (i);
+            if (i == mv)
+            {
+                g.setColour (kWada[spaceSlot % 5]);
+                g.fillRoundedRectangle (r, 6);
+            }
+            spaceSymbol (g, i, r.getCentre(), 8.5f, i == mv ? kDark : kLight.withAlpha (0.85f));
         }
         const bool spk = proc.apvts.getRawParameterValue ("spspk")->load() > 0.5f;
         button (kSpkBtn, spk ? "Speakers" : "Headphones", true, false, 14);
-        button (kNewSpaceBtn, "New space", true, false, 14);
+        button (kNewSpaceBtn, {}, true, false, 14);
+        diceSymbol (g, kNewSpaceBtn.getCentre(), 9.0f, kLight);
+
+        // beside each joystick: its movement, a dice, its speed (five dots)
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            const int shape = juce::roundToInt (proc.apvts.getRawParameterValue (pair == 0 ? "vec1shape" : "vec2shape")->load());
+            const int speed = juce::roundToInt (proc.apvts.getRawParameterValue (pair == 0 ? "vec1speed" : "vec2speed")->load());
+            const auto tint = kWada[pair == 0 ? 1 : 2];
+            for (int w = 0; w < 3; ++w)
+            {
+                const auto c = joyBtn (pair, w);
+                g.setColour (w == 0 && (shape > 0 || picking == pair) ? tint : Colour (0xff2f2d2b));
+                g.fillEllipse (c.x - 17.0f, c.y - 17.0f, 34.0f, 34.0f);
+                const auto ink = w == 0 && (shape > 0 || picking == pair) ? kDark : kLight;
+                if (w == 0)
+                {
+                    if (shape > 0) motionshapes::drawSymbol (g, shape - 1, c, 11.0f, ink);
+                    else { g.setColour (ink); g.fillEllipse (c.x - 3.5f, c.y - 3.5f, 7.0f, 7.0f); }
+                }
+                else if (w == 1) diceSymbol (g, c, 9.0f, ink);
+                else
+                    for (int k = 0; k < 5; ++k)
+                    {   // speed: five dots, the lit ones show how fast
+                        const float x = c.x - 10.0f + 5.0f * (float) k;
+                        g.setColour (k <= speed ? kAcc : kMuted.withAlpha (0.35f));
+                        g.fillEllipse (x - 2.0f, c.y - 2.0f + (k <= speed ? 0.0f : 0.0f), 4.0f, 4.0f);
+                    }
+            }
+            if (picking == pair)
+            {   // the shapes to choose from, over the pad (the first cell = no movement)
+                g.setColour (Colour (0xf01e1d1b));
+                g.fillRoundedRectangle (juce::Rectangle<float> (kPadCx[pair] - 80.0f, kPadCy - 80.0f, 160.0f, 160.0f), 12.0f);
+                for (int i = 0; i <= motionshapes::count; ++i)
+                {
+                    const auto r = pickCell (pair, i);
+                    if (i == shape) { g.setColour (tint.withAlpha (0.9f)); g.fillRoundedRectangle (r.reduced (1.5f), 6.0f); }
+                    const auto ink = i == shape ? kDark : kLight;
+                    if (i == 0) { g.setColour (ink); g.fillEllipse (r.getCentreX() - 3.0f, r.getCentreY() - 3.0f, 6.0f, 6.0f); }
+                    else motionshapes::drawSymbol (g, i - 1, r.getCentre(), 9.0f, ink);
+                }
+            }
+        }
         g.setColour (Colour (0xff2f2d2b));
         g.fillRoundedRectangle (kDetailsBtn, 16);
         g.setColour (kLight);

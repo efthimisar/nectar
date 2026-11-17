@@ -163,6 +163,9 @@ private:
     std::set<int> heldNotes;
     int octaveShift = 0;
     int selectedSlot = 0;
+    int picking = -1;                   // main screen: the joystick whose movement shapes are shown over its pad (-1 = none)
+    bool topBarClick (juce::Point<float> p);
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     int spaceSlot = 0;                  // main screen: the sound whose movement the Space chips and Speed knob show
     juce::String spaceSpeedId;          // kept alive for the Speed knob's parameter id
     std::set<int> selection { 0 };

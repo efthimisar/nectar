@@ -13,6 +13,7 @@
 #include <string>
 #include "Resonator.h"
 #include "MacroTone.h"
+#include "MotionShapes.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -91,6 +92,7 @@ public:
     bool backAll();                  // the corners before the last Make
     juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked
     void newSpace();                 // a random place and movement for each of the four sounds
+    void randomMovement (int pair);  // a random shape and speed for a joystick
     juce::String keyText (int slot) const;  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
     bool keyOf (int slot, int& tonic, bool& minor) const;
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
@@ -171,6 +173,13 @@ private:
     std::vector<std::atomic<float>> vecVal;          // per knob: its blended value right now (0..1 of its range)
     std::vector<std::atomic<bool>> vecAct;           // per knob: the stick is in charge of it
     std::array<std::atomic<float>*, 2> vecXP {}, vecYP {};
+    std::array<std::atomic<float>*, 2> vecShapeP {}, vecSpeedP {};
+    std::array<double, 2> vecMovePhase {};
+    std::array<std::array<float, 4>, 2> vecPh {};
+    std::array<std::array<juce::Point<float>, 4>, 2> vecTg {};
+    std::array<std::array<float, 4>, 4> spPh {};
+    std::array<std::array<juce::Point<float>, 4>, 4> spTg {};
+    juce::Random vecMoveRnd;
     std::array<float, 2> vecXs { { 0.5f, 0.5f } }, vecYs { { 0.5f, 0.5f } }; // smoothed stick position (audio thread)
     std::array<std::atomic<float>, 2> vecXShown { { { 0.5f }, { 0.5f } } }, vecYShown { { { 0.5f }, { 0.5f } } };
     std::vector<std::atomic<int>> routeSrc;
