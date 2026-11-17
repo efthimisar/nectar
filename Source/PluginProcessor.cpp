@@ -1280,6 +1280,26 @@ juce::String NektarProcessor::savePreset (const juce::String& name)
     return "Could not write the preset.";
 }
 
+// A preset remembers where each sound file was. When the file is not there (a preset made on another computer),
+// the sound is looked up by its name in the Nektar Library: letters and digits only, so "nord_ pad 1.wav",
+// "nord__pad_1.wav" and "031d8657-nord__pad_1.wav" (an upload prefix) all mean the same file.
+static juce::File findSampleFile (const juce::String& path, const juce::File& library)
+{
+    const juce::File direct (path);
+    if (path.isEmpty() || direct.existsAsFile()) return direct;
+    auto norm = [] (juce::String name)
+    {
+        name = name.upToLastOccurrenceOf (".", false, false).toLowerCase();
+        if (name.length() > 9 && name[8] == '-' && name.substring (0, 8).containsOnly ("0123456789abcdef")) name = name.substring (9);
+        return name.retainCharacters ("abcdefghijklmnopqrstuvwxyz0123456789");
+    };
+    const auto want = norm (path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
+    if (want.isEmpty() || ! library.isDirectory()) return {};
+    for (const auto& e : juce::RangedDirectoryIterator (library, true, "*.wav;*.aif;*.aiff;*.flac;*.mp3", juce::File::findFiles))
+        if (norm (e.getFile().getFileName()) == want) return e.getFile();
+    return {};
+}
+
 juce::String NektarProcessor::loadPreset (const juce::File& file)
 {
     auto xml = juce::XmlDocument::parse (file);
@@ -1292,18 +1312,19 @@ juce::String NektarProcessor::loadPreset (const juce::File& file)
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
-        if (path.isNotEmpty() && ! juce::File (path).existsAsFile())
-            missing += (missing.isEmpty() ? "" : ", ") + juce::String (slot + 1);
+        if (path.isNotEmpty() && ! findSampleFile (path, getLibraryFolder()).existsAsFile())
+            missing += (missing.isEmpty() ? "" : ", ") + juce::String (slot + 1) + " (" + juce::File (path).getFileName() + ")";
     }
     apvts.replaceState (state);
     readModFromState (state);
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
-        if (path.isNotEmpty() && juce::File (path).existsAsFile())
-            loadSample (juce::File (path), slot);
+        const auto found = findSampleFile (path, getLibraryFolder());
+        if (path.isNotEmpty() && found.existsAsFile())
+            loadSample (found, slot);
     }
-    return missing.isEmpty() ? juce::String() : "Sound file missing for slot " + missing + ".";
+    return missing.isEmpty() ? juce::String() : "Sound file not found in the Nektar Library for slot " + missing + ".";
 }
 
 std::shared_ptr<const Sample> NektarProcessor::getSample (int slot) const
