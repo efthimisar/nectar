@@ -51,7 +51,8 @@ private:
 class PairPad : public juce::Component
 {
 public:
-    static constexpr float kHalf = 78.0f; // half side in design units
+    static constexpr float kHalf = 70.0f; // radius of the round pad in design units
+    std::vector<juce::Point<float>> trail; // the last places of the stick (disc, -1..1), for its trail
     PairPad (NektarProcessor& p, int pairIn) : proc (p), pair (pairIn) { setMouseCursor (juce::MouseCursor::CrosshairCursor); }
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -192,6 +193,19 @@ private:
     std::set<int> heldNotes;
     int octaveShift = 0;
     int selectedSlot = 0;
+    void drawFace (juce::Graphics& g);
+    void faceClick (const juce::MouseEvent& e, juce::Point<float> p);
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    int partDrag = -1;                  // the sample screen: the slot whose part is being dragged
+    float partFrom = 0.0f;
+    std::vector<float> scrPeaks;        // the sample screen's waveform (whole file), and which sound it is
+    int scrSerial = -1;
+    struct Spark { float x, y, life; };
+    std::vector<Spark> sparks;          // grains as they are read
+    std::array<int, 4> sparkSeen {};
+    std::array<float, 4> levelShown {};
+    float mixShown = 0.0f;
     int picking = -1;                   // main screen: the joystick whose movement shapes are shown over its pad (-1 = none)
     bool topBarClick (juce::Point<float> p);
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;

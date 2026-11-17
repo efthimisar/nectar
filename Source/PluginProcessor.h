@@ -105,6 +105,33 @@ public:
     double tempoRatioFor (int slot, const Sample* s, double hostBpm, bool hostHas) const;
     struct HostNow { double bpm = 120.0; bool has = false; double ppq = 0.0; bool hasPpq = false; };
     HostNow hostNow;                                   // audio thread
+    std::atomic<int> relation { 0 };
+    std::array<float, 2> pairGainNow { { 1.0f, 1.0f } };
+    std::array<float, 4> pairGainWas { { 1.0f, 1.0f, 1.0f, 1.0f } };
+    double freeBeats = 0.0;
+    std::array<float, 256> shadowX {}, shadowY {};
+    int shadowAt = 0;
+    std::array<std::atomic<float>*, 4> grOctP {}, grArpP {};
+    std::array<std::array<float, 16>, 4> arpSteps {};   // semitones per step (Arp), from the seed and the sound's key
+    juce::String arpSig;
+    void updateArpSteps();
+public:
+    // for the screen
+    std::array<std::array<std::atomic<float>, 16>, 4> tapPos {};
+    std::array<std::atomic<int>, 4> tapCount {}, tapStep {};
+    std::array<std::atomic<float>, 4> slotLevel {};
+    std::atomic<float> mixLevel { 0.0f }, beatNow { 0.0f };
+    std::atomic<bool> beatOn { false };
+    float playheadOf (int slot) const { return players[(size_t) slot].playhead.load(); }
+    bool baking() { return cleanPool.getNumJobs() > 0; }
+    float knobNow01 (const juce::String& id) const   // a knob as the joystick has it now (0..1 of its range)
+    {
+        const auto it = modIdxById.find (id.toStdString());
+        if (it == modIdxById.end()) return 0.0f;
+        if (vecAct[(size_t) it->second].load()) return vecVal[(size_t) it->second].load();
+        if (auto* pa = apvts.getParameter (id)) return pa->getValue();
+        return 0.0f;
+    }
     double spaceAdvance (int slot, int numSamples, float motion);  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
     bool keyOf (int slot, int& tonic, bool& minor) const;
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
@@ -176,7 +203,7 @@ private:
     struct VecEntry { int idx; float c[4]; };       // knob (index in the modulation table) and its four corner values (0..1 of its range)
     std::array<std::vector<VecEntry>, 2> vecEntries; // guarded by vecLock
     juce::SpinLock vecLock;
-    struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; };
+    struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; int grOct[2] = { 0, 0 }; int grArp[2] = { 0, 0 }; bool swell = false; };
     std::array<std::vector<VecSnapshot>, 2> vecHistory; // message thread only
     VecSnapshot vectorNow (int pair);
     void applyVector (int pair, const VecSnapshot& snap);

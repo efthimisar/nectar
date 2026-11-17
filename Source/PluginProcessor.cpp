@@ -171,6 +171,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pitch" + sfx, 1 }, "Pitch" + nm,
                                                              NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("st")));
+        // grains an octave up (Shimmer), and a seed for the notes of the 16 steps (Arp; 0 = off)
+        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "groct" + sfx, 1 }, "Grain octave" + nm, -1, 1, 0));
+        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "grarp" + sfx, 1 }, "Grain notes" + nm, 0, 9999, 0));
         l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "stempo" + sfx, 1 }, "Tempo of sound" + nm,
                                                               juce::StringArray { "Auto", "No tempo", "Half", "Double" }, 0));
         {   // the key of the sound: 0 = as found by the analysis, 1 = no key (left as it is), 2.. = C major, C minor, C# major ...
@@ -193,7 +196,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             // movement of the sound around the listener: 0 still, 1 round and round, 2 left - right, 3 front - back
             // 0 still, 1 round the listener, 2 left - right, 3 front - back, 4.. a shape (MotionShapes.h) around the dot's place
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spmove" + sfx, 1 }, "Space movement" + nm,
-                                                                 NormalisableRange<float> (0.0f, (float) (3 + motionshapes::count), 1.0f), 0.0f));
+                                                                 NormalisableRange<float> (0.0f, 5.0f, 1.0f), 0.0f));
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spspeed" + sfx, 1 }, "Space movement speed" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.35f));
         }
@@ -362,7 +365,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     // the joysticks can move by themselves: a shape (0 = none, 1.. = shape) around the place where the stick was left, at one of
     // five speeds (16, 8, 4, 2, 1 s per round, as the Orb of Flow)
     for (const char* id : { "vec1shape", "vec2shape" })
-        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { id, 1 }, juce::String ("Joystick movement ") + (id[3] == '1' ? "1" : "2"), 0, motionshapes::count, 0));
+        l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { id, 1 }, juce::String ("Joystick movement ") + (id[3] == '1' ? "1" : "2"), 0, 4, 0));
     for (const char* id : { "vec1speed", "vec2speed" })
         l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { id, 1 }, juce::String ("Joystick movement speed ") + (id[3] == '1' ? "1" : "2"), 0, motionshapes::speedSteps - 1, 1));
     for (const char* id : { "vec1x", "vec1y", "vec2x", "vec2y" })
@@ -371,6 +374,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
                                                           juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
+    // Each joystick has its own character (what Make builds) and its own Gentle - Wild
+    {
+        const juce::StringArray chars { "Cloud", "Rhythm", "Metal", "Air", "Reverse", "Drone", "Swell", "Glitch", "Dust", "Bells", "Shimmer", "Melt", "Arp" };
+        for (int pr = 1; pr <= 2; ++pr)
+        {
+            l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character" + juce::String (pr), 1 }, "Character " + juce::String (pr), chars, pr == 1 ? 0 : 1));
+            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "wild" + juce::String (pr), 1 }, "Gentle - Wild " + juce::String (pr), 0.0f, 1.0f, 0.5f));
+            l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "swell" + juce::String (pr), 1 }, "Swell " + juce::String (pr), false));
+        }
+        // how the two pairs behave towards each other
+        l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "relation", 1 }, "Relation of the pairs",
+                                                              juce::StringArray { "None", "Contrast", "Shadow", "Call and response", "Depth" }, 0));
+    }
     // Tempo lock: sounds with a tempo are read faster or slower (pitch kept) to follow the host tempo
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "tempolock", 1 }, "Lock to tempo", true));
     // Harmony: the four sounds as recorded, all moved into one key, or their keynotes on the notes of one chord
@@ -484,6 +500,13 @@ NektarProcessor::NektarProcessor()
     pairMorphP[1] = apvts.getRawParameterValue ("morph34");
     apvts.addParameterListener ("morph12", this);
     apvts.addParameterListener ("morph34", this);
+    for (int sl = 0; sl < kSlots; ++sl)
+    {
+        const juce::String sx = sl == 0 ? juce::String() : juce::String (sl + 1);
+        grOctP[(size_t) sl] = apvts.getRawParameterValue ("groct" + sx);
+        grArpP[(size_t) sl] = apvts.getRawParameterValue ("grarp" + sx);
+        tapStep[(size_t) sl].store (-1);
+    }
     vecShapeP[0] = apvts.getRawParameterValue ("vec1shape"); vecShapeP[1] = apvts.getRawParameterValue ("vec2shape");
     vecSpeedP[0] = apvts.getRawParameterValue ("vec1speed"); vecSpeedP[1] = apvts.getRawParameterValue ("vec2speed");
     for (auto& a : vecPh) for (auto& v : a) v = vecMoveRnd.nextFloat() * juce::MathConstants<float>::twoPi;
@@ -555,6 +578,7 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 void NektarProcessor::timerCallback()
 {
     applyHarmony();
+    updateArpSteps();
     const auto now = juce::Time::getMillisecondCounter();
     for (int slot = 0; slot < kSlots; ++slot)
         if (cleanDirty[(size_t) slot].load() && now - cleanChangedAt[(size_t) slot].load() >= 250) // wait until the knob stops moving
@@ -882,6 +906,28 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     buffer.clear();
     double hostBpm = hostNow.has ? hostNow.bpm : 120.0;
+    {   // Swell (a pair's level breathes) and Call and response (the pairs take turns), our own shapes:
+        // with a host tempo both follow the bar (8 beats a round, the second pair half a round later); without one, 4 s
+        const int rel = juce::roundToInt (apvts.getRawParameterValue ("relation")->load());
+        relation.store (rel);
+        const double beats = hostNow.has ? (hostNow.hasPpq ? hostNow.ppq : freeBeats) : freeBeats;
+        freeBeats += (double) buffer.getNumSamples() / (hostRate.load() > 0.0 ? hostRate.load() : 44100.0) * (hostNow.has ? hostNow.bpm : 120.0) / 60.0;
+        beatNow.store ((float) (beats - std::floor (beats)));
+        beatOn.store (hostNow.has);
+        const double ph = beats / 8.0 - std::floor (beats / 8.0);
+        for (int pr = 0; pr < 2; ++pr)
+        {
+            float gsum = 1.0f;
+            if (apvts.getRawParameterValue (pr == 0 ? "swell1" : "swell2")->load() > 0.5f)
+                gsum *= 0.2f + 0.8f * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * (ph + 0.5 * pr)));
+            if (rel == 3)
+            {
+                const float th = juce::MathConstants<float>::halfPi * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * ph));
+                gsum *= pr == 0 ? std::cos (th) : std::sin (th);
+            }
+            pairGainNow[(size_t) pr] = gsum;
+        }
+    }
     const bool hostHasBpm = hostNow.has;
     // Motion knob: 0.5 = as made; down to four times slower, up to four times faster
     const float motionKnob = juce::jlimit (0.0f, 1.0f, modded (mSpeedP));
@@ -944,6 +990,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             g.pattern = (juce::uint32) juce::roundToInt (gp[12]->load());
             g.bpm = hostBpm * motionSteps; // the rhythm moves in halves and doubles, so it stays in time
             g.pitchSemis = p.pitchSemis;
+            g.octaveSemis = 12.0f * (float) juce::roundToInt (grOctP[(size_t) slot]->load());
+            g.stepSemis = juce::roundToInt (grArpP[(size_t) slot]->load()) > 0 ? arpSteps[(size_t) slot].data() : nullptr;
+            g.tapPos = tapPos[(size_t) slot].data(); g.tapCount = &tapCount[(size_t) slot]; g.tapStep = &tapStep[(size_t) slot];
             g.releaseSec = p.releaseSec;
             g.gain = p.level * p.level * p.autoGain;
             const auto smpNow = pl.getSample();
@@ -972,6 +1021,15 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             shifters[(size_t) slot].process (view, view.getNumSamples(), (fs < 0.0f ? -1.0f : 1.0f) * 1000.0f * std::abs (fs * fs * fs),
                                              rg > 0.005f ? 20.0f * std::pow (100.0f, rg) : 0.0f, juce::jmin (1.0f, rg * 8.0f));
         }
+        {
+            const float pg = pairGainNow[(size_t) (slot / 2)], pg0 = pairGainWas[(size_t) slot];
+            if (std::abs (pg - pg0) > 1.0e-4f || pg < 0.9999f)
+                for (int c = 0; c < view.getNumChannels(); ++c) view.applyGainRamp (c, 0, view.getNumSamples(), pg0, pg);
+            pairGainWas[(size_t) slot] = pg;
+            float m = 0.0f;
+            for (int c = 0; c < view.getNumChannels(); ++c) m = juce::jmax (m, view.getRMSLevel (c, 0, view.getNumSamples()));
+            slotLevel[(size_t) slot].store (m);
+        }
         loadedNow[(size_t) slot] = true;
         pans[(size_t) slot] = modded (panP[(size_t) slot]);
     }
@@ -984,29 +1042,24 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     {
         // the place on the pad, and its movement around it (our own design, no source)
         float az = modded (spAzP[(size_t) slot]), di = juce::jlimit (0.0f, 1.0f, modded (spDistP[(size_t) slot]));
-        const int move = juce::jlimit (0, 3 + motionshapes::count, juce::roundToInt (spMoveP[(size_t) slot]->load()));
-        if (move >= 4)
-        {   // a shape around the dot's own place (it is kept a little away from the head, where left and right swap)
-            const double ph = spaceAdvance (slot, buffer.getNumSamples(), motion);
-            const float a0 = juce::degreesToRadians (az), rr = 0.12f + 0.88f * di;
-            const auto q = motionshapes::point (move - 4, (float) ph, spPh[(size_t) slot].data(), spTg[(size_t) slot].data());
-            float x = rr * std::sin (a0) + 0.5f * q.x, y = rr * std::cos (a0) - 0.5f * q.y; // pad: y up = in front
-            float len = std::sqrt (x * x + y * y);
-            if (len < 0.15f) { const float f = 0.15f / juce::jmax (1.0e-4f, len); x *= f; y *= f; len = 0.15f; }
-            az = juce::radiansToDegrees (std::atan2 (x, y));
-            di = juce::jlimit (0.0f, 1.0f, (juce::jmin (1.0f, len) - 0.12f) / 0.88f);
+        if (relation.load() == 4)
+        {   // Depth: sounds 1 and 2 near and in front, 3 and 4 far and behind (our own rule)
+            if (slot < 2) { di *= 0.35f; az = juce::jlimit (-60.0f, 60.0f, az); }
+            else { di = 0.55f + 0.45f * di; if (std::abs (az) < 100.0f) az = (az < 0.0f ? -1.0f : 1.0f) * (180.0f - std::abs (az) * 0.6f); }
         }
-        else if (move > 0)
-        {
+        const int move = juce::jlimit (0, 5, juce::roundToInt (spMoveP[(size_t) slot]->load()));
+        if (move > 0)
+        {   // 1 left - right, 2 front - back, 3 an arc in front, 4 an arc behind, 5 a circle round the listener (our own designs)
             const double ph = spaceAdvance (slot, buffer.getNumSamples(), motion);
             const float a0 = juce::degreesToRadians (az), rr = 0.12f + 0.88f * di;
             const float x0 = rr * std::sin (a0), y0 = rr * std::cos (a0), tw = juce::MathConstants<float>::twoPi * (float) ph;
-            if (move == 1)
-                az += 360.0f * (float) ph;
+            if (move == 5) az += 360.0f * (float) ph;
+            else if (move == 3) az = 80.0f * std::sin (tw);
+            else if (move == 4) az = 180.0f + 80.0f * std::sin (tw);
             else
             {   // a straight line through the place; it never passes exactly through the head, where left and right would swap at once
                 float x = x0, y = y0;
-                if (move == 2) { x = juce::jmax (std::abs (x0), 0.4f) * std::sin (tw); y = (y0 < 0.0f ? -1.0f : 1.0f) * juce::jmax (std::abs (y0), 0.12f); }
+                if (move == 1) { x = juce::jmax (std::abs (x0), 0.4f) * std::sin (tw); y = (y0 < 0.0f ? -1.0f : 1.0f) * juce::jmax (std::abs (y0), 0.12f); }
                 else           { y = juce::jmax (std::abs (y0), 0.4f) * std::cos (tw); x = (x0 < 0.0f ? -1.0f : 1.0f) * juce::jmax (std::abs (x0), 0.12f); }
                 az = juce::radiansToDegrees (std::atan2 (x, y));
                 di = juce::jlimit (0.0f, 1.0f, (juce::jmin (1.0f, std::sqrt (x * x + y * y)) - 0.12f) / 0.88f);
@@ -1021,6 +1074,11 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     mixer.setSolo (soloSlot.load());
     mixer.setCross ({ modded (xmorphP[0]), modded (xmorphP[1]) });
     mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) }, space);
+    {
+        float m = 0.0f;
+        for (int c = 0; c < juce::jmin (2, buffer.getNumChannels()); ++c) m = juce::jmax (m, buffer.getRMSLevel (c, 0, buffer.getNumSamples()));
+        mixLevel.store (m);
+    }
 
     // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
     // Resonator B runs beside A on the same input (parallel, "Mix"): out = A + B - dry, so each mix knob keeps its meaning.
@@ -1548,7 +1606,10 @@ NektarProcessor::VecSnapshot NektarProcessor::vectorNow (int pair)
     {
         snap.grMode[k] = juce::roundToInt (grP[(size_t) (pair * 2 + k)][0]->load());
         snap.grPat[k] = juce::roundToInt (grP[(size_t) (pair * 2 + k)][12]->load());
+        snap.grOct[k] = juce::roundToInt (grOctP[(size_t) (pair * 2 + k)]->load());
+        snap.grArp[k] = juce::roundToInt (grArpP[(size_t) (pair * 2 + k)]->load());
     }
+    snap.swell = apvts.getRawParameterValue (pair == 0 ? "swell1" : "swell2")->load() > 0.5f;
     return snap;
 }
 
@@ -1560,7 +1621,10 @@ void NektarProcessor::applyVector (int pair, const VecSnapshot& snap)
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
         if (auto* pa = apvts.getParameter ("grmode" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grMode[k]));
         if (auto* pa = apvts.getParameter ("grpat" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grPat[k]));
+        if (auto* pa = apvts.getParameter ("groct" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grOct[k]));
+        if (auto* pa = apvts.getParameter ("grarp" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grArp[k]));
     }
+    if (auto* pa = apvts.getParameter (pair == 0 ? "swell1" : "swell2")) pa->setValueNotifyingHost (snap.swell ? 1.0f : 0.0f);
     {
         const juce::SpinLock::ScopedLockType lk (vecLock);
         for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
@@ -1613,8 +1677,15 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         if (h.size() > 24) h.erase (h.begin());
     }
     juce::Random master (seed != 0 ? seed : vecRnd.nextInt());
-    const int character = juce::jlimit (0, 4, juce::roundToInt (apvts.getRawParameterValue ("character")->load()));
-    const float wild = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("wild")->load());
+    const juce::String chId = pair == 0 ? "character1" : "character2";
+    if (pair == 1 && juce::roundToInt (apvts.getRawParameterValue ("relation")->load()) == 1)
+    {   // Contrast: joystick 2 takes the character opposite to joystick 1's (our own pairs)
+        static const int opposite[13] = { 7, 5, 3, 2, 10, 1, 8, 0, 6, 11, 5, 9, 6 };
+        const int c1 = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue ("character1")->load()));
+        if (auto* pa = apvts.getParameter (chId)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) opposite[c1]));
+    }
+    const int character = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (chId)->load()));
+    const float wild = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue (pair == 0 ? "wild1" : "wild2")->load());
 
     struct R { const char* id; float lo, hi, chance, off; }; // chance: how often the knob is in use at all; off: its value otherwise
     static const R cloud[] = { { "grspray", 0.2f, 0.6f, 1, 0 }, { "grsize", 0.45f, 0.8f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grjit", 0.0f, 0.2f, 0.3f, 0 },
@@ -1637,7 +1708,34 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         { "grjit", 0.1f, 0.4f, 1, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
         { "fshift", 0.35f, 0.65f, 0.2f, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
         { "blur", 0.1f, 0.4f, 0.4f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    const R* tables[5] = { cloud, rhythm, metal, airy, backw };
+    // the new characters (values are 0..1 of each knob's range; our own recipes, to be judged by ear)
+    static const R drone[] = { { "grsize", 0.8f, 1.0f, 1, 0 }, { "grdens", 0.7f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grjit", 0, 0, 0, 0 },
+        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.7f, 1, 0 }, { "sfiltype", 0.0f, 0.2f, 1, 0 }, { "sfilcut", 0.15f, 0.45f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.1f, 0.4f, 1, 0 }, { "bodyfocus", 0.4f, 0.7f, 1, 0 }, { "bodysize", 0.6f, 0.9f, 1, 0 },
+        { "blur", 0.5f, 0.9f, 1, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.45f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R glitch[] = { { "grsize", 0.05f, 0.25f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.4f, 1.0f, 1, 0 }, { "grjit", 0.5f, 1.0f, 1, 0 },
+        { "grrev", 0.3f, 1.0f, 0.5f, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.4f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.6f, 1, 0 },
+        { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.2f, 0.6f, 0.3f, 0 }, { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.7f, 1, 0 },
+        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.3f, 0.8f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.1f, 0.6f, 1, 0 } };
+    static const R dust[] = { { "grsize", 0.02f, 0.12f, 1, 0 }, { "grdens", 0.05f, 0.25f, 1, 0 }, { "grspray", 0.6f, 1.0f, 1, 0 }, { "grjit", 0.6f, 1.0f, 1, 0 },
+        { "grrev", 0.2f, 0.6f, 0.4f, 0 }, { "grspread", 0.8f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
+        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.2f, 0.6f, 0.6f, 0 }, { "air", 0.6f, 0.9f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R bells[] = { { "grsize", 0.3f, 0.6f, 1, 0 }, { "grdens", 0.4f, 0.8f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.1f, 0.3f, 0 },
+        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.5f, 0.9f, 1, 0 }, { "sfilres", 0.6f, 0.9f, 1, 0 },
+        { "fshift", 0.2f, 0.8f, 1, 0.5f }, { "ring", 0.25f, 0.7f, 1, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.8f, 1.0f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
+        { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.4f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R shimmer[] = { { "grsize", 0.5f, 0.85f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.2f, 0.5f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.4f, 0 },
+        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.3f, 0.6f, 1, 0 }, { "bodysize", 0.4f, 0.8f, 1, 0 },
+        { "blur", 0.2f, 0.6f, 0.6f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.7f, 0.95f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+    static const R arp[] = { { "grgate", 0.4f, 0.9f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.8f, 1, 0 },
+        { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.45f, 0.95f, 1, 0 }, { "sfilres", 0.2f, 0.5f, 1, 0 }, { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 },
+        { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.5f, 0.85f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 },
+        { "air", 0.35f, 0.65f, 1, 0 }, { "grsize", 0.3f, 0.5f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
+    // Swell and Melt take Cloud's recipe and add their own movement (the pair's level breathing; the Morph between the two)
+    const R* tables[13] = { cloud, rhythm, metal, airy, backw, drone, cloud, glitch, dust, bells, shimmer, cloud, arp };
+    const bool rhythmic = character == 1 || character == 7 || character == 12;
     const R* table = tables[character];
     const int tableLen = 18;
 
@@ -1678,7 +1776,7 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
             {   // positions are picked outright (no spreading around a centre: a place between two loud places may be silent)
                 VecEntry e; e.idx = it->second;
                 const float first = loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())];
-                for (auto& c : e.c) c = rnd.nextFloat() < wild ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
+                for (auto& c : e.c) c = (character == 7 || rnd.nextFloat() < wild) ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
                 out.push_back (e);
             }
         }
@@ -1688,13 +1786,18 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
             const R r = table[i];
             add (r.id + sfx, [&rnd, r] { return rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off; });
         }
-        snap.grMode[k] = character == 1 ? 2 : 1;
+        snap.grMode[k] = rhythmic ? 2 : 1;
+        snap.grOct[k] = character == 10 && (k == 0 || rnd.nextFloat() < 0.5f) ? 1 : 0;
+        snap.grArp[k] = character == 12 ? 1 + rnd.nextInt (9999) : 0;
         // rhythm: a pattern with 6 to 11 of the 16 steps on, the first step always on
         int pat = 1;
         const int want = 6 + rnd.nextInt (6);
         for (int tries = 0; tries < 200 && juce::BigInteger (pat).countNumberOfSetBits() < want; ++tries) pat |= 1 << rnd.nextInt (16);
-        snap.grPat[k] = character == 1 ? pat : juce::roundToInt (grP[(size_t) slot][12]->load());
+        snap.grPat[k] = rhythmic ? (character == 12 ? 0xffff : pat) : juce::roundToInt (grP[(size_t) slot][12]->load());
     }
+    snap.swell = character == 6;
+    if (character == 11) // Melt: the Morph of the pair moves with the stick
+        add (pair == 0 ? "morph12" : "morph34", [&rnd] { return 0.15f + 0.85f * rnd.nextFloat(); });
     const int crossAt = add (pair == 0 ? "xmorph12" : "xmorph34", [&rnd] { return rnd.nextFloat(); });
     add (pair == 0 ? "imorph12" : "imorph34", [&rnd] { return rnd.nextFloat() < 0.5f ? 0.1f + 0.5f * rnd.nextFloat() : 0.0f; });
     if (levelAt[0] >= 0 && levelAt[1] >= 0)
@@ -1853,11 +1956,25 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
                 ph += blockSec * mot / motionshapes::periodSeconds (sp);
             ph -= std::floor (ph);
             if (ph < old) for (auto& t : vecTg[(size_t) pair]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f };
-            const auto q = motionshapes::point (shape - 1, (float) ph, vecPh[(size_t) pair].data(), vecTg[(size_t) pair].data());
-            tx += 0.45f * q.x; ty -= 0.45f * q.y; // screen y points down, the stick's y up
+            static const int pick[4] = { 1, 3, 9, 10 }; // figure eight, spiral, Lissajous, flower
+            const auto q = motionshapes::point (pick[juce::jlimit (0, 3, shape - 1)], (float) ph, vecPh[(size_t) pair].data(), vecTg[(size_t) pair].data());
+            // the shape fills the whole round pad; the pad's disc is spread onto the square of the four corners
+            const auto sq = motionshapes::discToSquare (q.x / 0.85f * 0.99f, -q.y / 0.85f * 0.99f);
+            tx = 0.5f + 0.5f * sq.x; ty = 0.5f + 0.5f * sq.y;
+        }
+        if (pair == 1 && relation.load() == 2)
+        {   // Shadow: joystick 2 follows joystick 1 half a second later, mirrored left - right
+            const int d = juce::jlimit (1, (int) shadowX.size() - 1, (int) (0.5 / juce::jmax (1.0e-4, blockSec)));
+            tx = 1.0f - shadowX[(size_t) ((shadowAt - d + (int) shadowX.size()) % (int) shadowX.size())];
+            ty = shadowY[(size_t) ((shadowAt - d + (int) shadowY.size()) % (int) shadowY.size())];
         }
         xs += (juce::jlimit (0.0f, 1.0f, tx) - xs) * k;
         ys += (juce::jlimit (0.0f, 1.0f, ty) - ys) * k;
+        if (pair == 0)
+        {
+            shadowAt = (shadowAt + 1) % (int) shadowX.size();
+            shadowX[(size_t) shadowAt] = xs; shadowY[(size_t) shadowAt] = ys;
+        }
         vecXShown[(size_t) pair].store (xs); vecYShown[(size_t) pair].store (ys);
         const juce::SpinLock::ScopedTryLockType lk (vecLock);
         if (! lk.isLocked()) continue;
@@ -2264,7 +2381,7 @@ void NektarProcessor::newSpace()
         set ("spaz", -180.0f + 360.0f * vecRnd.nextFloat());
         set ("spdist", 0.1f + 0.55f * vecRnd.nextFloat());
         const float r = vecRnd.nextFloat();
-        set ("spmove", r < 0.25f ? 0.0f : (float) (1 + vecRnd.nextInt (3 + motionshapes::count)));
+        set ("spmove", r < 0.25f ? 0.0f : (float) (1 + vecRnd.nextInt (5)));
         set ("spspeed", 0.1f + 0.4f * vecRnd.nextFloat());
     }
 }
@@ -2401,4 +2518,33 @@ double NektarProcessor::spaceAdvance (int slot, int numSamples, float motion)
     ph -= std::floor (ph);
     if (ph < old) for (auto& t : spTg[(size_t) slot]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f };
     return ph;
+}
+
+// Arp: the 16 steps' notes, from the seed that Make chose and the key of the sound: the major pentatonic above a major keynote,
+// the minor pentatonic above a minor one (so the notes stay in the key that Harmony moved the sound to), up to an octave and a
+// half; a sound with no key takes the major pentatonic. Our own rules.
+void NektarProcessor::updateArpSteps()
+{
+    juce::String sig;
+    int tonic[kSlots] {}; bool minor[kSlots] {};
+    for (int sl = 0; sl < kSlots; ++sl)
+    {
+        if (! keyOf (sl, tonic[sl], minor[sl])) minor[sl] = false;
+        sig << juce::roundToInt (grArpP[(size_t) sl]->load()) << (minor[sl] ? "m" : "M") << ";";
+    }
+    if (sig == arpSig) return;
+    arpSig = sig;
+    static const int majP[8] = { 0, 2, 4, 7, 9, 12, 14, 16 }, minP[8] = { 0, 3, 5, 7, 10, 12, 15, 17 };
+    for (int sl = 0; sl < kSlots; ++sl)
+    {
+        const int seed = juce::roundToInt (grArpP[(size_t) sl]->load());
+        juce::Random r (seed * 7919 + 13);
+        int last = 0;
+        for (int st = 0; st < 16; ++st)
+        {   // mostly small steps up and down the scale, sometimes a leap, back home on the first step of each half bar
+            if (st % 8 == 0) last = 0;
+            else last = juce::jlimit (0, 7, last + (r.nextFloat() < 0.2f ? r.nextInt (5) - 2 : r.nextInt (3) - 1));
+            arpSteps[(size_t) sl][(size_t) st] = seed > 0 ? (float) (minor[sl] ? minP[last] : majP[last]) : 0.0f;
+        }
+    }
 }

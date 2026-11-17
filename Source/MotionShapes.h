@@ -14,6 +14,23 @@ namespace motionshapes
         static const double p[speedSteps] { 16.0, 8.0, 4.0, 2.0, 1.0 };
         return p[juce::jlimit (0, speedSteps - 1, speed)];
     }
+    // The round joystick pad and the square of its four corners: the elliptical grid mapping (Fong, "Analytical methods for
+    // squaring the disc", 2015, arXiv:1509.06344 - not checked here). The rim of the disc goes to the edges of the square, so the
+    // four points at 45 degrees reach the four corners. Both in -1..1, y up.
+    inline juce::Point<float> discToSquare (float u, float v)
+    {
+        const float d = u * u + v * v;
+        if (d > 1.0f) { const float s = 1.0f / std::sqrt (d); u *= s; v *= s; }
+        const float r2 = 2.0f * std::sqrt (2.0f);
+        const float a = 2.0f + u * u - v * v, b = 2.0f - u * u + v * v;
+        const float x = 0.5f * std::sqrt (juce::jmax (0.0f, a + r2 * u)) - 0.5f * std::sqrt (juce::jmax (0.0f, a - r2 * u));
+        const float y = 0.5f * std::sqrt (juce::jmax (0.0f, b + r2 * v)) - 0.5f * std::sqrt (juce::jmax (0.0f, b - r2 * v));
+        return { juce::jlimit (-1.0f, 1.0f, x), juce::jlimit (-1.0f, 1.0f, y) };
+    }
+    inline juce::Point<float> squareToDisc (float x, float y)
+    {
+        return { x * std::sqrt (juce::jmax (0.0f, 1.0f - y * y * 0.5f)), y * std::sqrt (juce::jmax (0.0f, 1.0f - x * x * 0.5f)) };
+    }
     inline float tri (float x) { x -= std::floor (x); return 4.0f * std::abs (x - 0.5f) - 1.0f; }
     inline juce::Point<float> poly (const juce::Point<float>* v, int n, float u)
     {

@@ -691,4 +691,11 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
                 if (v.active) v.adsr.noteOff();
     }
     renderTo (total);
+    {   // for the screen: where the first sounding voice reads
+        float ph = -1.0f;
+        const int n = sample != nullptr ? sample->play.getNumSamples() : 0;
+        for (const auto& v : voices)
+            if (v.active && n > 0) { ph = (float) juce::jlimit (0.0, 1.0, v.pos / (double) n); break; }
+        playhead.store (ph);
+    }
 }

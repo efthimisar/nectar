@@ -134,6 +134,9 @@ private:
     };
 
     const juce::AudioBuffer<float>* partnerBuffer (const Params& p) const noexcept;
+public:
+    std::atomic<float> playhead { -1.0f }; // 0..1 of the sound where the first sounding voice reads, -1 = none (for the screen)
+private:
     void noteOn (int note, float velocity, const Params& p);
     void noteOff (int note, const Params& p);
     void renderTape (Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p);

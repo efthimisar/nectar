@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <array>
 #include <cmath>
@@ -26,6 +27,12 @@ public:
         juce::uint32 pattern = 0xffffu; // 16 steps, bit 0 = first step
         float gate = 0.8f;              // rhythmic: grain length as part of one step
         float pitchSemis = 0.0f;
+        const float* stepSemis = nullptr; // rhythmic: a pitch (semitones) for each of the 16 steps (Arp), or none
+        float octaveSemis = 0.0f;         // all grains moved by this (Shimmer: +12)
+        // what the screen shows: where each new grain is read (0..1 of the sound) and which step plays
+        std::atomic<float>* tapPos = nullptr; // 16 places, written in turn
+        std::atomic<int>* tapCount = nullptr;
+        std::atomic<int>* tapStep = nullptr;
         float releaseSec = 0.25f;
         float gain = 1.0f;
         const juce::AudioBuffer<float>* src2 = nullptr; // a second copy of the sound (same length) with other colour settings
@@ -86,7 +93,8 @@ public:
                             pos += (rnd.nextDouble() - 0.5) * p.spray;
                             pos -= std::floor (pos);
                             g.rev = rnd.nextFloat() < p.reverse;
-                            g.inc = ratio * std::pow (2.0, (rnd.nextDouble() - 0.5) * 2.0 * p.jitter / 12.0) * (g.rev ? -1.0 : 1.0);
+                            const double extra = (double) p.octaveSemis + (p.rhythmic && p.stepSemis != nullptr ? (double) p.stepSemis[step & 15] : 0.0);
+                            g.inc = ratio * std::pow (2.0, extra / 12.0) * std::pow (2.0, (rnd.nextDouble() - 0.5) * 2.0 * p.jitter / 12.0) * (g.rev ? -1.0 : 1.0);
                             g.len = sizeS;
                             g.t = 0.0;
                             g.pos = regA + pos * regLen + (g.rev ? sizeS * ratio : 0.0);
@@ -94,9 +102,15 @@ public:
                             g.gl = std::cos (pan * juce::MathConstants<float>::halfPi) * 1.4142f;
                             g.gr = std::sin (pan * juce::MathConstants<float>::halfPi) * 1.4142f;
                             g.on = true;
+                            if (p.tapPos != nullptr && p.tapCount != nullptr)
+                            {
+                                const int k = p.tapCount->fetch_add (1) & 15;
+                                p.tapPos[k].store ((float) ((g.pos) / (double) juce::jmax (1, n)));
+                            }
                             break;
                         }
                 untilNext += interval * (p.rhythmic ? 1.0 : 1.0 + (rnd.nextDouble() - 0.5) * p.jitter);
+                if (p.tapStep != nullptr) p.tapStep->store (p.rhythmic ? (step & 15) : -1);
                 ++step;
             }
             untilNext -= 1.0;
