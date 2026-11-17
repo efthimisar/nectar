@@ -426,6 +426,7 @@ NektarProcessor::NektarProcessor()
     : AudioProcessor (makeBuses()),
       apvts (*this, nullptr, "STATE", createLayout())
 {
+    fxRack.onChange = [this] { setLatencySamples (fxRack.latency()); };
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
@@ -554,6 +555,9 @@ NektarProcessor::NektarProcessor()
 NektarProcessor::~NektarProcessor()
 {
     stopTimer();
+    if (judgeThread != nullptr) judgeThread->stopThread (8000);
+    judgeThread = nullptr;
+    judge = nullptr;
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
@@ -581,6 +585,7 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 
 void NektarProcessor::timerCallback()
 {
+    if (judgeDone.exchange (false)) finishMake();
     applyHarmony();
     updateArpSteps();
     const auto now = juce::Time::getMillisecondCounter();
@@ -743,6 +748,7 @@ bool NektarProcessor::hasRoomTone() const
 
 void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    fxRack.prepare (sampleRate, samplesPerBlock);
     mixer.prepare (sampleRate, samplesPerBlock);
     for (auto& pl : players)
         pl.prepare (sampleRate);
@@ -1138,6 +1144,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     }
 
     // Master out: the last gain, before the safety knee (smoothed over the block)
+    fxRack.process (buffer, midi); // the user's own effects (VST3), on the whole sound
+
     {
         const float g = std::pow (10.0f, masterP->load() / 20.0f);
         if (std::abs (g - 1.0f) > 1.0e-4f || std::abs (lastMaster - 1.0f) > 1.0e-4f)
@@ -1551,13 +1559,29 @@ void NektarProcessor::getStateInformation (juce::MemoryBlock& dest)
             state.setProperty ("samplePath" + juce::String (slot + 1), s->path, nullptr);
     addModToState (state);
     if (auto xml = state.createXml())
+    {
+        xml->addChildElement (fxRack.toXml().release());
         copyXmlToBinary (*xml, dest);
+    }
 }
 
 void NektarProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
     {
+        {   // the effects open on the message thread
+            std::shared_ptr<juce::XmlElement> fx;
+            if (auto* f = xml->getChildByName ("FX")) fx = std::make_shared<juce::XmlElement> (*f);
+            if (juce::MessageManager::existsAndIsCurrentThread())
+                fxRack.fromXml (fx.get());
+            else
+            {
+                auto* self = this;
+                auto alive = std::weak_ptr<int> (aliveToken);
+                juce::MessageManager::callAsync ([self, fx, alive] { if (! alive.expired()) self->fxRack.fromXml (fx.get()); });
+            }
+            xml->deleteAllChildElementsWithTagName ("FX");
+        }
         auto state = juce::ValueTree::fromXml (*xml);
         if (state.isValid())
         {
@@ -1729,6 +1753,11 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         h.push_back (vectorNow (pair));
         if (h.size() > 24) h.erase (h.begin());
     }
+    newVectorCore (pair, seed, parts, nullptr, 8);
+}
+
+void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount)
+{
     juce::Random master (seed != 0 ? seed : vecRnd.nextInt());
     const juce::String chId = pair == 0 ? "character1" : "character2";
     if (pair == 1 && juce::roundToInt (apvts.getRawParameterValue ("relation")->load()) == 1)
@@ -1828,17 +1857,33 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         const auto it = modIdxById.find (id.toStdString());
         if (it == modIdxById.end()) return -1;
         VecEntry e; e.idx = it->second;
+        // keep it musical (after the listening of 18 Nov 2026: "fast, curly, not musical at all"): frequency shift and ring only
+        // where metal is the point (Metal, Bells); no comb filter (its pitch has nothing to do with the key); gentle resonance and grit
+        const bool metallic = character == 2 || character == 9;
+        if ((id.startsWith ("fshift") || id.startsWith ("ring")) && ! metallic && k >= 0)
+        {
+            nowOf (e.idx, e.c);
+            out.push_back (e);
+            return (int) out.size() - 1;
+        }
+        auto musical = [&id, metallic] (float v)
+        {
+            if (id.startsWith ("sfiltype")) return metallic ? (v >= 0.5f && v < 0.75f ? v + 0.25f : v) : v * 0.49f;
+            if (id.startsWith ("sfilres")) return juce::jmin (v, 0.5f);
+            if (id.startsWith ("srcrough")) return juce::jmin (v, 0.25f);
+            return v;
+        };
         if (k < 0 || group < 0)
-            for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, draw());
+            for (auto& c : e.c) c = juce::jlimit (0.0f, 1.0f, musical (draw()));
         else
         {
             float now4[4];
             nowOf (e.idx, now4);
             const float a = amount[k][group];
-            const float centre = draw();
+            const float centre = musical (draw());
             for (int c = 0; c < 4; ++c)
             {
-                const float target = centre + (draw() - centre) * a;
+                const float target = musical (centre + (musical (draw()) - centre) * a);
                 e.c[c] = juce::jlimit (0.0f, 1.0f, now4[c] + a * reach[c] * (target - now4[c]));
             }
         }
@@ -1974,6 +2019,20 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         if (cutMin < 0.3f) v -= 2.0f * (0.3f - cutMin);
         return v;
     };
+    if (draftsOut != nullptr)
+    {   // Make listens: hand over the drafts, the better half by the quick estimate, to be heard and measured
+        std::vector<std::pair<float, VecSnapshot>> all;
+        for (int d = 0; d < draftCount * 2; ++d)
+        {
+            juce::Random rnd (master.nextInt());
+            auto sn = gen (rnd);
+            all.push_back ({ score (sn), std::move (sn) });
+        }
+        std::stable_sort (all.begin(), all.end(), [] (const auto& a, const auto& b) { return a.first > b.first; });
+        draftsOut->clear();
+        for (int d = 0; d < draftCount && d < (int) all.size(); ++d) draftsOut->push_back (std::move (all[(size_t) d].second));
+        return;
+    }
     const int drafts = seed != 0 ? 1 : 8;
     VecSnapshot best;
     float bestScore = -1.0e9f;
@@ -2400,6 +2459,36 @@ juce::String NektarProcessor::makeAll (int target)
     if (target >= 0 && getSample (target) == nullptr) return "Sound " + juce::String (target + 1) + " is empty.";
     if (target >= 0 && slotLock[(size_t) target].load()) return "Sound " + juce::String (target + 1) + " is locked. Unlock it to change it.";
     if (parts[0] == 0 && parts[1] == 0) return "Everything is locked. Unlock something to change it.";
+    if (listenOnMake && ! judging.load())
+    {   // Make listens: drafts now, heard and measured in the background, the best one is put in place when done (finishMake)
+        if (judge == nullptr)
+        {
+            judge = std::make_unique<NektarProcessor>();
+            judge->listenOnMake = false;
+            judge->stopTimer();
+            judge->setPlayConfigDetails (0, 2, hostRate.load() > 0.0 ? hostRate.load() : 48000.0, 512);
+            judge->prepareToPlay (hostRate.load() > 0.0 ? hostRate.load() : 48000.0, 512);
+        }
+        JudgeJob job;
+        job.target = target;
+        for (int pair = 0; pair < 2; ++pair)
+        {
+            job.parts[pair] = parts[pair];
+            if (parts[pair] != 0) newVectorCore (pair, 0, parts[pair], &job.drafts[pair], target >= 0 ? 6 : 4);
+        }
+        {
+            const juce::ScopedLock sl (judgeLock);
+            judgeJob = std::move (job);
+        }
+        judgeDone = false;
+        judging = true;
+        struct T : juce::Thread { NektarProcessor& o; explicit T (NektarProcessor& p) : juce::Thread ("Make listens"), o (p) {} void run() override { o.runJudge(); } };
+        if (judgeThread != nullptr) judgeThread->stopThread (4000);
+        judgeThread = std::make_unique<T> (*this);
+        judgeThread->startThread();
+        return target >= 0 ? "Listening to versions of sound " + juce::String (target + 1) + "..." : juce::String ("Listening to versions of the free sounds...");
+    }
+    if (judging.load()) return "Still listening...";
     for (int pair = 0; pair < 2; ++pair)
     {
         auto& h = vecHistory[(size_t) pair];
@@ -2671,4 +2760,191 @@ float NektarProcessor::resMixNow() const noexcept
     const float own = modded (resMixP);
     const bool chord = juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) == 2;
     return juce::jlimit (0.0f, 1.0f, own + (chord ? chordRing : 0.0f));
+}
+
+// ---- Make listens
+// The drafts of Make are played in a hidden copy of Nektar (same sounds, same settings), one sound alone, the stick in each
+// corner, and two things are measured: loudness (RMS in dB) and brightness (spectral centroid, in octaves). The draft kept is
+// the one whose corners stay near the sound's own loudness and inside the brightness of the other sounds, with no corner
+// that falls silent, and with some difference between its corners. Using the spectral centroid as the main correlate of
+// perceived brightness follows the timbre literature (e.g. Grey & Gordon 1978; McAdams et al. 1995); the limits and weights
+// below are our own choices, to be judged by ear.
+NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y)
+{
+    auto& j = *judge;
+    const int pair = slot / 2;
+    if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1x" : "vec2x")) pa->setValueNotifyingHost (x);
+    if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) pa->setValueNotifyingHost (y);
+    j.setSolo (slot);
+    const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
+    const int bs = 512, warm = (int) (0.25 * sr / bs), meas = (int) (0.75 * sr / bs), tail = (int) (0.3 * sr / bs);
+    juce::AudioBuffer<float> b (2, bs);
+    constexpr int order = 11, n = 1 << order;
+    juce::dsp::FFT fft (order);
+    std::vector<float> win ((size_t) n), work ((size_t) (2 * n));
+    for (int i = 0; i < n; ++i) win[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (n - 1));
+    std::vector<float> mono;
+    mono.reserve ((size_t) (meas * bs));
+    double energy = 0.0; long count = 0;
+    for (int i = 0; i < warm + meas; ++i)
+    {
+        b.clear();
+        juce::MidiBuffer m;
+        if (i == 0) { m.addEvent (juce::MidiMessage::noteOn (1, 60, 0.8f), 0); m.addEvent (juce::MidiMessage::noteOn (1, 67, 0.7f), 0); }
+        j.processBlock (b, m);
+        if (i < warm) continue;
+        for (int k = 0; k < bs; ++k)
+        {
+            const float v = 0.5f * (b.getSample (0, k) + b.getSample (1, k));
+            mono.push_back (v);
+            energy += (double) b.getSample (0, k) * b.getSample (0, k) + (double) b.getSample (1, k) * b.getSample (1, k);
+            count += 2;
+        }
+    }
+    {   // let it go quiet before the next measurement
+        juce::MidiBuffer off;
+        off.addEvent (juce::MidiMessage::noteOff (1, 60), 0); off.addEvent (juce::MidiMessage::noteOff (1, 67), 0);
+        off.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+        for (int i = 0; i < tail; ++i) { b.clear(); juce::MidiBuffer none; j.processBlock (b, i == 0 ? off : none); }
+    }
+    Heard h;
+    h.db = (float) (10.0 * std::log10 (energy / (double) juce::jmax (1L, count) + 1.0e-12));
+    double num = 0.0, den = 0.0, flatSum = 0.0; int frames = 0;
+    for (size_t start = 0; start + (size_t) n <= mono.size(); start += (size_t) n / 2)
+    {
+        std::fill (work.begin(), work.end(), 0.0f);
+        for (int i = 0; i < n; ++i) work[(size_t) i] = mono[start + (size_t) i] * win[(size_t) i];
+        fft.performFrequencyOnlyForwardTransform (work.data());
+        double logSum = 0.0, linSum = 0.0, frameEnergy = 0.0;
+        for (int bin = 1; bin < n / 2; ++bin)
+        {
+            const double p = (double) work[(size_t) bin] * work[(size_t) bin];
+            num += p * (double) bin * sr / n; den += p;
+            logSum += std::log (p + 1.0e-20); linSum += p; frameEnergy += p;
+        }
+        if (frameEnergy > 1.0e-12)
+        {   // spectral flatness: geometric over arithmetic mean of the power spectrum (0 = tonal, 1 = noise; see Madhu 2009)
+            const double bins = (double) (n / 2 - 1);
+            flatSum += std::exp (logSum / bins) / (linSum / bins);
+            ++frames;
+        }
+    }
+    h.bright = den > 1.0e-18 ? (float) std::log2 (juce::jmax (20.0, num / den) / 20.0) : 0.0f;
+    h.flat = frames > 0 ? (float) (flatSum / frames) : 0.0f;
+    return h;
+}
+
+void NektarProcessor::runJudge()
+{
+    auto& j = *judge;
+    JudgeJob job;
+    {
+        const juce::ScopedLock sl (judgeLock);
+        job = judgeJob;
+    }
+    auto exitNow = [this] { return judgeThread != nullptr && judgeThread->threadShouldExit(); };
+    auto settle = [&j, &exitNow]
+    {   // the copy bakes its colours; wait until it is done and has taken the results
+        for (int i = 0; i < 6; ++i) { j.timerCallback(); juce::Thread::sleep (5); }
+        for (int guard = 0; guard < 3000 && (j.cleanPool.getNumJobs() > 0) && ! exitNow(); ++guard) { j.timerCallback(); juce::Thread::sleep (10); }
+        juce::AudioBuffer<float> b (2, 512);
+        for (int i = 0; i < 4; ++i) { j.timerCallback(); b.clear(); juce::MidiBuffer m; j.processBlock (b, m); }
+    };
+    // 1. the copy gets the same settings and sounds as now
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (auto* q = j.apvts.getParameter (rp->paramID)) q->setValueNotifyingHost (rp->getValue());
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (const auto s = getSample (slot); s != nullptr)
+        {
+            auto copy = std::make_shared<Sample> (*s);
+            j.publishSample (copy, slot);
+        }
+    for (int pair = 0; pair < 2; ++pair) j.applyVector (pair, vectorNow (pair));
+    for (int slot = 0; slot < kSlots; ++slot) j.scheduleClean (slot);
+    settle();
+    // 2. how the sounds are now: loudness of each, brightness of the ones that stay as they are
+    const float x0[2] = { j.apvts.getRawParameterValue ("vec1x")->load(), j.apvts.getRawParameterValue ("vec2x")->load() };
+    const float y0[2] = { j.apvts.getRawParameterValue ("vec1y")->load(), j.apvts.getRawParameterValue ("vec2y")->load() };
+    Heard now[kSlots];
+    bool changing[kSlots] = { false, false, false, false };
+    for (int slot = 0; slot < kSlots; ++slot) changing[slot] = ((job.parts[slot / 2] >> (slot % 2)) & 1) != 0 && getSample (slot) != nullptr;
+    float bLo = 1.0e9f, bHi = -1.0e9f;
+    for (int slot = 0; slot < kSlots && ! exitNow(); ++slot)
+    {
+        if (getSample (slot) == nullptr) continue;
+        now[slot] = listen (slot, j.apvts.getParameter (slot < 2 ? "vec1x" : "vec2x")->getValue(), j.apvts.getParameter (slot < 2 ? "vec1y" : "vec2y")->getValue());
+        if (! changing[slot] && now[slot].db > -70.0f) { bLo = juce::jmin (bLo, now[slot].bright); bHi = juce::jmax (bHi, now[slot].bright); }
+    }
+    juce::ignoreUnused (x0, y0);
+    // 3. every draft: each changing sound in its four corners
+    for (int pair = 0; pair < 2 && ! exitNow(); ++pair)
+    {
+        float bestScore = -1.0e9f;
+        for (int d = 0; d < (int) job.drafts[pair].size() && ! exitNow(); ++d)
+        {
+            j.applyVector (pair, job.drafts[pair][(size_t) d]);
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (changing[slot]) j.scheduleClean (slot);
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) j.cleanDirty[(size_t) slot] = false;
+            settle();
+            float sc = 0.0f;
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot)
+            {
+                if (! changing[slot]) continue;
+                const float lo = bHi >= bLo ? bLo - 0.5f : now[slot].bright - 1.0f, hi = bHi >= bLo ? bHi + 0.5f : now[slot].bright + 1.0f;
+                float bMin = 1.0e9f, bMax = -1.0e9f;
+                for (int c = 0; c < 4; ++c)
+                {
+                    const auto h = listen (slot, (c & 1) ? 1.0f : 0.0f, (c & 2) ? 1.0f : 0.0f);
+                    const float dl = std::abs (h.db - now[slot].db);
+                    sc -= juce::jmax (0.0f, dl - 3.0f);                                  // keeps its loudness (within 3 dB)
+                    if (h.db < now[slot].db - 20.0f || h.db < -70.0f) sc -= 10.0f;       // a corner that falls silent
+                    sc -= 2.0f * (h.bright < lo ? lo - h.bright : (h.bright > hi ? h.bright - hi : 0.0f)); // fits the others' brightness
+                    sc -= 8.0f * juce::jmax (0.0f, h.flat - now[slot].flat - 0.05f);   // stays as tonal as it was (not turned into noise)
+                    bMin = juce::jmin (bMin, h.bright); bMax = juce::jmax (bMax, h.bright);
+                }
+                sc += 0.5f * juce::jmin (1.5f, bMax - bMin);                             // some difference between the corners
+            }
+            if (sc > bestScore) { bestScore = sc; job.best[pair] = d; }
+        }
+        j.applyVector (pair, vectorNow (pair)); // the copy goes back to how things are now
+    }
+    {
+        const juce::ScopedLock sl (judgeLock);
+        judgeJob.best[0] = job.best[0];
+        judgeJob.best[1] = job.best[1];
+    }
+    if (! exitNow()) judgeDone = true;
+    else judging = false;
+}
+
+void NektarProcessor::finishMake()
+{
+    JudgeJob job;
+    {
+        const juce::ScopedLock sl (judgeLock);
+        job = judgeJob;
+    }
+    int heard = 0;
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        if (job.parts[pair] == 0 || job.drafts[pair].empty()) continue;
+        auto& h = vecHistory[(size_t) pair];
+        h.push_back (vectorNow (pair));
+        if (h.size() > 24) h.erase (h.begin());
+        applyVector (pair, job.drafts[pair][(size_t) juce::jlimit (0, (int) job.drafts[pair].size() - 1, job.best[pair])]);
+        heard += (int) job.drafts[pair].size();
+    }
+    judging = false;
+    juce::String msg;
+    if (job.target >= 0)
+    {
+        const juce::String sfx = job.target == 0 ? juce::String() : juce::String (job.target + 1);
+        auto pc = [this, &sfx] (const char* id) { return juce::String (juce::roundToInt (100.0f * apvts.getRawParameterValue (id + sfx)->load())); };
+        msg = "Sound " + juce::String (job.target + 1) + " changed (heard " + juce::String (heard) + " versions): rhythm " + pc ("mkrhy") + ", colour " + pc ("mkcol") + ", texture " + pc ("mktex") + ".";
+    }
+    else
+        msg = "Made (heard " + juce::String (heard) + " versions). Hold a key and move the joysticks. Lock what you like, then Make again.";
+    const juce::ScopedLock sl (judgeLock);
+    makeMessage = msg;
 }

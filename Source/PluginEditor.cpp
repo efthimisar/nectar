@@ -33,6 +33,7 @@ const juce::Rectangle<float> kPanelL (10.0f, 68.0f, 340.0f, 392.0f), kPanelC (35
 // centre: the library categories, Random sounds and the relation of the pairs; the Space circle with its oval on the rim
 inline juce::Rectangle<float> libChip (int i) { return { 376.0f + (float) i * 42.0f, 80.0f, 38.0f, 22.0f }; }
 const juce::Rectangle<float> kRandBtn (440.0f, 404.0f, 130.0f, 28.0f);
+inline juce::Rectangle<float> fxSlot (int i) { return { 214.0f + (float) i * 170.0f, 15.0f, 160.0f, 30.0f }; } // the two effects, top bar
 const juce::Point<float> kRelBtn (592.0f, 418.0f);
 const juce::Rectangle<float> kSpaceOval (472.0f, 305.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
 // bottom: the river of the four sounds; the three arcs; Keep, Make, Back; Harmony and Key; the message
@@ -907,6 +908,7 @@ void SpacePad::mouseUp (const juce::MouseEvent&)
 
 NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p), proc (p)
 {
+    proc.fxRack.beforeChange = [this] (int i) { fxWindows[(size_t) juce::jlimit (0, 1, i)] = nullptr; };
     regular = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoRegular_ttf, BinaryData::CarlitoRegular_ttfSize);
     bold    = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoBold_ttf, BinaryData::CarlitoBold_ttfSize);
 
@@ -961,6 +963,8 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
 NektarEditor::~NektarEditor()
 {
     stopTimer();
+    proc.fxRack.beforeChange = nullptr;
+    for (auto& w : fxWindows) w = nullptr;
     proc.removeChangeListener (this);
     releaseAllKeys();
 }
@@ -1143,6 +1147,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 bool NektarEditor::topBarClick (juce::Point<float> p)
 {
     if (juce::Rectangle<float> (130, 15, 64, 30).contains (p)) showPresetMenu();
+    else if (fxSlot (0).contains (p)) fxMenu (0);
+    else if (fxSlot (1).contains (p)) fxMenu (1);
     else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p)) say (proc.saveToLibrary (selectedSlot));
     else return false;
     return true;
@@ -1398,6 +1404,7 @@ void NektarEditor::toggleRoomTone()
 
 void NektarEditor::timerCallback()
 {
+    if (const auto m = proc.takeMakeMessage(); m.isNotEmpty()) { say (m); repaint(); }
     if (resampleArmTicks > 0 && --resampleArmTicks == 0)
     {
         resampleArmedSlot = -1;
@@ -2230,6 +2237,21 @@ void mkIcon (juce::Graphics& g, int i, juce::Point<float> c, juce::Colour col)
 
 void NektarEditor::drawFace (Graphics& g)
 {
+    for (int i = 0; i < 2; ++i)
+    {   // the two effects at the end (VST3): name when one is there, lit when it is on
+        const auto r = fxSlot (i);
+        const auto nm = proc.fxRack.name (i);
+        const bool on = nm.isNotEmpty() && proc.fxRack.isOn (i);
+        g.setColour (Colour (0xff1e1d1b));
+        g.fillRoundedRectangle (r, 15.0f);
+        g.setColour (on ? kAcc : kMuted.withAlpha (nm.isEmpty() ? 0.5f : 0.8f));
+        g.drawRoundedRectangle (r.reduced (0.75f), 15.0f, 1.5f);
+        g.fillEllipse (r.getX() + 11.0f, r.getCentreY() - 3.5f, 7.0f, 7.0f);
+        g.setColour (nm.isEmpty() ? kMuted : (on ? kLight : kMuted));
+        g.setFont (font (regular, 13));
+        g.drawFittedText (nm.isEmpty() ? juce::String ("+ FX ") + juce::String (i + 1) : nm, r.withTrimmedLeft (26.0f).withTrimmedRight (10.0f).toNearestInt(),
+                          juce::Justification::centredLeft, 1, 0.8f);
+    }
     auto button = [&] (juce::Rectangle<float> r, bool usable, bool strong)
     {
         g.setColour (strong && usable ? kAcc : Colour (0xff2f2d2b));
@@ -3006,4 +3028,86 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
         hoverSaid = name;
         if (name.isNotEmpty()) { say (name); repaint(); }
     }
+}
+
+// ---- the effects at the end (VST3)
+void NektarEditor::openFxWindow (int i)
+{
+    auto* inst = proc.fxRack.instance (i);
+    if (inst == nullptr) return;
+    auto& w = fxWindows[(size_t) i];
+    if (w == nullptr || w->getContentComponent() == nullptr)
+    {
+        w = std::make_unique<FxWindow> (inst->getName());
+        if (auto* ed = inst->createEditorIfNeeded()) w->setContentOwned (ed, true);
+        else { auto* g = new juce::GenericAudioProcessorEditor (*inst); g->setSize (420, 360); w->setContentOwned (g, true); }
+        w->setUsingNativeTitleBar (true);
+        w->setResizable (false, false);
+        w->centreWithSize (w->getWidth(), w->getHeight());
+    }
+    w->setVisible (true);
+    w->toFront (true);
+}
+
+void NektarEditor::fxMenu (int i)
+{
+    juce::PopupMenu m;
+    const bool has = proc.fxRack.instance (i) != nullptr;
+    const auto list = proc.fxRack.effects();
+    juce::PopupMenu choose;
+    {
+        juce::String maker;
+        juce::PopupMenu sub;
+        for (int k = 0; k < list.size(); ++k)
+        {
+            const auto mk = list[k].manufacturerName.isEmpty() ? juce::String ("Other") : list[k].manufacturerName;
+            if (mk != maker && maker.isNotEmpty()) { choose.addSubMenu (maker, sub); sub = {}; }
+            maker = mk;
+            sub.addItem (1000 + k, list[k].name);
+        }
+        if (maker.isNotEmpty()) choose.addSubMenu (maker, sub);
+    }
+    if (has)
+    {
+        m.addItem (1, "Open its window");
+        m.addItem (2, "On", true, proc.fxRack.isOn (i));
+        m.addSubMenu ("Replace with", choose, list.size() > 0);
+        m.addItem (3, "Remove");
+    }
+    else if (list.size() > 0)
+    {
+        m.addSectionHeader ("Effect " + juce::String (i + 1) + " (on the whole sound, at the end)");
+        for (juce::PopupMenu::MenuItemIterator it (choose); it.next();) m.addItem (it.getItem());
+    }
+    else
+        m.addItem (-1, proc.fxRack.scanning() ? "Looking for effects..." : "No effects found yet", false);
+    m.addSeparator();
+    m.addItem (4, proc.fxRack.scanning() ? "Looking for effects..." : "Look for effects (VST3)", ! proc.fxRack.scanning());
+    juce::Component::SafePointer<NektarEditor> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal ((fxSlot (i) * ((float) getWidth() / kDW)).toNearestInt())),
+        [safe, i, list] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            auto& ed = *safe;
+            if (r == 1) ed.openFxWindow (i);
+            else if (r == 2) ed.proc.fxRack.setOn (i, ! ed.proc.fxRack.isOn (i));
+            else if (r == 3) { ed.fxWindows[(size_t) i] = nullptr; ed.proc.fxRack.load (i, nullptr); ed.say ("Effect " + juce::String (i + 1) + " removed."); }
+            else if (r == 4)
+            {
+                ed.say ("Looking for VST3 effects on this computer...");
+                ed.proc.fxRack.scan ([safe]
+                {
+                    if (safe != nullptr) { safe->say (juce::String (safe->proc.fxRack.effects().size()) + " effects found. Click + FX to choose one."); safe->repaint(); }
+                });
+            }
+            else if (r >= 1000 && r - 1000 < list.size())
+            {
+                ed.fxWindows[(size_t) i] = nullptr;
+                const auto d = list[r - 1000];
+                const auto err = ed.proc.fxRack.load (i, &d);
+                ed.say (err.isNotEmpty() ? err : d.name + " is on the whole sound. Click it to open its window.");
+                if (err.isEmpty()) ed.openFxWindow (i);
+            }
+            ed.repaint();
+        });
 }

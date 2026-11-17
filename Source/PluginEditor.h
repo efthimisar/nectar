@@ -163,6 +163,14 @@ private:
     void toggleRoomTone();
     void toggleResample();
     void showPresetMenu();
+    void fxMenu (int i);                 // the menu of one effect slot in the top bar
+    void openFxWindow (int i);
+    struct FxWindow : juce::DocumentWindow
+    {
+        FxWindow (const juce::String& t) : juce::DocumentWindow (t, juce::Colours::black, juce::DocumentWindow::closeButton) {}
+        void closeButtonPressed() override { setVisible (false); }
+    };
+    std::array<std::unique_ptr<FxWindow>, 2> fxWindows;
     void say (const juce::String& text);
     void renderDesign (juce::Graphics&);
     void addGrain (juce::Image&);

@@ -15,6 +15,7 @@
 #include "MacroTone.h"
 #include "MotionShapes.h"
 #include "LibraryIndex.h"
+#include "FxRack.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -124,13 +125,18 @@ public:
     std::array<std::atomic<float>, 4> slotLevel {};
     std::atomic<float> mixLevel { 0.0f }, beatNow { 0.0f };
     std::atomic<bool> beatOn { false };
+    std::shared_ptr<int> aliveToken = std::make_shared<int> (0); // async work checks that Nektar is still there
+    FxRack fxRack;                                     // two VST3 effects at the end, on the whole sound
     std::atomic<float> outPeak { 0.0f };               // the editor reads and lowers it
     float chordRing = 0.3f;                            // how much the strings ring with Harmony -> Chord (our own choice)
     float resMixNow() const noexcept;
     double hostBpmShown() const { return hostBpmAtomic.load(); }
     std::atomic<double> hostBpmAtomic { 0.0 };          // 0 = the host gives no tempo
     float playheadOf (int slot) const { return players[(size_t) slot].playhead.load(); }
-    bool baking() { return cleanPool.getNumJobs() > 0; }
+    bool baking() { return cleanPool.getNumJobs() > 0 || judging.load(); }
+    // Make listens: the versions are played in a hidden copy of Nektar and measured before one is chosen
+    juce::String takeMakeMessage() { const juce::ScopedLock sl (judgeLock); auto m = makeMessage; makeMessage = {}; return m; }
+    bool listenOnMake = true;   // off in quick tests
     float knobNow01 (const juce::String& id) const   // a knob as the joystick has it now (0..1 of its range)
     {
         const auto it = modIdxById.find (id.toStdString());
@@ -213,6 +219,19 @@ private:
     juce::SpinLock vecLock;
     struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; int grOct[2] = { 0, 0 }; int grArp[2] = { 0, 0 }; bool swell = false; };
     std::array<std::vector<VecSnapshot>, 2> vecHistory; // message thread only
+    // ---- Make listens (see PluginProcessor.cpp, "Make listens")
+    struct Heard { float db = -100.0f, bright = 0.0f, flat = 0.0f; }; // loudness (dB) and brightness (spectral centroid, octaves above 20 Hz)
+    struct JudgeJob { std::vector<VecSnapshot> drafts[2]; int parts[2] = { 0, 0 }; int target = -1; std::vector<VecSnapshot> chosen; int best[2] = { 0, 0 }; };
+    std::unique_ptr<NektarProcessor> judge;              // the hidden copy (made on the message thread, used by the judge thread)
+    std::unique_ptr<juce::Thread> judgeThread;
+    std::atomic<bool> judging { false }, judgeDone { false };
+    juce::CriticalSection judgeLock;
+    JudgeJob judgeJob;
+    juce::String makeMessage;
+    void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount);
+    void runJudge();                                     // judge thread
+    Heard listen (int slot, float x, float y);           // judge thread, on the copy: one sound alone, the stick at x, y
+    void finishMake();                                   // message thread
     VecSnapshot vectorNow (int pair);
     void applyVector (int pair, const VecSnapshot& snap);
     juce::Random vecRnd;
