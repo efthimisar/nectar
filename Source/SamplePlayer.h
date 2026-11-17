@@ -11,6 +11,8 @@
 #include "MorphVoice.h"
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
+#include "Tonality.h"
+
 struct Sample
 {
     juce::AudioBuffer<float> data; // as read from the file
@@ -43,6 +45,8 @@ struct Sample
 
     std::shared_ptr<const SineModel> model; // sine-wave description of `play` (made in the background; may be missing)
     double modelRate = 0.0;                  // host rate the model was made for
+    Tonality tonality;                       // key of the sound (from the model)
+    bool keyKnown = false;                   // tonality has been worked out
 };
 
 namespace signalsmith { namespace stretch { template<typename, class> struct SignalsmithStretch; } }

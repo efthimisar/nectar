@@ -91,6 +91,8 @@ public:
     bool backAll();                  // the corners before the last Make
     juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked
     void newSpace();                 // a random place and movement for each of the four sounds
+    juce::String keyText (int slot) const;  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
+    bool keyOf (int slot, int& tonic, bool& minor) const;
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
     int solo() const { return soloSlot.load(); }
     float spaceAzNow (int slot) const { return spAzShown[(size_t) slot].load(); }     // where the sound is right now (with its movement)
@@ -233,6 +235,9 @@ private:
     std::array<std::atomic<bool>, 2> blendLock {};
     std::atomic<int> soloSlot { -1 };
     void clearSlotVector (int slot);
+    void applyHarmony();
+    juce::String harmonySig;
+    std::array<float, kSlots> harmonyShift {};
     std::array<std::atomic<float>*, 2> imorphP {};
     std::array<std::atomic<float>*, 2> xmorphP {};
     Resonator resonator, resonatorB;

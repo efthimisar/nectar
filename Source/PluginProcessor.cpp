@@ -95,6 +95,8 @@ public:
                 a /= (double) juce::jmax (1, s->play.getNumChannels()); b /= 2.0;
                 s->modelGain = b > 1.0e-20 ? (float) juce::jlimit (0.25, 4.0, std::sqrt (a / b)) : 1.0f;
             }
+            s->tonality = Tonality::of (*s->model);
+            s->keyKnown = true;
         }
         clearMove (*s);
         if (grains && mv.n > 1)
@@ -164,6 +166,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pitch" + sfx, 1 }, "Pitch" + nm,
                                                              NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("st")));
+        {   // the key of the sound: 0 = as found by the analysis, 1 = no key (left as it is), 2.. = C major, C minor, C# major ...
+            juce::StringArray keys { "Auto", "No key" };
+            for (int k = 0; k < 12; ++k) { keys.add (juce::String (Tonality::noteName (k)) + " major"); keys.add (juce::String (Tonality::noteName (k)) + " minor"); }
+            l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "skey" + sfx, 1 }, "Key of sound" + nm, keys, 0));
+        }
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail" + sfx, 1 }, "Tail" + nm,
                                                              NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("s")));
@@ -350,6 +357,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
                                                           juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
+    // Harmony: the four sounds as recorded, all moved into one key, or their keynotes on the notes of one chord
+    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "harmony", 1 }, "Harmony",
+                                                          juce::StringArray { "As is", "One key", "Chord" }, 1));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo width (0 = mono, middle = as it is, 1 = wide)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
@@ -524,6 +534,7 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 
 void NektarProcessor::timerCallback()
 {
+    applyHarmony();
     const auto now = juce::Time::getMillisecondCounter();
     for (int slot = 0; slot < kSlots; ++slot)
         if (cleanDirty[(size_t) slot].load() && now - cleanChangedAt[(size_t) slot].load() >= 250) // wait until the knob stops moving
@@ -2163,6 +2174,7 @@ juce::String NektarProcessor::randomSounds()
             const auto f = files[vecRnd.nextInt (files.size())];
             if (used.contains (f.getFileName()) && used.size() < files.size()) continue;
             if (loadSample (f, slot).isNotEmpty()) continue;
+            if (auto* pk = apvts.getParameter (slot == 0 ? juce::String ("skey") : "skey" + juce::String (slot + 1))) pk->setValueNotifyingHost (0.0f);
             used.add (f.getFileName());
             clearSlotVector (slot);
             ++changed;
@@ -2185,4 +2197,80 @@ void NektarProcessor::newSpace()
         set ("spmove", r < 0.4f ? 0.0f : (r < 0.6f ? 1.0f : (r < 0.8f ? 2.0f : 3.0f)));
         set ("spspeed", 0.1f + 0.4f * vecRnd.nextFloat());
     }
+}
+
+// ---- Harmony: the key of each sound and the shift that brings it into the chosen key or chord
+// Our own design on top of the key finding (Tonality.h): each sound is moved by at most half an octave up or down.
+// One key: a major sound is moved so its keynote is the Key; a minor sound so that its relative major is the Key (the
+// same seven notes). Chord: the keynotes of the sounds with a key, in circle order, go to the root, fifth, third and
+// root of a chord on the Key; the chord is minor when the first of them is minor.
+bool NektarProcessor::keyOf (int slot, int& tonic, bool& minor) const
+{
+    const auto s = getSample (slot);
+    if (s == nullptr) return false;
+    const int choice = juce::roundToInt (apvts.getRawParameterValue (slot == 0 ? juce::String ("skey") : "skey" + juce::String (slot + 1))->load());
+    if (choice == 1) return false;
+    if (choice >= 2) { tonic = (choice - 2) / 2; minor = ((choice - 2) % 2) == 1; return true; }
+    if (! s->keyKnown || ! s->tonality.tonal) return false;
+    tonic = s->tonality.tonic; minor = s->tonality.minor;
+    return true;
+}
+
+void NektarProcessor::applyHarmony()
+{
+    const int mode = juce::roundToInt (apvts.getRawParameterValue ("harmony")->load());
+    const int key = juce::roundToInt (apvts.getRawParameterValue ("key")->load());
+    int tonic[kSlots] {}; bool minor[kSlots] {}, has[kSlots] {};
+    juce::String sig;
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        has[slot] = keyOf (slot, tonic[slot], minor[slot]);
+        const auto s = getSample (slot);
+        sig << (s != nullptr ? s->serial : -1) << (s != nullptr && s->keyKnown ? "k" : "") << ":" << (has[slot] ? tonic[slot] * 2 + (minor[slot] ? 1 : 0) : -1) << ";";
+    }
+    sig << mode << "/" << key;
+    if (sig == harmonySig) return;
+    const bool waiting = [&] { for (int slot = 0; slot < kSlots; ++slot) { const auto s = getSample (slot); if (s != nullptr && ! s->keyKnown) return true; } return false; }();
+    harmonySig = sig;
+    auto wrap = [] (int d) { d = ((d % 12) + 12) % 12; return d > 5 ? d - 12 : d; };
+    int order = 0;
+    const int chordDeg[4] = { 0, 7, 4, 0 };
+    bool chordMinor = false;
+    for (int slot = 0; slot < kSlots; ++slot) if (has[slot]) { chordMinor = minor[slot]; break; }
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const auto s = getSample (slot);
+        if (s == nullptr || (! s->keyKnown && waiting && mode != 0)) continue;
+        float shift = 0.0f;
+        if (mode == 1 && has[slot])
+            shift = (float) wrap (key - (minor[slot] ? tonic[slot] + 3 : tonic[slot]));
+        else if (mode == 2 && has[slot])
+        {
+            int deg = chordDeg[juce::jmin (order, 3)];
+            if (deg == 4 && chordMinor) deg = 3;
+            shift = (float) wrap (key + deg - tonic[slot]);
+            ++order;
+        }
+        else if (mode != 0 && ! has[slot])
+            continue; // a sound without a key is left as it is
+        harmonyShift[(size_t) slot] = shift;
+        if (auto* pa = apvts.getParameter (slot == 0 ? juce::String ("pitch") : "pitch" + juce::String (slot + 1)))
+            pa->setValueNotifyingHost (pa->convertTo0to1 (shift));
+    }
+    sendChangeMessage();
+}
+
+juce::String NektarProcessor::keyText (int slot) const
+{
+    const auto s = getSample (slot);
+    if (s == nullptr) return {};
+    if (! s->keyKnown && juce::roundToInt (apvts.getRawParameterValue (slot == 0 ? juce::String ("skey") : "skey" + juce::String (slot + 1))->load()) == 0)
+        return "...";
+    int t = 0; bool m = false;
+    if (! keyOf (slot, t, m)) return "no key";
+    juce::String r = juce::String (Tonality::noteName (t)) + (m ? " minor" : " major");
+    const float sh = harmonyShift[(size_t) slot];
+    if (juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) != 0 && std::abs (sh) > 0.01f)
+        r << " " << (sh > 0 ? "+" : "") << juce::roundToInt (sh);
+    return r;
 }

@@ -31,6 +31,9 @@ const juce::Rectangle<float> kRandBtn (28.0f, 420.0f, 160.0f, 40.0f), kMakeBtn (
                              kBackBtn (632.0f, 420.0f, 86.0f, 40.0f), kKeepBtn (880.0f, 420.0f, 132.0f, 40.0f);
 const juce::Rectangle<float> kSpkBtn (788.0f, 582.0f, 116.0f, 30.0f), kNewSpaceBtn (912.0f, 582.0f, 100.0f, 30.0f);
 inline juce::Rectangle<float> charChip (int i) { return { 28.0f + (float) i * 100.0f, 498.0f, 92.0f, 32.0f }; }
+inline juce::Rectangle<float> harmChip (int i) { const float x[3] = { 612.0f, 674.0f, 750.0f }, w[3] = { 58.0f, 72.0f, 56.0f }; return { x[i], 498.0f, w[i], 32.0f }; }
+const juce::Rectangle<float> kKeyBtn (810.0f, 498.0f, 74.0f, 32.0f);
+inline juce::Rectangle<float> keyLabel (int slot) { return { kSlotCx[slot] - 42.0f, 392.0f, 84.0f, 14.0f }; }
 inline juce::Rectangle<float> moveChip (int i) { return { 340.0f + (float) i * 90.0f, 582.0f, 84.0f, 30.0f }; }
 // small round buttons on each sound circle: lock (top right) and solo (top left); between the two circles of a pair: the blend lock
 inline juce::Point<float> lockAt (int slot) { return { kSlotCx[slot] + 24.0f, kSlotCy[slot] - 26.0f }; }
@@ -895,6 +898,48 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
             repaint();
             return;
         }
+        for (int i = 0; i < 3; ++i)
+            if (harmChip (i).contains (p))
+            {
+                if (auto* pa = proc.apvts.getParameter ("harmony")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) i));
+                const char* says[3] = { "Each sound plays as it was recorded.", "All sounds with a key are moved into one key: the Key button.",
+                                        "The keynotes of the sounds go to the notes of one chord on the Key button." };
+                say (says[i]);
+                repaint();
+                return;
+            }
+        if (kKeyBtn.contains (p))
+        {
+            if (auto* pa = proc.apvts.getParameter ("key"))
+            {
+                const int cur = juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load());
+                pa->setValueNotifyingHost (pa->convertTo0to1 ((float) (((cur + (e.mods.isShiftDown() ? -1 : 1)) % 12 + 12) % 12)));
+            }
+            repaint();
+            return;
+        }
+        for (int slot = 0; slot < 4; ++slot)
+            if (proc.getSample (slot) != nullptr && keyLabel (slot).expanded (4.0f).contains (p))
+            {   // the key of this sound, when the analysis got it wrong
+                juce::PopupMenu m;
+                const int cur = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("skey", slot))->load());
+                juce::String found = "Found by Nektar";
+                if (const auto smp = proc.getSample (slot); smp != nullptr && smp->keyKnown)
+                    found << ": " << (smp->tonality.tonal ? juce::String (Tonality::noteName (smp->tonality.tonic)) + (smp->tonality.minor ? " minor" : " major") : juce::String ("no key"));
+                m.addItem (1, found, true, cur == 0);
+                m.addItem (2, "No key (leave as it is)", true, cur == 1);
+                m.addSeparator();
+                for (int k = 0; k < 24; ++k)
+                    m.addItem (3 + k, juce::String (Tonality::noteName (k / 2)) + (k % 2 ? " minor" : " major"), true, cur == 2 + k);
+                juce::Component::SafePointer<NektarEditor> safe (this);
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, slot] (int r)
+                {
+                    if (safe == nullptr || r <= 0) return;
+                    if (auto* pk = safe->proc.apvts.getParameter (safe->slotId ("skey", slot))) pk->setValueNotifyingHost (pk->convertTo0to1 ((float) (r - 1)));
+                    safe->repaint();
+                });
+                return;
+            }
         if (kNewSpaceBtn.contains (p)) { proc.newSpace(); say ("A new place and movement for each sound."); repaint(); return; }
         for (int i = 0; i < 5; ++i)
             if (charChip (i).contains (p))
@@ -1517,6 +1562,28 @@ void NektarEditor::drawOverlay (Graphics& g)
             g.drawText (ends[i][1], juce::Rectangle<float> (cx + 24.0f, 612.0f, 36.0f, 14.0f), juce::Justification::centredLeft);
         }
 
+        // Harmony and its Key; under every circle the key of that sound (click to correct it)
+        const char* harm[3] = { "As is", "One key", "Chord" };
+        const int hm = juce::roundToInt (proc.apvts.getRawParameterValue ("harmony")->load());
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto r = harmChip (i);
+            g.setColour (i == hm ? kAcc : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 16);
+            g.setColour (i == hm ? kDark : kLight);
+            g.setFont (font (regular, 14));
+            g.drawText (harm[i], r, juce::Justification::centred);
+        }
+        button (kKeyBtn, juce::String ("Key ") + Tonality::noteName (juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load())), hm != 0, false, 14);
+        g.setFont (font (regular, 12));
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            const auto t = proc.keyText (slot);
+            if (t.isEmpty()) continue;
+            g.setColour (t == "no key" || t == "..." ? kMuted.withAlpha (0.6f) : kWada[slot % 5]);
+            g.drawText (t, keyLabel (slot), juce::Justification::centred);
+        }
+
         // Space: the movement of the chosen sound, headphones or speakers, a new placement
         g.setColour (kMuted);
         g.setFont (font (regular, 14));
@@ -1654,6 +1721,7 @@ void NektarEditor::chooseFile (int slot)
 void NektarEditor::loadFile (const juce::File& f, int slot)
 {
     message = proc.loadSample (f, slot);
+    if (auto* pk = proc.apvts.getParameter (slotId ("skey", slot))) pk->setValueNotifyingHost (0.0f); // a new sound: its key is found again
     cache = juce::Image();
     repaint();
 }
