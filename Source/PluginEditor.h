@@ -219,6 +219,7 @@ private:
     void faceClick (const juce::MouseEvent& e, juce::Point<float> p);
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    bool recAll = false; // all four chosen: Rec and Resample make a new sound in the library
     int partDrag = -1;                  // the sample screen: the slot whose part is being dragged
     float partFrom = 0.0f;
     std::vector<float> scrPeaks;        // the sample screen's waveform (whole file), and which sound it is

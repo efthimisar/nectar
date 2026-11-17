@@ -1228,7 +1228,7 @@ void NektarProcessor::startRecording (int slot)
     if (! recordingAllowed || recState.load() == 1)
         return;
     recSource.store (0);
-    recSlot.store (juce::jlimit (-1, kSlots - 1, slot));
+    recSlot.store (juce::jlimit (kToLibrary, kSlots - 1, slot));
     recChannels.store (juce::jlimit (1, 2, getTotalNumInputChannels()));
     recBuffer.clear();
     recPos.store (0);
@@ -1241,7 +1241,12 @@ void NektarProcessor::startResample (int slot)
         return;
     recSource.store (1);
     rsSilent.store (-1);
-    recSlot.store (juce::jlimit (0, kSlots - 1, slot));
+    recSlot.store (juce::jlimit (kToLibrary, kSlots - 1, slot));
+    if (slot >= 0)
+    {   // one sound: only it is heard (and recorded) until the take ends
+        soloBeforeResample = soloSlot.load();
+        soloSlot.store (slot);
+    }
     recChannels.store (2);
     recBuffer.clear();
     recPos.store (0);
@@ -1261,7 +1266,34 @@ juce::String NektarProcessor::stopRecording()
     recState.store (0);
     const int n = recPos.load();
     const int ch = recChannels.load();
-    if (recSlot.load() < 0) // room tone: only the noise profile is kept
+    const bool wasResample = recSource.load() == 1;
+    const int target = recSlot.load();
+    if (soloBeforeResample != -2) { soloSlot.store (soloBeforeResample); soloBeforeResample = -2; }
+    if (target == kToLibrary)
+    {   // a new sound in the library: Recordings (microphone) or Resampled (the whole Nectar)
+        if (n < (int) (hostRate.load() * 0.1))
+            return {};
+        juce::AudioBuffer<float> take (ch, n);
+        for (int c = 0; c < ch; ++c)
+            take.copyFrom (c, 0, recBuffer, c, 0, n);
+        const auto dir = getLibraryFolder().getChildFile (wasResample ? "Resampled" : "Recordings");
+        if (! dir.createDirectory())
+            return "Could not create the library folder.";
+        const auto file = dir.getChildFile (juce::String (wasResample ? "Resample " : "Rec ") + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S") + ".wav").getNonexistentSibling();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::FileOutputStream> stream (file.createOutputStream());
+        if (stream == nullptr)
+            return "Could not write the file.";
+        std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.get(), hostRate.load(), (unsigned int) ch, 24, {}, 0));
+        if (writer == nullptr)
+            return "Could not write the file.";
+        stream.release();
+        writer->writeFromAudioSampleBuffer (take, 0, n);
+        writer.reset();
+        rescanLibrary();
+        return "New sound in the library: " + dir.getFileName() + " / " + file.getFileNameWithoutExtension();
+    }
+    if (target < 0) // room tone: only the noise profile is kept
     {
         if (n < (int) (hostRate.load() * 0.5))
             return "Room tone is too short (0.5 s or more).";
@@ -1286,8 +1318,19 @@ juce::String NektarProcessor::stopRecording()
     s->data.setSize (ch, n);
     for (int c = 0; c < ch; ++c)
         s->data.copyFrom (c, 0, recBuffer, c, 0, n);
-    publishSample (s, recSlot.load());
-    return {};
+    publishSample (s, target);
+    if (! wasResample)
+        return {};
+    {   // the changes are now inside the sound: its own processing goes back to neutral, so nothing is heard twice
+        const juce::String sfx = target == 0 ? juce::String() : juce::String (target + 1);
+        for (auto* id : { "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev",
+                          "grspread", "grgate", "grpat", "groct", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize",
+                          "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev",
+                          "noise", "hum", "lowcut" })
+            if (auto* p = apvts.getParameter (juce::String (id) + sfx))
+                p->setValueNotifyingHost (p->getDefaultValue());
+    }
+    return "Sound " + juce::String (target + 1) + " now holds its changes. Press Make for new corners.";
 }
 
 juce::File NektarProcessor::getLibraryFolder()

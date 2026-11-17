@@ -55,11 +55,13 @@ public:
     // Recording from the microphone (standalone app only).
     static constexpr double kMaxRecordSeconds = 60.0;
     bool canRecord() const { return recordingAllowed; }
-    void startRecording (int slot);  // the recording goes into this slot when it stops (-1 = room tone)
+    static constexpr int kToLibrary = -2; // a recording or resample that becomes a new sound in the library
+    void startRecording (int slot);  // the recording goes into this slot when it stops (-1 = room tone, kToLibrary = a new sound in the library)
     juce::String stopRecording();    // message thread: turns what was recorded into the sound of that slot; returns a message, if any
     bool isRecordingRoomTone() const { return recState.load() == 1 && recSlot.load() < 0; }
     bool hasRoomTone() const;
     bool isRecording() const { return recState.load() == 1; }
+    int recordingSlot() const { return recSlot.load(); }
     // Resample: records the output of the synth itself (all slots, resonator, tilt) into a slot. Works in the plugin too.
     void startResample (int slot);
     bool isResampling() const { return recState.load() == 1 && recSource.load() == 1; }
@@ -282,6 +284,7 @@ private:
     std::array<std::atomic<bool>, kSlots> slotLock {};
     std::array<std::atomic<bool>, 2> blendLock {};
     std::atomic<int> soloSlot { -1 };
+    int soloBeforeResample = -2; // the solo before a one-sound resample (-2 = none running)
     void clearSlotVector (int slot);
     void applyHarmony();
     juce::String harmonySig;
