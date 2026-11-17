@@ -11,7 +11,8 @@
 //     alpha(phi) = 1 + amin/2 + (1 - amin/2) cos(phi/phimin * 180 deg), amin = 0.1, phimin = 150 deg, ears at +-100 deg.
 //     (Eqs. 2-5 and alpha_min = 0.1, phimin = 150 deg checked against the paper's text, 15 Nov 2026)
 // Our own additions (no published source): darker sound behind the listener, distance = level + high-frequency loss,
-// and the speaker mode (plain pan from the azimuth, no time or head-shadow cues, which would only colour the sound on speakers).
+// and the speaker mode (plain pan from the azimuth, no time or head-shadow cues, which would only colour the sound on speakers;
+// distance there = level, high-frequency loss and a narrower sound; behind = darker, as on headphones).
 class Spatializer
 {
 public:
@@ -25,7 +26,7 @@ public:
         for (auto& v : line) v = 0.0f;
         wpos = 0;
         for (auto& e : ear) e = Ear();
-        lpState = 0.0f;
+        lpState = 0.0f; lpSide = 0.0f;
         prevDelay = { 0.0f, 0.0f };
         prevAz = -1000.0f;
     }
@@ -40,7 +41,9 @@ public:
     };
 
     // in: mono, n samples. outL / outR: the placed signal (overwritten).
-    void process (const float* in, float* outL, float* outR, int n, const Params& p)
+    // side: (left - right) / 2 of a stereo sound, or nullptr. It is added around the placed point (our own addition), so a wide
+    // sound keeps its width; it gets the same distance / back treatment, but no direction cues.
+    void process (const float* in, const float* side, float* outL, float* outR, int n, const Params& p)
     {
         constexpr float pi = juce::MathConstants<float>::pi;
         constexpr float a = 0.0875f, c = 343.0f;
@@ -64,12 +67,16 @@ public:
             const float pan = std::sin (th); // -1 left .. 1 right
             const float t = (pan + 1.0f) * 0.25f * pi;
             const float gl = std::sqrt (2.0f) * std::cos (t), gr = std::sqrt (2.0f) * std::sin (t);
+            // on speakers a far sound is also narrower (its own width shrinks to a third at the far edge; our own choice)
+            const float narrow = 1.0f - 0.67f * juce::jlimit (0.0f, 1.0f, p.dist) * juce::jlimit (0.0f, 1.0f, p.far);
             for (int i = 0; i < n; ++i)
             {
                 lpState += lpA * (in[i] - lpState);
                 const float y = lpState * gDist * gBack;
-                outL[i] = y * gl;
-                outR[i] = y * gr;
+                float sd = 0.0f;
+                if (side != nullptr) { lpSide += lpA * (side[i] - lpSide); sd = lpSide * gDist * gBack * narrow; }
+                outL[i] = y * gl + sd;
+                outR[i] = y * gr - sd;
             }
             prevAz = p.azDeg;
             return;
@@ -114,6 +121,12 @@ public:
                 s.z = s.b1 * x - s.a1 * y;
                 (e == 0 ? outL : outR)[i] = y;
             }
+            if (side != nullptr)
+            {
+                lpSide += lpA * (side[i] - lpSide);
+                outL[i] += lpSide * g0;
+                outR[i] -= lpSide * g0;
+            }
             wpos = (wpos + 1) % kLine;
         }
         prevDelay = dTarget;
@@ -128,7 +141,7 @@ private:
     std::array<float, kLine> line {};
     int wpos = 0;
     std::array<Ear, 2> ear;
-    float lpState = 0.0f;
+    float lpState = 0.0f, lpSide = 0.0f;
     std::array<float, 2> prevDelay { 0.0f, 0.0f };
     float prevAz = -1000.0f;
 };

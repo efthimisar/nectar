@@ -84,6 +84,8 @@ class SpacePad : public juce::Component
 {
 public:
     explicit SpacePad (NektarProcessor& p) : proc (p) { setMouseCursor (juce::MouseCursor::DraggingHandCursor); }
+    std::function<void (int)> onPick;   // a dot was clicked (its sound becomes the one the Space controls show)
+    int chosen = 0;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -161,6 +163,8 @@ private:
     std::set<int> heldNotes;
     int octaveShift = 0;
     int selectedSlot = 0;
+    int spaceSlot = 0;                  // main screen: the sound whose movement the Space chips and Speed knob show
+    juce::String spaceSpeedId;          // kept alive for the Speed knob's parameter id
     std::set<int> selection { 0 };
     int fixedKnobs = 0;                 // knobs that are always there (top bar); the rest belong to the panel
     std::map<juce::String, float> lastPanel; // last seen values of the first selected sample (to copy a change to the others)

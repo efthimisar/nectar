@@ -25,15 +25,18 @@ const juce::Rectangle<float> kScreen (24.0f, 450.0f, 992.0f, 62.0f);
 const juce::Rectangle<float> kModeBtn[3] = { { 150.0f, 414.0f, 54.0f, 26.0f }, { 208.0f, 414.0f, 78.0f, 26.0f }, { 290.0f, 414.0f, 84.0f, 26.0f } };
 const juce::Rectangle<float> kScaleBtn[2] = { { 386.0f, 414.0f, 170.0f, 26.0f }, { 562.0f, 414.0f, 74.0f, 26.0f } };
 const juce::Rectangle<float> kFaceBtn (644.0f, 412.0f, 94.0f, 28.0f);      // details view: back to the joysticks
-const juce::Rectangle<float> kDetailsBtn (892.0f, 606.0f, 120.0f, 32.0f);  // joystick face: open the panel with all the knobs
-inline juce::Rectangle<float> pairBtn (int pair, int which) // which: 0 New, 1 Back, 2 Keep
-{
-    const float w[3] = { 96.0f, 80.0f, 80.0f };
-    float x = pair == 0 ? 28.0f : 1040.0f - 28.0f - 272.0f;
-    for (int i = 0; i < which; ++i) x += w[i] + 8.0f;
-    return { x, 424.0f, w[which], 38.0f };
-}
-inline juce::Rectangle<float> charChip (int i) { return { 264.0f + (float) i * 104.0f, 520.0f, 96.0f, 34.0f }; }
+const juce::Rectangle<float> kDetailsBtn (892.0f, 498.0f, 120.0f, 32.0f);  // main screen: open the panel with all the knobs
+// the main screen (design units): sounds, Make, Back, Keep; Character and Gentle - Wild; the three big knobs and Space
+const juce::Rectangle<float> kRandBtn (28.0f, 420.0f, 160.0f, 40.0f), kMakeBtn (420.0f, 416.0f, 200.0f, 48.0f),
+                             kBackBtn (632.0f, 420.0f, 86.0f, 40.0f), kKeepBtn (880.0f, 420.0f, 132.0f, 40.0f);
+const juce::Rectangle<float> kSpkBtn (788.0f, 582.0f, 116.0f, 30.0f), kNewSpaceBtn (912.0f, 582.0f, 100.0f, 30.0f);
+inline juce::Rectangle<float> charChip (int i) { return { 28.0f + (float) i * 100.0f, 498.0f, 92.0f, 32.0f }; }
+inline juce::Rectangle<float> moveChip (int i) { return { 340.0f + (float) i * 90.0f, 582.0f, 84.0f, 30.0f }; }
+// small round buttons on each sound circle: lock (top right) and solo (top left); between the two circles of a pair: the blend lock
+inline juce::Point<float> lockAt (int slot) { return { kSlotCx[slot] + 24.0f, kSlotCy[slot] - 26.0f }; }
+inline juce::Point<float> soloAt (int slot) { return { kSlotCx[slot] - 24.0f, kSlotCy[slot] - 26.0f }; }
+inline juce::Point<float> blendAt (int pair) { return { (kSlotCx[pair * 2] + kSlotCx[pair * 2 + 1]) * 0.5f, kSlotCy[pair * 2] }; }
+constexpr float kBadgeR = 10.0f;
 constexpr float kColW = (992.0f - 48.0f) / 5.0f;
 inline float colX (int c) { return 24.0f + (float) c * (kColW + 12.0f); }
 const char* const kSlotIds[] = { "level", "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev", "noise", "hum", "lowcut", "pan", "loop" };
@@ -643,7 +646,19 @@ void SpacePad::paint (Graphics& g)
     {
         const auto az = proc.apvts.getRawParameterValue (s == 0 ? "spaz" : "spaz" + juce::String (s + 1))->load();
         const auto di = proc.apvts.getRawParameterValue (s == 0 ? "spdist" : "spdist" + juce::String (s + 1))->load();
-        const auto p = spaceDotPos (az, di, R);
+        const auto home = spaceDotPos (az, di, R);
+        const bool moving = juce::roundToInt (proc.apvts.getRawParameterValue (s == 0 ? "spmove" : "spmove" + juce::String (s + 1))->load()) > 0;
+        const auto p = moving && s != dragging ? spaceDotPos (proc.spaceAzNow (s), proc.spaceDistNow (s), R) : home;
+        if (moving)
+        {   // where it was put: a small ring; the dot itself travels
+            g.setColour (kWada[s % 5].withAlpha (0.5f));
+            g.drawEllipse (home.x - 5.0f, home.y - 5.0f, 10.0f, 10.0f, 1.2f);
+        }
+        if (s == chosen)
+        {
+            g.setColour (kAcc);
+            g.drawEllipse (p.x - 13.0f, p.y - 13.0f, 26.0f, 26.0f, 1.6f);
+        }
         g.setColour (kWada[s % 5].withAlpha (s == dragging ? 1.0f : 0.92f));
         g.fillEllipse (p.x - 9.5f, p.y - 9.5f, 19, 19);
         g.setColour (kDark);
@@ -673,11 +688,15 @@ void SpacePad::mouseDown (const juce::MouseEvent& e)
     {
         const auto az = proc.apvts.getRawParameterValue (s == 0 ? "spaz" : "spaz" + juce::String (s + 1))->load();
         const auto di = proc.apvts.getRawParameterValue (s == 0 ? "spdist" : "spdist" + juce::String (s + 1))->load();
-        const float d = e.position.getDistanceFrom (spaceDotPos (az, di, R));
+        const bool moving = juce::roundToInt (proc.apvts.getRawParameterValue (s == 0 ? "spmove" : "spmove" + juce::String (s + 1))->load()) > 0;
+        const float d = juce::jmin (e.position.getDistanceFrom (spaceDotPos (az, di, R)),
+                                    moving ? e.position.getDistanceFrom (spaceDotPos (proc.spaceAzNow (s), proc.spaceDistNow (s), R)) : 1.0e9f);
         if (d < best) { best = d; dragging = s; }
     }
     if (dragging >= 0)
     {
+        chosen = dragging;
+        if (onPick) onPick (dragging);
         const juce::String sfx = dragging == 0 ? juce::String() : juce::String (dragging + 1);
         if (auto* pa = proc.apvts.getParameter ("spaz" + sfx)) pa->beginChangeGesture();
         if (auto* pd = proc.apvts.getParameter ("spdist" + sfx)) pd->beginChangeGesture();
@@ -708,6 +727,12 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
 
     {
         spacePad = std::make_unique<SpacePad> (proc);
+        spacePad->onPick = [this] (int s)
+        {
+            if (s == spaceSlot) return;
+            spaceSlot = s;
+            if (! detailsView) { rebuildPanel(); repaint(); }
+        };
         addAndMakeVisible (*spacePad);
     }
 
@@ -826,13 +851,51 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
     grabKeyboardFocus();
     const auto p = e.position / ((float) getWidth() / kDW);
     if (! detailsView)
-    {   // the joystick face
-        for (int pair = 0; pair < 2; ++pair)
+    {   // the main screen
+        if (kRandBtn.contains (p)) { say (proc.randomSounds()); repaint(); return; }
+        if (kMakeBtn.contains (p)) { say (proc.makeAll()); repaint(); return; }
+        if (kBackBtn.contains (p)) { if (proc.backAll()) say ("Back to what was there before the last Make."); repaint(); return; }
+        if (kKeepBtn.contains (p)) { pressKeep(); return; }
+        for (int slot = 0; slot < 4; ++slot)
         {
-            if (pairBtn (pair, 0).contains (p)) { pressNew (pair); return; }
-            if (pairBtn (pair, 1).contains (p)) { pressBack (pair); return; }
-            if (pairBtn (pair, 2).contains (p)) { pressKeep(); return; }
+            if (p.getDistanceFrom (lockAt (slot)) <= kBadgeR + 2.0f)
+            {
+                proc.setSlotLock (slot, ! proc.slotLocked (slot));
+                say (proc.slotLocked (slot) ? "Sound " + juce::String (slot + 1) + " is locked: Make and Random sounds leave it as it is."
+                                            : "Sound " + juce::String (slot + 1) + " is free again.");
+                repaint();
+                return;
+            }
+            if (p.getDistanceFrom (soloAt (slot)) <= kBadgeR + 2.0f)
+            {
+                proc.setSolo (proc.solo() == slot ? -1 : slot);
+                say (proc.solo() == slot ? "Only sound " + juce::String (slot + 1) + " is heard." : "All four sounds are heard.");
+                repaint();
+                return;
+            }
         }
+        for (int pair = 0; pair < 2; ++pair)
+            if (p.getDistanceFrom (blendAt (pair)) <= kBadgeR + 2.0f)
+            {
+                proc.setBlendLock (pair, ! proc.blendLocked (pair));
+                say (juce::String ("How sounds ") + (pair == 0 ? "1 and 2" : "3 and 4") + (proc.blendLocked (pair) ? " blend is locked." : " blend is free again."));
+                repaint();
+                return;
+            }
+        for (int i = 0; i < 4; ++i)
+            if (moveChip (i).contains (p))
+            {
+                if (auto* pa = proc.apvts.getParameter (slotId ("spmove", spaceSlot))) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) i));
+                repaint();
+                return;
+            }
+        if (kSpkBtn.contains (p))
+        {
+            if (auto* pa = proc.apvts.getParameter ("spspk")) pa->setValueNotifyingHost (pa->getValue() > 0.5f ? 0.0f : 1.0f);
+            repaint();
+            return;
+        }
+        if (kNewSpaceBtn.contains (p)) { proc.newSpace(); say ("A new place and movement for each sound."); repaint(); return; }
         for (int i = 0; i < 5; ++i)
             if (charChip (i).contains (p))
             {
@@ -1243,10 +1306,10 @@ void NektarEditor::timerCallback()
 
 int NektarEditor::mixMask() const
 {
-    const char* ids[3] = { "filmix", "resmix", "spmix" };
-    const int bits[3] = { 1, 2, 16 };
-    int m = 0;
-    for (int i = 0; i < 3; ++i)
+    const char* ids[2] = { "filmix", "resmix" };
+    const int bits[2] = { 1, 2 };
+    int m = 16; // Space is always on now (the sounds are always placed)
+    for (int i = 0; i < 2; ++i)
         if (proc.apvts.getRawParameterValue (ids[i])->load() > 0.001f) m |= bits[i];
     return m;
 }
@@ -1266,8 +1329,13 @@ void NektarEditor::rebuildPanel()
     lastPanel.clear();
     if (joyPad != nullptr) joyPad->setVisible (detailsView && motionView);
     if (! detailsView)
-    {   // the joystick face has one knob: how far apart the corners are
-        addKnob (520.0f, 596.0f, 15.0f, "Gentle - Wild", false, 0.0f, "wild");
+    {   // the main screen: how far apart the corners are, the three big knobs, and the speed of the chosen sound's movement
+        addKnob (580.0f, 514.0f, 13.0f, "Gentle - Wild", false, 0.0f, "wild");
+        addKnob (70.0f, 600.0f, 22.0f, "Motion", false, 0.0f, "mspeed");
+        addKnob (164.0f, 600.0f, 22.0f, "Weight", false, 0.0f, "mweight");
+        addKnob (258.0f, 600.0f, 22.0f, "Light", false, 0.0f, "mlight");
+        spaceSpeedId = slotId ("spspeed", spaceSlot);
+        addKnob (742.0f, 597.0f, 13.0f, "Speed", false, 0.0f, spaceSpeedId.toRawUTF8());
         resized();
         return;
     }
@@ -1297,7 +1365,7 @@ void NektarEditor::rebuildPanel()
     {
         if (mixMask() & 16)
         {
-            row (0, y1, { { "Amount", "spmix" }, { "Speakers", "spspk" }, { "Width", "width" } });
+            row (0, y1, { { "Speakers", "spspk" }, { "Width", "width" } });
             row (0, y2, { { "Far", "spfar" }, { "Back", "spback" } });
         }
         else
@@ -1370,50 +1438,110 @@ void NektarEditor::drawOverlay (Graphics& g)
 {
     if (! detailsView)
     {
-        const char* labels[3] = { "New", "Back", "Keep" };
-        for (int pair = 0; pair < 2; ++pair)
+        auto button = [&] (juce::Rectangle<float> r, const juce::String& text, bool usable, bool strong, float size)
         {
-            const bool have = proc.getSample (pair * 2) != nullptr || proc.getSample (pair * 2 + 1) != nullptr;
-            for (int w = 0; w < 3; ++w)
-            {
-                const auto r = pairBtn (pair, w);
-                const bool usable = w == 0 ? have : (w == 1 ? proc.vectorHistory (pair) > 0 : proc.vectorOn (pair));
-                g.setColour (w == 0 && usable ? kWada[pair == 0 ? 1 : 2] : Colour (0xff2f2d2b));
-                g.fillRoundedRectangle (r, 19);
-                g.setColour (w == 0 && usable ? kDark : (usable ? kLight : kMuted.withAlpha (0.45f)));
-                g.setFont (font (w == 0 ? bold : regular, 17));
-                g.drawText (labels[w], r, juce::Justification::centred);
-            }
-            g.setColour (kMuted);
-            g.setFont (font (regular, 14));
-            g.drawText (pair == 0 ? "Joystick for sounds 1 + 2" : "Joystick for sounds 3 + 4",
-                        juce::Rectangle<float> (pairBtn (pair, 0).getX(), 468.0f, 272.0f, 20.0f), juce::Justification::centred);
+            g.setColour (strong && usable ? kAcc : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+            g.setColour (strong && usable ? kDark : (usable ? kLight : kMuted.withAlpha (0.45f)));
+            g.setFont (font (strong ? bold : regular, size));
+            g.drawText (text, r, juce::Justification::centred);
+        };
+        bool anySound = false, allLocked = true;
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            anySound = anySound || proc.getSample (slot) != nullptr;
+            allLocked = allLocked && proc.slotLocked (slot);
         }
-        g.setColour (kMuted);
-        g.setFont (font (regular, 14));
-        g.drawText ("Character of the next New", juce::Rectangle<float> (264.0f, 494.0f, 512.0f, 20.0f), juce::Justification::centred);
+        button (kRandBtn, "Random sounds", ! allLocked, false, 16);
+        button (kMakeBtn, "Make", anySound, true, 21);
+        button (kBackBtn, "Back", proc.vectorHistory (0) > 0 || proc.vectorHistory (1) > 0, false, 16);
+        button (kKeepBtn, "Keep", proc.vectorOn (0) || proc.vectorOn (1), false, 16);
+        if (message.isNotEmpty())
+        {
+            g.setColour (kMuted);
+            g.setFont (font (regular, 15));
+            g.drawText (message, juce::Rectangle<float> (28.0f, 468.0f, 984.0f, 22.0f), juce::Justification::centred);
+        }
+
+        // on the sound circles: solo (left) and lock (right); between the two circles of a pair: lock of how they blend
+        auto badge = [&] (juce::Point<float> c, bool on, int kind) // kind 0 lock, 1 solo, 2 blend
+        {
+            g.setColour (on ? kAcc : Colour (0xff2f2d2b));
+            g.fillEllipse (c.x - kBadgeR, c.y - kBadgeR, 2 * kBadgeR, 2 * kBadgeR);
+            g.setColour (on ? kDark : kMuted);
+            if (kind == 0)
+            {   // a padlock
+                g.fillRoundedRectangle (c.x - 4.5f, c.y - 1.0f, 9.0f, 6.5f, 1.2f);
+                juce::Path sh;
+                sh.addCentredArc (c.x, c.y - 1.5f, 3.0f, 3.2f, 0.0f, -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
+                g.strokePath (sh, juce::PathStrokeType (1.4f));
+            }
+            else if (kind == 1)
+            {
+                g.setFont (font (bold, 12));
+                g.drawText ("S", juce::Rectangle<float> (c.x - kBadgeR, c.y - kBadgeR, 2 * kBadgeR, 2 * kBadgeR), juce::Justification::centred);
+            }
+            else
+            {   // two linked rings
+                g.drawEllipse (c.x - 6.0f, c.y - 3.0f, 7.0f, 6.0f, 1.3f);
+                g.drawEllipse (c.x - 1.0f, c.y - 3.0f, 7.0f, 6.0f, 1.3f);
+            }
+        };
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            badge (lockAt (slot), proc.slotLocked (slot), 0);
+            badge (soloAt (slot), proc.solo() == slot, 1);
+        }
+        for (int pair = 0; pair < 2; ++pair)
+            badge (blendAt (pair), proc.blendLocked (pair), 2);
+
         const char* chars[5] = { "Cloud", "Rhythm", "Metal", "Air", "Reverse" };
         const int cur = juce::roundToInt (proc.apvts.getRawParameterValue ("character")->load());
         for (int i = 0; i < 5; ++i)
         {
             const auto r = charChip (i);
             g.setColour (i == cur ? kAcc : Colour (0xff2f2d2b));
-            g.fillRoundedRectangle (r, 17);
+            g.fillRoundedRectangle (r, 16);
             g.setColour (i == cur ? kDark : kLight);
-            g.setFont (font (regular, 16));
+            g.setFont (font (regular, 15));
             g.drawText (chars[i], r, juce::Justification::centred);
         }
+
+        g.setColour (kMuted.withAlpha (0.8f));
+        g.setFont (font (regular, 11));
+        const char* ends[3][2] = { { "slow", "fast" }, { "thin", "heavy" }, { "dull", "bright" } };
+        for (int i = 0; i < 3; ++i)
+        {
+            const float cx = 70.0f + 94.0f * (float) i;
+            g.drawText (ends[i][0], juce::Rectangle<float> (cx - 58.0f, 612.0f, 34.0f, 14.0f), juce::Justification::centredRight);
+            g.drawText (ends[i][1], juce::Rectangle<float> (cx + 24.0f, 612.0f, 36.0f, 14.0f), juce::Justification::centredLeft);
+        }
+
+        // Space: the movement of the chosen sound, headphones or speakers, a new placement
+        g.setColour (kMuted);
+        g.setFont (font (regular, 14));
+        g.drawText ("Space - sound " + juce::String (spaceSlot + 1) + " (pick a dot above)", juce::Rectangle<float> (340.0f, 556.0f, 440.0f, 20.0f),
+                    juce::Justification::centredLeft);
+        g.drawText ("Change the whole sound", juce::Rectangle<float> (28.0f, 556.0f, 290.0f, 20.0f), juce::Justification::centredLeft);
+        const char* moves[4] = { "Still", "Round", "Left - right", "Front - back" };
+        const int mv = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("spmove", spaceSlot))->load());
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto r = moveChip (i);
+            g.setColour (i == mv ? kWada[spaceSlot % 5] : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 15);
+            g.setColour (i == mv ? kDark : kLight);
+            g.setFont (font (regular, 14));
+            g.drawText (moves[i], r, juce::Justification::centred);
+        }
+        const bool spk = proc.apvts.getRawParameterValue ("spspk")->load() > 0.5f;
+        button (kSpkBtn, spk ? "Speakers" : "Headphones", true, false, 14);
+        button (kNewSpaceBtn, "New space", true, false, 14);
         g.setColour (Colour (0xff2f2d2b));
         g.fillRoundedRectangle (kDetailsBtn, 16);
         g.setColour (kLight);
         g.setFont (font (regular, 16));
         g.drawText ("Details", kDetailsBtn, juce::Justification::centred);
-        if (message.isNotEmpty())
-        {
-            g.setColour (kMuted);
-            g.setFont (font (regular, 15));
-            g.drawText (message, juce::Rectangle<float> (28.0f, 610.0f, 400.0f, 24.0f), juce::Justification::centredLeft);
-        }
         return;
     }
     if (masterView)

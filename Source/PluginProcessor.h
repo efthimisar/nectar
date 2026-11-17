@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <string>
 #include "Resonator.h"
+#include "MacroTone.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -77,7 +78,23 @@ public:
     bool joyHasPath() const { return joyLen.load() > 0; }
     void joyClearPath() { joyLen.store (0); }
     // Pair joystick (pair 0 = samples 1+2, pair 1 = samples 3+4)
-    void newVector (int pair, int seed = 0);    // "New": four fresh corner settings in the chosen Character (0 = a random seed)
+    // "New": four fresh corner settings in the chosen Character (0 = a random seed).
+    // parts: bit 0 = the first sound of the pair, bit 1 = the second, bit 2 = how the two blend (Cross, Inter); a part that
+    // is left out keeps the corners it has. history: remember the corners before, for Back.
+    void newVector (int pair, int seed = 0, int parts = 7, bool history = true);
+    // The main screen: a lock per sound and per pair blend; Make draws new corners for everything that is not locked.
+    void setSlotLock (int slot, bool on) { slotLock[(size_t) slot].store (on); }
+    bool slotLocked (int slot) const { return slotLock[(size_t) slot].load(); }
+    void setBlendLock (int pair, bool on) { blendLock[(size_t) pair].store (on); }
+    bool blendLocked (int pair) const { return blendLock[(size_t) pair].load(); }
+    juce::String makeAll();          // returns a message
+    bool backAll();                  // the corners before the last Make
+    juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked
+    void newSpace();                 // a random place and movement for each of the four sounds
+    void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
+    int solo() const { return soloSlot.load(); }
+    float spaceAzNow (int slot) const { return spAzShown[(size_t) slot].load(); }     // where the sound is right now (with its movement)
+    float spaceDistNow (int slot) const { return spDistShown[(size_t) slot].load(); }
     bool backVector (int pair);                 // "Back": the corners that were there before the last New
     int vectorHistory (int pair) const { return (int) vecHistory[(size_t) pair].size(); }
     void pinVector (const juce::String& paramId, float value01); // a knob moved by hand: the same in all four corners from now on
@@ -207,6 +224,15 @@ private:
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
     std::atomic<float>* spMixP = nullptr; std::atomic<float>* spSpkP = nullptr;
     std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
+    std::array<std::atomic<float>*, kSlots> spMoveP {}, spSpeedP {};
+    std::array<double, kSlots> spPhase {};
+    std::array<std::atomic<float>, kSlots> spAzShown {}, spDistShown {};
+    std::atomic<float>* mSpeedP = nullptr; std::atomic<float>* mWeightP = nullptr; std::atomic<float>* mLightP = nullptr;
+    MacroTone macroTone;
+    std::array<std::atomic<bool>, kSlots> slotLock {};
+    std::array<std::atomic<bool>, 2> blendLock {};
+    std::atomic<int> soloSlot { -1 };
+    void clearSlotVector (int slot);
     std::array<std::atomic<float>*, 2> imorphP {};
     std::array<std::atomic<float>*, 2> xmorphP {};
     Resonator resonator, resonatorB;

@@ -28,7 +28,7 @@ public:
         for (auto& sp : spat) sp.prepare (sampleRate);
         spatActive = {};
         mono.assign ((size_t) juce::jmax (1, maxBlock), 0.0f);
-        binL = mono; binR = mono;
+        binL = mono; binR = mono; sideBuf = mono;
         lastGain = {};
         for (auto& g : lastGain) g = { 1.0f, 1.0f };
     }
@@ -66,6 +66,7 @@ public:
     // Cross-fade inside a pair (0..1, 0 = only the first slot, 0.5 = both at full level, 1 = only the second).
     // Equal-power law, each side capped at 1. Meant to be driven by Velocity (velocity crossmorph) or Envelope (dynamic one).
     void setCross (const std::array<float, 2>& c) { cross = c; }
+    void setSolo (int slot) { solo = slot; } // -1 = all four are heard
 
     // without placement (plain pan only)
     void mix (juce::AudioBuffer<float>& out, int numSamples, const std::array<bool, kSlots>& loaded,
@@ -91,17 +92,18 @@ public:
                     mono.resize ((size_t) numSamples);
                     binL.resize ((size_t) numSamples);
                     binR.resize ((size_t) numSamples);
+                    sideBuf.resize ((size_t) numSamples);
                 }
                 const float* l = b.getReadPointer (0);
                 const float* r = b.getReadPointer (1);
-                for (int i = 0; i < numSamples; ++i) mono[(size_t) i] = 0.5f * (l[i] + r[i]);
+                for (int i = 0; i < numSamples; ++i) { mono[(size_t) i] = 0.5f * (l[i] + r[i]); sideBuf[(size_t) i] = 0.5f * (l[i] - r[i]); }
                 Spatializer::Params sp;
                 sp.azDeg = space.azDeg[(size_t) s];
                 sp.dist = space.dist[(size_t) s];
                 sp.far = space.far;
                 sp.back = space.back;
                 sp.speakers = space.speakers;
-                spat[(size_t) s].process (mono.data(), binL.data(), binR.data(), numSamples, sp);
+                spat[(size_t) s].process (mono.data(), sideBuf.data(), binL.data(), binR.data(), numSamples, sp);
                 spatActive[(size_t) s] = true;
             }
             else if (spatActive[(size_t) s])
@@ -159,7 +161,7 @@ public:
             else
                 pairs[(size_t) pr].active = false;
             for (int s : { a, b })
-                if (loaded[(size_t) s])
+                if (loaded[(size_t) s] && (solo < 0 || solo == s))
                     for (int c = 0; c < juce::jmin (2, out.getNumChannels()); ++c)
                         out.addFrom (c, 0, scratch[(size_t) s], c, 0, numSamples);
         }
@@ -179,4 +181,6 @@ private:
     std::array<Spatializer, kSlots> spat;
     std::array<bool, kSlots> spatActive {};
     std::vector<float> mono, binL, binR;
+    std::vector<float> sideBuf;
+    int solo = -1;
 };
