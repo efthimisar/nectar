@@ -12,6 +12,7 @@
 
 // A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
 #include "Tonality.h"
+#include "TempoFind.h"
 
 struct Sample
 {
@@ -47,6 +48,8 @@ struct Sample
     double modelRate = 0.0;                  // host rate the model was made for
     Tonality tonality;                       // key of the sound (from the model)
     bool keyKnown = false;                   // tonality has been worked out
+    TempoFind tempo;                         // tempo of the sound (0 = none)
+    bool tempoKnown = false;
 };
 
 namespace signalsmith { namespace stretch { template<typename, class> struct SignalsmithStretch; } }
@@ -65,6 +68,7 @@ public:
         float releaseSec = 0.25f;
         float keepLength = 1.0f; // 0..1
         bool loop = false;       // sustain: a smooth loop in a steady part of the sound
+        double tempoRatio = 1.0; // host tempo / the sound's tempo: how much faster the sound is read (pitch kept)
         float stretch = 0.0f;    // 0 = off, otherwise extreme stretch (see stretchFactor)
         float blur = 0.0f;       // 0..1 smooths the spectrum (spectral voices)
         float freeze = 0.0f;     // 0..1 stops the position in the sound (spectral voices)

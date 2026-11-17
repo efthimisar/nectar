@@ -79,6 +79,32 @@ private:
     NektarProcessor& proc;
 };
 
+// The library map around the Space pad: every sound of the chosen category as a slowly drifting dot (see LibraryIndex);
+// drag the cursor to a group of sounds (Random sounds picks from there); double-click a dot to load it into the chosen circle.
+class LibraryMap : public juce::Component
+{
+public:
+    explicit LibraryMap (NektarProcessor& p) : proc (p) {}
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    bool hitTest (int x, int y) override;
+    std::function<void (const juce::File&)> onLoad;
+    std::function<void (const juce::String&)> onHover;
+private:
+    juce::Point<float> toUnit (juce::Point<float> p) const;
+    juce::Point<float> toPix (float x, float y) const;
+    int dotAt (juce::Point<float> p) const;
+    void refresh();
+    NektarProcessor& proc;
+    std::vector<LibraryIndex::Dot> dots;
+    int seenVersion = -1;
+    juce::String seenCategory = "\x01";
+    int hover = -1;
+};
+
 // Top view of the listener with the four slots as numbered dots: direction = angle, distance = radius.
 class SpacePad : public juce::Component
 {
@@ -158,6 +184,9 @@ private:
     void pressBack (int pair);
     void pressKeep();
     std::unique_ptr<SpacePad> spacePad;
+    std::unique_ptr<LibraryMap> libMap;
+    int chipPage = 0;                   // which categories the chips above the map show (when there are more than six)
+    juce::Rectangle<float> chipRect (int i) const;
     juce::Point<float> joyPadCentre;
     juce::String message;
     std::set<int> heldNotes;

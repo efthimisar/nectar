@@ -355,7 +355,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     v.morphAdd = v.additive && partnerModelUsable (p);
     // with the model at full strength and nothing else asked of the spectral engine, only the model plays
     v.spectral = index < kSpectralVoices && (v.additive ? p.model < 0.99f : (spectralOn (p) || partnerBuffer (p) != nullptr));
-    v.stretched = ! v.spectral && index < kStretchVoices && p.keepLength > 0.02f;
+    v.stretched = ! v.spectral && index < kStretchVoices && (p.keepLength > 0.02f || std::abs (p.tempoRatio - 1.0) > 1.0e-4);
     v.adsr.setSampleRate (sr);
     v.adsr.setParameters ({ kAttackSec, 0.0f, 1.0f, p.releaseSec });
     v.adsr.noteOn();
@@ -377,7 +377,7 @@ void SamplePlayer::noteOn (int note, float velocity, const Params& p)
     {
         auto& st = *stretchers[(size_t) index];
         const double R = std::pow (2.0, ((double) (note - 60) + (double) p.pitchSemis) / 12.0);
-        const double speed = std::pow (R, 1.0 - (double) p.keepLength);
+        const double speed = std::pow (R, 1.0 - (double) p.keepLength) * p.tempoRatio;
         st.setTransposeFactor ((float) R); // the pitch always follows the key; "keep length" only sets how fast we read
         // pre-roll so the sound starts right away instead of after the stretcher's latency
         const int len = juce::jmin ((int) inL.size(), st.outputSeekLength ((float) speed));
@@ -438,7 +438,7 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
     auto& st = *stretchers[(size_t) index];
     const int n = sample->play.getNumSamples();
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
-    const double speed = std::pow (R, 1.0 - (double) p.keepLength);
+    const double speed = std::pow (R, 1.0 - (double) p.keepLength) * p.tempoRatio; // locked to the host tempo: read faster or slower
     st.setTransposeFactor ((float) R); // the pitch always follows the key; "keep length" only sets how fast we read
     const float gain = p.level * p.level * p.autoGain * v.velocity;
     float* oL = out.getWritePointer (0);
@@ -494,7 +494,7 @@ bool SamplePlayer::modelUsable (int index, const Params& p) const noexcept
 void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
-    const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
+    const double factor = (stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0) / juce::jmax (0.25, p.tempoRatio);
     const double advance = (1.0 - (double) p.freeze) / factor;
     const float gain = p.level * p.level * p.autoGain * v.velocity;
     const float mix = v.morphAdd ? p.model : v.modelMix; // the pair morph can move while the note is held
@@ -572,7 +572,7 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
 void SamplePlayer::renderSpectral (int index, Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
     const double R = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
-    const double factor = stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0;
+    const double factor = (stretchOn (p.stretch) ? stretchFactor (p.stretch) : 1.0) / juce::jmax (0.25, p.tempoRatio);
     const float gain = p.level * p.level * p.autoGain * v.velocity;
     float* oL = out.getWritePointer (0);
     float* oR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;

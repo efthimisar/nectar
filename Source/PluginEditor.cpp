@@ -36,6 +36,7 @@ inline juce::Rectangle<float> moveCell (int i) { return { 330.0f + (float) (i % 
 inline juce::Point<float> joyBtn (int pair, int which) { return { pair == 0 ? 52.0f : 988.0f, 170.0f + 44.0f * (float) which }; }
 inline juce::Rectangle<float> pickCell (int pair, int i) { return { kPadCx[pair] - 78.0f + (float) (i % 6) * 26.0f, kPadCy - 78.0f + (float) (i / 6) * 31.0f, 26.0f, 31.0f }; }
 inline juce::Rectangle<float> charChip (int i) { return { 28.0f + (float) i * 100.0f, 498.0f, 92.0f, 32.0f }; }
+inline juce::Rectangle<float> libChip (int i) { return { 273.0f + (float) i * 72.0f, 77.0f, 66.0f, 26.0f }; }
 inline juce::Rectangle<float> harmChip (int i) { const float x[3] = { 612.0f, 674.0f, 750.0f }, w[3] = { 58.0f, 72.0f, 56.0f }; return { x[i], 498.0f, w[i], 32.0f }; }
 const juce::Rectangle<float> kKeyBtn (810.0f, 498.0f, 74.0f, 32.0f);
 inline juce::Rectangle<float> keyLabel (int slot) { return { kSlotCx[slot] - 42.0f, 392.0f, 84.0f, 14.0f }; }
@@ -625,6 +626,110 @@ void JoyPad::mouseUp (const juce::MouseEvent&)
     if (auto* py = proc.apvts.getParameter ("joyy")) py->endChangeGesture();
 }
 
+
+// ------------------------------------------------------------------ LibraryMap
+void LibraryMap::refresh()
+{
+    if (proc.libIndex.version() == seenVersion && proc.libCategory == seenCategory) return;
+    seenVersion = proc.libIndex.version();
+    seenCategory = proc.libCategory;
+    dots = proc.libIndex.layout (proc.libCategory);
+    hover = -1;
+}
+juce::Point<float> LibraryMap::toPix (float x, float y) const
+{
+    const float R = (float) getWidth() * 0.5f;
+    return { R + x * R * 0.94f, R + y * R * 0.94f };
+}
+juce::Point<float> LibraryMap::toUnit (juce::Point<float> p) const
+{
+    const float R = (float) getWidth() * 0.5f;
+    return { (p.x - R) / (R * 0.94f), (p.y - R) / (R * 0.94f) };
+}
+bool LibraryMap::hitTest (int x, int y)
+{   // only the ring around the Space pad belongs to the map
+    const float d = toUnit ({ (float) x, (float) y }).getDistanceFromOrigin();
+    return d >= 0.52f && d <= 1.06f;
+}
+int LibraryMap::dotAt (juce::Point<float> p) const
+{
+    int best = -1; float bd = 7.0f;
+    const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    for (int i = 0; i < (int) dots.size(); ++i)
+    {
+        const float dx = 0.012f * (float) std::sin (t * (0.31 + 0.07 * (i % 7)) + i), dy = 0.012f * (float) std::cos (t * (0.27 + 0.05 * (i % 5)) + 1.7 * i);
+        const float d = toPix (dots[(size_t) i].x + dx, dots[(size_t) i].y + dy).getDistanceFrom (p);
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+void LibraryMap::paint (juce::Graphics& g)
+{
+    refresh();
+    const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const auto cur = proc.libCursor;
+    const float R = (float) getWidth() * 0.5f;
+    if (dots.empty())
+    {
+        g.setColour (kMuted.withAlpha (0.8f));
+        g.setFont (juce::Font (juce::FontOptions (12.0f)));
+        g.drawText (proc.libIndex.busy() ? "Reading the library..." : "Put sounds in Music / Nektar Library",
+                    juce::Rectangle<float> (0, R * 0.12f, (float) getWidth(), 16), juce::Justification::centred);
+        return;
+    }
+    // the group the cursor holds: its nearest quarter (at least four), as Random sounds will pick
+    std::vector<float> dist (dots.size());
+    for (size_t i = 0; i < dots.size(); ++i) dist[i] = juce::Point<float> (dots[i].x, dots[i].y).getDistanceFrom (cur);
+    auto sorted = dist;
+    std::sort (sorted.begin(), sorted.end());
+    const size_t keep = juce::jmin (dots.size(), (size_t) juce::jmax (4, (int) dots.size() / 4));
+    const float lim = sorted[keep - 1];
+    const float sz = juce::jlimit (2.2f, 4.6f, 4.6f - 0.012f * (float) dots.size());
+    for (int i = 0; i < (int) dots.size(); ++i)
+    {   // molecules: each drifts a little around its place
+        const float dx = 0.012f * (float) std::sin (t * (0.31 + 0.07 * (i % 7)) + i), dy = 0.012f * (float) std::cos (t * (0.27 + 0.05 * (i % 5)) + 1.7 * i);
+        const auto p = toPix (dots[(size_t) i].x + dx, dots[(size_t) i].y + dy);
+        const bool in = dist[(size_t) i] <= lim;
+        const auto col = kWada[(size_t) (i % 5)];
+        g.setColour (col.withAlpha (in ? 0.95f : 0.35f));
+        g.fillEllipse (p.x - sz, p.y - sz, 2 * sz, 2 * sz);
+        if (i == hover) { g.setColour (kAcc); g.drawEllipse (p.x - sz - 3, p.y - sz - 3, 2 * sz + 6, 2 * sz + 6, 1.2f); }
+    }
+    // the cursor and the reach of its group
+    const auto c = toPix (cur.x, cur.y);
+    g.setColour (kAcc.withAlpha (0.16f));
+    g.fillEllipse (c.x - 13.0f, c.y - 13.0f, 26, 26);
+    g.setColour (kAcc);
+    g.drawEllipse (c.x - 8.5f, c.y - 8.5f, 17, 17, 1.4f);
+    g.fillEllipse (c.x - 3.5f, c.y - 3.5f, 7, 7);
+    juce::ignoreUnused (R);
+}
+void LibraryMap::mouseDown (const juce::MouseEvent& e) { mouseDrag (e); }
+void LibraryMap::mouseDrag (const juce::MouseEvent& e)
+{
+    auto u = toUnit (e.position);
+    const float d = u.getDistanceFromOrigin();
+    if (d > 1.0f) u /= d;
+    if (d < 0.55f && d > 1.0e-4f) u *= 0.55f / d;
+    proc.libCursor = u;
+    repaint();
+}
+void LibraryMap::mouseMove (const juce::MouseEvent& e)
+{
+    const int h = dotAt (e.position);
+    if (h != hover)
+    {
+        hover = h;
+        if (onHover) onHover (h >= 0 ? dots[(size_t) h].file.getFileNameWithoutExtension() : juce::String());
+        repaint();
+    }
+}
+void LibraryMap::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    const int h = dotAt (e.position);
+    if (h >= 0 && onLoad) onLoad (dots[(size_t) h].file);
+}
+
 // ------------------------------------------------------------------ SpacePad
 namespace
 {
@@ -741,6 +846,11 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
     bold    = juce::Typeface::createSystemTypefaceFor (BinaryData::CarlitoBold_ttf, BinaryData::CarlitoBold_ttfSize);
 
     {
+        libMap = std::make_unique<LibraryMap> (proc);
+        libMap->onLoad = [this] (const juce::File& f) { loadFile (f, selectedSlot); say ("Loaded into circle " + juce::String (selectedSlot + 1) + "."); };
+        libMap->onHover = [this] (const juce::String& n) { if (n.isNotEmpty()) say (n); };
+        addAndMakeVisible (*libMap);
+        proc.rescanLibrary();
         spacePad = std::make_unique<SpacePad> (proc);
         spacePad->onPick = [this] (int s)
         {
@@ -808,6 +918,8 @@ void NektarEditor::resized()
         k->setBounds (juce::Rectangle<float> ((c.x - KnobComponent::kWidth / 2.0f) * s, (c.y - r) * s,
                                               KnobComponent::kWidth * s, k->height() * s).toNearestInt());
     }
+    if (libMap != nullptr)
+        libMap->setBounds (juce::Rectangle<float> ((kLibX - 140.0f) * s, (kLibY - 140.0f) * s, 280.0f * s, 280.0f * s).toNearestInt());
     if (spacePad != nullptr)
         spacePad->setBounds (juce::Rectangle<float> ((kSpaceX - kSpaceR) * s, (kSpaceY - kSpaceR) * s,
                                                      2 * kSpaceR * s, 2 * kSpaceR * s).toNearestInt());
@@ -900,6 +1012,17 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
                 return;
             }
         }
+        for (int i = 0; i < 7; ++i)
+            if (libChip (i).contains (p))
+            {
+                const auto cats = proc.libIndex.categories();
+                if (i == 0) proc.libCategory = {};
+                else if (i == 6) ++chipPage, chipPage = cats.size() > 0 ? chipPage % juce::jmax (1, (cats.size() + 5) / 6) : 0;
+                else if (const int k = chipPage * 6 + i - 1; k < cats.size()) proc.libCategory = cats[k];
+                proc.rescanLibrary();
+                repaint();
+                return;
+            }
         if (kRandBtn.contains (p)) { say (proc.randomSounds()); repaint(); return; }
         if (kMakeBtn.contains (p)) { say (proc.makeAll()); repaint(); return; }
         if (kBackBtn.contains (p)) { if (proc.backAll()) say ("Back to what was there before the last Make."); repaint(); return; }
@@ -976,10 +1099,27 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
                 m.addSeparator();
                 for (int k = 0; k < 24; ++k)
                     m.addItem (3 + k, juce::String (Tonality::noteName (k / 2)) + (k % 2 ? " minor" : " major"), true, cur == 2 + k);
+                m.addSeparator();
+                {   // tempo: as found, none, half, double
+                    const int tc = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("stempo", slot))->load());
+                    juce::String tf = "Tempo found by Nektar";
+                    if (const auto smp = proc.getSample (slot); smp != nullptr && smp->tempoKnown)
+                        tf << ": " << (smp->tempo.bpm > 0.0f ? juce::String (juce::roundToInt (smp->tempo.bpm)) + " bpm" : juce::String ("no tempo"));
+                    m.addItem (101, tf, true, tc == 0);
+                    m.addItem (102, "No tempo (not locked)", true, tc == 1);
+                    m.addItem (103, "Half of it", true, tc == 2);
+                    m.addItem (104, "Double", true, tc == 3);
+                }
                 juce::Component::SafePointer<NektarEditor> safe (this);
                 m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, slot] (int r)
                 {
                     if (safe == nullptr || r <= 0) return;
+                    if (r > 100)
+                    {
+                        if (auto* pt = safe->proc.apvts.getParameter (safe->slotId ("stempo", slot))) pt->setValueNotifyingHost (pt->convertTo0to1 ((float) (r - 101)));
+                        safe->repaint();
+                        return;
+                    }
                     if (auto* pk = safe->proc.apvts.getParameter (safe->slotId ("skey", slot))) pk->setValueNotifyingHost (pk->convertTo0to1 ((float) (r - 1)));
                     safe->repaint();
                 });
@@ -1363,6 +1503,8 @@ void NektarEditor::timerCallback()
         joyPad->repaint();
     if (spacePad != nullptr)
         spacePad->repaint();
+    if (libMap != nullptr && ! detailsView)
+        libMap->repaint();
     for (auto& pp : pairPads)
         if (pp != nullptr) pp->repaint();
 
@@ -1705,6 +1847,25 @@ void NektarEditor::drawOverlay (Graphics& g)
             g.drawText (ends[i][1], juce::Rectangle<float> (cx + 24.0f, 612.0f, 36.0f, 14.0f), juce::Justification::centredLeft);
         }
 
+        {   // the library categories (the folders in the library); "All" first, "+" turns the page when there are more
+            const auto cats = proc.libIndex.categories();
+            const int pages = juce::jmax (1, (cats.size() + 5) / 6);
+            chipPage = juce::jlimit (0, pages - 1, chipPage);
+            for (int i = 0; i < 7; ++i)
+            {
+                juce::String name; bool on = false;
+                if (i == 0) { name = "All"; on = proc.libCategory.isEmpty(); }
+                else if (i == 6) { if (pages <= 1) break; name = "+"; }
+                else { const int k = chipPage * 6 + i - 1; if (k >= cats.size()) break; name = cats[k]; on = proc.libCategory == name; }
+                const auto r = libChip (i);
+                g.setColour (on ? kAcc : Colour (0xff2f2d2b));
+                g.fillRoundedRectangle (r, 13);
+                g.setColour (on ? kDark : kLight);
+                g.setFont (font (regular, 13));
+                g.drawFittedText (name, r.reduced (5, 0).toNearestInt(), juce::Justification::centred, 1, 0.8f);
+            }
+        }
+
         // Harmony and its Key; under every circle the key of that sound (click to correct it)
         const char* harm[3] = { "As is", "One key", "Chord" };
         const int hm = juce::roundToInt (proc.apvts.getRawParameterValue ("harmony")->load());
@@ -1720,11 +1881,16 @@ void NektarEditor::drawOverlay (Graphics& g)
         button (kKeyBtn, juce::String ("Key ") + Tonality::noteName (juce::roundToInt (proc.apvts.getRawParameterValue ("key")->load())), hm != 0, false, 14);
         g.setFont (font (regular, 12));
         for (int slot = 0; slot < 4; ++slot)
-        {
-            const auto t = proc.keyText (slot);
-            if (t.isEmpty()) continue;
-            g.setColour (t == "no key" || t == "..." ? kMuted.withAlpha (0.6f) : kWada[slot % 5]);
-            g.drawText (t, keyLabel (slot), juce::Justification::centred);
+        {   // key (short: "Gm +2", "C", "-") and tempo ("124"), click to correct
+            auto k = proc.keyText (slot);
+            if (k.isEmpty()) continue;
+            k = k.replace (" minor", "m").replace (" major", "");
+            if (k == "no key") k = "-";
+            auto t = proc.tempoText (slot);
+            t = t.endsWith (" bpm") ? t.upToFirstOccurrenceOf (" ", false, false) : (t == "..." ? t : "-");
+            g.setColour (kWada[slot % 5]);
+            g.setFont (font (regular, 11.5f));
+            g.drawText (k + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  ")) + t, keyLabel (slot), juce::Justification::centred);
         }
 
         // Space: the movement of the chosen sound, headphones or speakers, a new placement
@@ -1907,6 +2073,7 @@ void NektarEditor::loadFile (const juce::File& f, int slot)
 {
     message = proc.loadSample (f, slot);
     if (auto* pk = proc.apvts.getParameter (slotId ("skey", slot))) pk->setValueNotifyingHost (0.0f); // a new sound: its key is found again
+    if (auto* pt = proc.apvts.getParameter (slotId ("stempo", slot))) pt->setValueNotifyingHost (0.0f); // ...and its tempo
     cache = juce::Image();
     repaint();
 }
@@ -2048,34 +2215,6 @@ void NektarEditor::renderDesign (Graphics& g)
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xce\xbd\xce\xad\xce\xba\xcf\x84\xce\xb1\xcf\x81")),
                 juce::Rectangle<float> (kDW - 150.0f, 8, 130, 44), juce::Justification::centredRight);
 
-    // ---- style chips
-    {
-        const char* chips[] = { "All", "Glass", "Metal", "Wood", "Paper", "Water", "Voice" };
-        const Colour cc[] = { kLight, kWada[0], kWada[1], kWada[2], kWada[3], kWada[2], kWada[0] };
-        float x = 273;
-        for (int i = 0; i < 7; ++i)
-        {
-            const juce::Rectangle<float> r (x, 77, 62, 26);
-            if (i == 1)
-            {
-                g.setColour (kWada[0]);
-                g.fillRoundedRectangle (r, 13);
-                g.setColour (kDark);
-            }
-            else
-            {
-                g.setColour (Colour (0xff2f2d2b));
-                g.fillRoundedRectangle (r, 13);
-                g.setColour (cc[i].withAlpha (0.8f));
-                g.drawRoundedRectangle (r, 13, 1.3f);
-                g.setColour (kLight);
-            }
-            g.setFont (font (reg, 14));
-            g.drawText (chips[i], r, juce::Justification::centred);
-            x += 72;
-        }
-    }
-
     // ---- ring (library map): recessed bowl; the ring and the check screen are drawn smaller (kRingScale)
     g.saveState();
     g.addTransform (juce::AffineTransform::scale (kRingScale, kRingScale, kCx, kCy).translated (kLibX - kCx, kLibY - kCy));
@@ -2083,22 +2222,6 @@ void NektarEditor::renderDesign (Graphics& g)
     g.fillEllipse (kCx - kRingR + 4, kCy - kRingR + 5, 2 * kRingR, 2 * kRingR);
     g.setGradientFill (ColourGradient (Colour (0xff141312), kCx - 120, kCy - 150, Colour (0xff2a2826), kCx + 200, kCy + 230, true));
     g.fillEllipse (kCx - kRingR, kCy - kRingR, 2 * kRingR, 2 * kRingR);
-
-    {
-        juce::Random rnd (42);
-        for (int i = 0; i < 70; ++i)
-        {
-            const float a = rnd.nextFloat() * juce::MathConstants<float>::twoPi;
-            const float rr = std::sqrt (rnd.nextFloat()) * (kRingR - 18.0f);
-            sphere (g, kCx + std::cos (a) * rr, kCy + std::sin (a) * rr, 3.8f + rnd.nextFloat() * 4.2f, kWada[i % 5]);
-        }
-        g.setColour (kAcc);
-        g.drawEllipse (640 - 17, 290 - 17, 34, 34, 1.5f);
-        g.setColour (kAcc.withAlpha (0.18f));
-        g.fillEllipse (640 - 26, 290 - 26, 52, 52);
-        g.setColour (kAcc);
-        g.fillEllipse (640 - 6.5f, 290 - 6.5f, 13, 13);
-    }
 
     // ---- centre screen
     g.setGradientFill (ColourGradient (kAcc.withAlpha (0.10f), kCx, kCy, kAcc.withAlpha (0.0f), kCx + 150, kCy, true));

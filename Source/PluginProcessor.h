@@ -14,6 +14,7 @@
 #include "Resonator.h"
 #include "MacroTone.h"
 #include "MotionShapes.h"
+#include "LibraryIndex.h"
 
 class NektarProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
@@ -93,7 +94,18 @@ public:
     juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked
     void newSpace();                 // a random place and movement for each of the four sounds
     void randomMovement (int pair);  // a random shape and speed for a joystick
-    juce::String keyText (int slot) const;  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
+    // the library map: its index, the chosen category ("" = all) and the cursor (unit disc); Random sounds picks near it
+    LibraryIndex libIndex;
+    juce::String libCategory;
+    juce::Point<float> libCursor { 0.0f, -0.78f };
+    void rescanLibrary() { libIndex.scan (getLibraryFolder()); }
+    juce::String keyText (int slot) const;
+    juce::String tempoText (int slot) const;          // "124 bpm", "no tempo", "..."
+    float tempoOf (int slot, const Sample* s) const;  // 0 = none
+    double tempoRatioFor (int slot, const Sample* s, double hostBpm, bool hostHas) const;
+    struct HostNow { double bpm = 120.0; bool has = false; double ppq = 0.0; bool hasPpq = false; };
+    HostNow hostNow;                                   // audio thread
+    double spaceAdvance (int slot, int numSamples, float motion);  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
     bool keyOf (int slot, int& tonic, bool& minor) const;
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
     int solo() const { return soloSlot.load(); }

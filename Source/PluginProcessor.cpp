@@ -73,6 +73,11 @@ public:
             smp.grainSrcHi.setSize (0, 0); smp.grainSrcY.setSize (0, 0); smp.grainSrcXY.setSize (0, 0);
         };
         clearMove (*s);
+        if (! s->tempoKnown)
+        {   // the tempo of the whole file (name first, then the sound), once per sound
+            s->tempo = TempoFind::of (s->data, s->rate, s->name);
+            s->tempoKnown = true;
+        }
         if (! (soundSame && base->model != nullptr && std::abs (base->modelRate - hostRate) < 0.5))
         {
             {   // the sound itself is ready: hand it over now, the sine-wave description follows when it is done
@@ -166,6 +171,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pitch" + sfx, 1 }, "Pitch" + nm,
                                                              NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
                                                              juce::AudioParameterFloatAttributes().withLabel ("st")));
+        l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "stempo" + sfx, 1 }, "Tempo of sound" + nm,
+                                                              juce::StringArray { "Auto", "No tempo", "Half", "Double" }, 0));
         {   // the key of the sound: 0 = as found by the analysis, 1 = no key (left as it is), 2.. = C major, C minor, C# major ...
             juce::StringArray keys { "Auto", "No key" };
             for (int k = 0; k < 12; ++k) { keys.add (juce::String (Tonality::noteName (k)) + " major"); keys.add (juce::String (Tonality::noteName (k)) + " minor"); }
@@ -364,6 +371,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
                                                           juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
+    // Tempo lock: sounds with a tempo are read faster or slower (pitch kept) to follow the host tempo
+    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "tempolock", 1 }, "Lock to tempo", true));
     // Harmony: the four sounds as recorded, all moved into one key, or their keynotes on the notes of one chord
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "harmony", 1 }, "Harmony",
                                                           juce::StringArray { "As is", "One key", "Chord" }, 1));
@@ -833,6 +842,15 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (changed) midi.swapWith (mapped);
     }
 
+    {   // the host's tempo and position, for the tempo lock and the movements that follow the beat
+        hostNow = {};
+        if (auto* phd = getPlayHead())
+            if (auto pos = phd->getPosition())
+            {
+                if (auto b = pos->getBpm()) { hostNow.bpm = *b; hostNow.has = *b > 1.0; }
+                if (auto q = pos->getPpqPosition()) { hostNow.ppq = *q; hostNow.hasPpq = pos->getIsPlaying(); }
+            }
+    }
     updateMods (buffer.getNumSamples(), midi);
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
@@ -863,10 +881,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     const int limit = juce::jmax (8, 32 / juce::jmax (1, loaded));
 
     buffer.clear();
-    double hostBpm = 120.0;
-    if (auto* ph = getPlayHead())
-        if (auto pos = ph->getPosition())
-            if (auto b = pos->getBpm()) hostBpm = *b;
+    double hostBpm = hostNow.has ? hostNow.bpm : 120.0;
+    const bool hostHasBpm = hostNow.has;
     // Motion knob: 0.5 = as made; down to four times slower, up to four times faster
     const float motionKnob = juce::jlimit (0.0f, 1.0f, modded (mSpeedP));
     const float motion = std::pow (2.0f, 4.0f * (motionKnob - 0.5f));
@@ -908,6 +924,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (slot % 2 == 1)
             p.level *= std::sqrt (1.0f - juce::jmin (1.0f, modded (pairMorphP[(size_t) (slot / 2)]) * 50.0f)); // heard inside the morph of its pair
         p.pitchSemis = modded (pitchP[(size_t) slot]);
+        p.tempoRatio = tempoRatioFor (slot, pl.getSample().get(), hostBpm, hostHasBpm);
         p.releaseSec = modded (tailP[(size_t) slot]);
         pl.setVoiceLimit (limit);
         auto view = mixer.scratchFor (slot, buffer.getNumSamples());
@@ -920,7 +937,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             GrainVoice::Params g;
             g.rhythmic = grMode == 2;
             g.start = 0.0f; g.end = 1.0f; // the sound that is played is already the chosen part
-             g.position = modded (gp[3]); g.scan = modded (gp[4]) * motion;
+             g.position = modded (gp[3]); g.scan = modded (gp[4]) * motion * (float) tempoRatioFor (slot, getSample (slot).get(), hostBpm, hostHasBpm);
             g.spray = modded (gp[5]); g.sizeMs = modded (gp[6]); g.density = modded (gp[7]); g.jitter = modded (gp[8]);
             g.reverse = modded (gp[9]); g.spread = modded (gp[10]); g.gate = modded (gp[11]);
             g.sizeMs /= std::sqrt (motion); // slower motion = longer grains, so they follow each other more slowly
@@ -970,10 +987,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         const int move = juce::jlimit (0, 3 + motionshapes::count, juce::roundToInt (spMoveP[(size_t) slot]->load()));
         if (move >= 4)
         {   // a shape around the dot's own place (it is kept a little away from the head, where left and right swap)
-            const double hz = 0.02 * std::pow (100.0, (double) juce::jlimit (0.0f, 1.0f, modded (spSpeedP[(size_t) slot]))) * (double) motion;
-            auto& ph = spPhase[(size_t) slot];
-            ph += hz * (double) buffer.getNumSamples() / (hostRate.load() > 0.0 ? hostRate.load() : 44100.0);
-            if (ph >= 1.0) { ph -= std::floor (ph); for (auto& t : spTg[(size_t) slot]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f }; }
+            const double ph = spaceAdvance (slot, buffer.getNumSamples(), motion);
             const float a0 = juce::degreesToRadians (az), rr = 0.12f + 0.88f * di;
             const auto q = motionshapes::point (move - 4, (float) ph, spPh[(size_t) slot].data(), spTg[(size_t) slot].data());
             float x = rr * std::sin (a0) + 0.5f * q.x, y = rr * std::cos (a0) - 0.5f * q.y; // pad: y up = in front
@@ -984,10 +998,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
         else if (move > 0)
         {
-            const double hz = 0.02 * std::pow (100.0, (double) juce::jlimit (0.0f, 1.0f, modded (spSpeedP[(size_t) slot]))) * (double) motion; // 50 s .. 0.5 s per round, times the Motion knob
-            auto& ph = spPhase[(size_t) slot];
-            ph += hz * (double) buffer.getNumSamples() / (hostRate.load() > 0.0 ? hostRate.load() : 44100.0);
-            ph -= std::floor (ph);
+            const double ph = spaceAdvance (slot, buffer.getNumSamples(), motion);
             const float a0 = juce::degreesToRadians (az), rr = 0.12f + 0.88f * di;
             const float x0 = rr * std::sin (a0), y0 = rr * std::cos (a0), tw = juce::MathConstants<float>::twoPi * (float) ph;
             if (move == 1)
@@ -1829,8 +1840,19 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
         {   // the stick travels the shape around the place where it was left (the Motion knob makes it slower or faster)
             const double mot = std::pow (2.0, 4.0 * ((double) juce::jlimit (0.0f, 1.0f, mSpeedP->load()) - 0.5));
             auto& ph = vecMovePhase[(size_t) pair];
-            ph += blockSec * mot / motionshapes::periodSeconds (juce::roundToInt (vecSpeedP[(size_t) pair]->load()));
-            if (ph >= 1.0) { ph -= std::floor (ph); for (auto& t : vecTg[(size_t) pair]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f }; }
+            const double old = ph;
+            const int sp = juce::roundToInt (vecSpeedP[(size_t) pair]->load());
+            if (hostNow.has && apvts.getRawParameterValue ("tempolock")->load() > 0.5f)
+            {   // locked to the beat: 32, 16, 8, 4 or 2 beats per round (halved / doubled by the Motion knob)
+                static const double beats[motionshapes::speedSteps] { 32.0, 16.0, 8.0, 4.0, 2.0 };
+                const double per = beats[juce::jlimit (0, motionshapes::speedSteps - 1, sp)] / std::pow (2.0, std::round (std::log2 (mot)));
+                if (hostNow.hasPpq) ph = hostNow.ppq / per - std::floor (hostNow.ppq / per);
+                else ph += blockSec * hostNow.bpm / 60.0 / per;
+            }
+            else
+                ph += blockSec * mot / motionshapes::periodSeconds (sp);
+            ph -= std::floor (ph);
+            if (ph < old) for (auto& t : vecTg[(size_t) pair]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f };
             const auto q = motionshapes::point (shape - 1, (float) ph, vecPh[(size_t) pair].data(), vecTg[(size_t) pair].data());
             tx += 0.45f * q.x; ty -= 0.45f * q.y; // screen y points down, the stick's y up
         }
@@ -2197,6 +2219,17 @@ juce::String NektarProcessor::randomSounds()
     for (int i = files.size(); --i >= 0;)
         if (files.getReference (i).getSize() > 60 * 1024 * 1024 || files.getReference (i).getFileName().startsWithChar ('.')) files.remove (i);
     if (files.isEmpty()) return "No sounds found. Put WAV files into Music / Nektar Library.";
+    {   // with the library map: the sounds of the chosen category nearest the cursor (a quarter of them, at least four)
+        auto dots = libIndex.layout (libCategory);
+        if (! dots.empty())
+        {
+            std::sort (dots.begin(), dots.end(), [this] (const LibraryIndex::Dot& a, const LibraryIndex::Dot& b)
+            { return juce::Point<float> (a.x, a.y).getDistanceFrom (libCursor) < juce::Point<float> (b.x, b.y).getDistanceFrom (libCursor); });
+            const int keep = juce::jmin ((int) dots.size(), juce::jmax (4, (int) dots.size() / 4));
+            files.clear();
+            for (int i = 0; i < keep; ++i) files.add (dots[(size_t) i].file);
+        }
+    }
     juce::StringArray used;
     for (int slot = 0; slot < kSlots; ++slot)
         if (slotLock[(size_t) slot].load())
@@ -2211,6 +2244,7 @@ juce::String NektarProcessor::randomSounds()
             if (used.contains (f.getFileName()) && used.size() < files.size()) continue;
             if (loadSample (f, slot).isNotEmpty()) continue;
             if (auto* pk = apvts.getParameter (slot == 0 ? juce::String ("skey") : "skey" + juce::String (slot + 1))) pk->setValueNotifyingHost (0.0f);
+            if (auto* pt = apvts.getParameter (slot == 0 ? juce::String ("stempo") : "stempo" + juce::String (slot + 1))) pt->setValueNotifyingHost (0.0f);
             used.add (f.getFileName());
             clearSlotVector (slot);
             ++changed;
@@ -2315,4 +2349,56 @@ void NektarProcessor::randomMovement (int pair)
 {
     if (auto* pa = apvts.getParameter (pair == 0 ? "vec1shape" : "vec2shape")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) (1 + vecRnd.nextInt (motionshapes::count))));
     if (auto* pa = apvts.getParameter (pair == 0 ? "vec1speed" : "vec2speed")) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) vecRnd.nextInt (4)));
+}
+
+// ---- Tempo lock (our own rules on top of TempoFind.h)
+float NektarProcessor::tempoOf (int slot, const Sample* s) const
+{
+    if (s == nullptr || ! s->tempoKnown || s->tempo.bpm <= 0.0f) return 0.0f;
+    const int fix = juce::roundToInt (apvts.getRawParameterValue (slot == 0 ? juce::String ("stempo") : "stempo" + juce::String (slot + 1))->load());
+    if (fix == 1) return 0.0f;
+    return s->tempo.bpm * (fix == 2 ? 0.5f : (fix == 3 ? 2.0f : 1.0f));
+}
+
+// how much faster the sound is read so that it follows the host tempo; the half or double tempo is used when it is nearer,
+// so a loop is never read more than about 1.4 times faster or slower than it was recorded
+double NektarProcessor::tempoRatioFor (int slot, const Sample* s, double hostBpm, bool hostHas) const
+{
+    if (! hostHas || apvts.getRawParameterValue ("tempolock")->load() < 0.5f) return 1.0;
+    const float b = tempoOf (slot, s);
+    if (b <= 0.0f || hostBpm <= 0.0) return 1.0;
+    double r = hostBpm / (double) b;
+    while (r > 1.4142) r *= 0.5;
+    while (r < 0.7071) r *= 2.0;
+    return r;
+}
+
+juce::String NektarProcessor::tempoText (int slot) const
+{
+    const auto s = getSample (slot);
+    if (s == nullptr) return {};
+    if (! s->tempoKnown) return "...";
+    const float b = tempoOf (slot, s.get());
+    return b > 0.0f ? juce::String (juce::roundToInt (b)) + " bpm" : juce::String ("no tempo");
+}
+
+// one round of a Space movement: 50 s .. 0.5 s by the Speed knob (times the Motion knob); with a host tempo and the lock on,
+// the nearest whole number of beats in powers of two (1 .. 256), and in step with the host's bar position when it plays
+double NektarProcessor::spaceAdvance (int slot, int numSamples, float motion)
+{
+    auto& ph = spPhase[(size_t) slot];
+    const double old = ph;
+    const double perSec = 50.0 * std::pow (0.01, (double) juce::jlimit (0.0f, 1.0f, modded (spSpeedP[(size_t) slot]))) / (double) motion;
+    const double sr = hostRate.load() > 0.0 ? hostRate.load() : 44100.0;
+    if (hostNow.has && apvts.getRawParameterValue ("tempolock")->load() > 0.5f)
+    {
+        const double per = juce::jlimit (1.0, 256.0, std::pow (2.0, std::round (std::log2 (perSec * hostNow.bpm / 60.0))));
+        if (hostNow.hasPpq) ph = hostNow.ppq / per - std::floor (hostNow.ppq / per);
+        else ph += (double) numSamples / sr * hostNow.bpm / 60.0 / per;
+    }
+    else
+        ph += (double) numSamples / sr / perSec;
+    ph -= std::floor (ph);
+    if (ph < old) for (auto& t : spTg[(size_t) slot]) t = { vecMoveRnd.nextFloat() * 1.4f - 0.7f, vecMoveRnd.nextFloat() * 1.4f - 0.7f };
+    return ph;
 }
