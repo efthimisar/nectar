@@ -98,6 +98,8 @@ public:
     HostNow hostNow;                                   // audio thread
     std::atomic<int> relation { 0 };
     std::array<float, 2> pairGainNow { { 1.0f, 1.0f } };
+    std::array<std::array<std::atomic<float>, 9>, 2> padDbNow {};  // the pad's level correction now (audio thread reads)
+    std::atomic<int> onlyPair { -1 };                                 // the hidden copy listens to one pair alone
     std::array<float, 4> pairGainWas { { 1.0f, 1.0f, 1.0f, 1.0f } };
     double freeBeats = 0.0;
     std::array<float, 256> shadowX {}, shadowY {};
@@ -204,10 +206,11 @@ private:
     struct VecEntry { int idx; float c[4]; };       // knob (index in the modulation table) and its four corner values (0..1 of its range)
     std::array<std::vector<VecEntry>, 2> vecEntries; // guarded by vecLock
     juce::SpinLock vecLock;
-    struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; int grOct[2] = { 0, 0 }; int grArp[2] = { 0, 0 }; bool swell = false; };
+    struct VecSnapshot { std::vector<VecEntry> entries; int grMode[2] = { 0, 0 }; int grPat[2] = { 0, 0 }; int grOct[2] = { 0, 0 }; int grArp[2] = { 0, 0 }; bool swell = false;
+                         std::array<float, 9> padDb {}; }; // padDb: level correction (dB) on a 3x3 grid of the pad, so it sounds equally loud everywhere
     std::array<std::vector<VecSnapshot>, 2> vecHistory; // message thread only
     // ---- Make listens (see PluginProcessor.cpp, "Make listens")
-    struct Heard { float db = -100.0f, bright = 0.0f, flat = 0.0f; }; // loudness (dB) and brightness (spectral centroid, octaves above 20 Hz)
+    struct Heard { float db = -100.0f, bright = 0.0f, flat = 0.0f, mod = 0.0f; }; // mod: how much the level moves (10 ms steps), std / mean // loudness (dB) and brightness (spectral centroid, octaves above 20 Hz)
     struct JudgeJob { std::vector<VecSnapshot> drafts[2]; int parts[2] = { 0, 0 }; int target = -1; std::vector<VecSnapshot> chosen; int best[2] = { 0, 0 }; };
     std::unique_ptr<NektarProcessor> judge;              // the hidden copy (made on the message thread, used by the judge thread)
     std::unique_ptr<juce::Thread> judgeThread;
@@ -221,7 +224,7 @@ private:
     juce::String makeMessage;
     void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount);
     void runJudge();                                     // judge thread
-    Heard listen (int slot, float x, float y);           // judge thread, on the copy: one sound alone, the stick at x, y
+    Heard listen (int slot, float x, float y, int pairOnly = -1); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
     void finishMake();                                   // message thread
     VecSnapshot vectorNow (int pair);
     void applyVector (int pair, const VecSnapshot& snap);

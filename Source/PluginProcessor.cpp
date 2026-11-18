@@ -664,6 +664,15 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 const float th = juce::MathConstants<float>::halfPi * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * ph));
                 gsum *= pr == 0 ? std::cos (th) : std::sin (th);
             }
+            {   // the pad's level correction where the stick is now (bilinear between the 3x3 points)
+                const float x = juce::jlimit (0.0f, 1.0f, vecXShown[(size_t) pr].load()) * 2.0f, y = juce::jlimit (0.0f, 1.0f, vecYShown[(size_t) pr].load()) * 2.0f;
+                const int ix = juce::jmin (1, (int) x), iy = juce::jmin (1, (int) y);
+                const float fx = x - (float) ix, fy = y - (float) iy;
+                auto at = [this, pr] (int gx, int gy) { return padDbNow[(size_t) pr][(size_t) (gy * 3 + gx)].load(); };
+                const float db = (1 - fy) * ((1 - fx) * at (ix, iy) + fx * at (ix + 1, iy)) + fy * ((1 - fx) * at (ix, iy + 1) + fx * at (ix + 1, iy + 1));
+                if (vecOn[(size_t) pr].load() && std::abs (db) > 0.01f) gsum *= juce::Decibels::decibelsToGain (db);
+            }
+            if (onlyPair.load() >= 0 && onlyPair.load() != pr) gsum = 0.0f;
             pairGainNow[(size_t) pr] = gsum;
         }
     }
@@ -756,7 +765,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
         {
             const float pg = pairGainNow[(size_t) (slot / 2)], pg0 = pairGainWas[(size_t) slot];
-            if (std::abs (pg - pg0) > 1.0e-4f || pg < 0.9999f)
+            if (std::abs (pg - pg0) > 1.0e-4f || std::abs (pg - 1.0f) > 1.0e-4f)
                 for (int c = 0; c < view.getNumChannels(); ++c) view.applyGainRamp (c, 0, view.getNumSamples(), pg0, pg);
             pairGainWas[(size_t) slot] = pg;
             float m = 0.0f;
@@ -1307,6 +1316,7 @@ NektarProcessor::VecSnapshot NektarProcessor::vectorNow (int pair)
         snap.grArp[k] = juce::roundToInt (grArpP[(size_t) (pair * 2 + k)]->load());
     }
     snap.swell = apvts.getRawParameterValue (pair == 0 ? "swell1" : "swell2")->load() > 0.5f;
+    for (int i = 0; i < 9; ++i) snap.padDb[(size_t) i] = padDbNow[(size_t) pair][(size_t) i].load();
     return snap;
 }
 
@@ -1322,6 +1332,7 @@ void NektarProcessor::applyVector (int pair, const VecSnapshot& snap)
         if (auto* pa = apvts.getParameter ("grarp" + sfx)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) snap.grArp[k]));
     }
     if (auto* pa = apvts.getParameter (pair == 0 ? "swell1" : "swell2")) pa->setValueNotifyingHost (snap.swell ? 1.0f : 0.0f);
+    for (int i = 0; i < 9; ++i) padDbNow[(size_t) pair][(size_t) i].store (snap.padDb[(size_t) i]);
     {
         const juce::SpinLock::ScopedLockType lk (vecLock);
         for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
@@ -1663,6 +1674,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
         const float sc = score (sn);
         if (sc > bestScore) { bestScore = sc; best = std::move (sn); }
     }
+    best.padDb.fill (0.0f); // (a Make that listens measures the pad and fills this in)
     applyVector (pair, best);
 }
 
@@ -1762,6 +1774,9 @@ void NektarProcessor::addModToState (juce::ValueTree& state)
         for (const auto& e : vecEntries[(size_t) pair])
             data << modIds[(size_t) e.idx] << ":" << juce::String (e.c[0], 4) << "," << juce::String (e.c[1], 4) << "," << juce::String (e.c[2], 4) << "," << juce::String (e.c[3], 4) << ";";
         v.setProperty ("corners", data, nullptr);
+        juce::String pad;
+        for (int i = 0; i < 9; ++i) pad << juce::String (padDbNow[(size_t) pair][(size_t) i].load(), 2) << (i < 8 ? "," : "");
+        v.setProperty ("pad", pad, nullptr);
         state.appendChild (v, nullptr);
     }
 }
@@ -1770,11 +1785,17 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
 {
     {   // pair joysticks
         std::array<std::vector<VecEntry>, 2> got;
+        std::array<std::array<float, 9>, 2> pads {};
         for (int i = 0; i < state.getNumChildren(); ++i)
         {
             const auto c = state.getChild (i);
             if (! c.hasType ("VEC")) continue;
             const int pair = juce::jlimit (0, 1, (int) c.getProperty ("pair"));
+            {
+                juce::StringArray pv;
+                pv.addTokens (c.getProperty ("pad").toString(), ",", "");
+                if (pv.size() == 9) for (int i = 0; i < 9; ++i) pads[(size_t) pair][(size_t) i] = juce::jlimit (-24.0f, 24.0f, pv[i].getFloatValue());
+            }
             juce::StringArray items;
             items.addTokens (c.getProperty ("corners").toString(), ";", "");
             for (const auto& item : items)
@@ -1796,6 +1817,7 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
                 vecEntries[(size_t) pair] = got[(size_t) pair];
             }
             vecHistory[(size_t) pair].clear();
+            for (int i = 0; i < 9; ++i) padDbNow[(size_t) pair][(size_t) i].store (pads[(size_t) pair][(size_t) i]);
             setVectorOn (pair, ! got[(size_t) pair].empty());
         }
     }
@@ -2131,13 +2153,14 @@ float NektarProcessor::resMixNow() const noexcept
 // that falls silent, and with some difference between its corners. Using the spectral centroid as the main correlate of
 // perceived brightness follows the timbre literature (e.g. Grey & Gordon 1978; McAdams et al. 1995); the limits and weights
 // below are our own choices, to be judged by ear.
-NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y)
+NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int pairOnly)
 {
     auto& j = *judge;
-    const int pair = slot / 2;
+    const int pair = slot >= 0 ? slot / 2 : pairOnly;
+    j.onlyPair = slot >= 0 ? -1 : pairOnly;
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1x" : "vec2x")) pa->setValueNotifyingHost (x);
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) pa->setValueNotifyingHost (y);
-    j.setSolo (slot);
+    j.setSolo (slot >= 0 ? slot : -1);
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
     const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (0.5 * sr / bs), tail = (int) (0.2 * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
@@ -2193,6 +2216,19 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y)
     }
     h.bright = den > 1.0e-18 ? (float) std::log2 (juce::jmax (20.0, num / den) / 20.0) : 0.0f;
     h.flat = frames > 0 ? (float) (flatSum / frames) : 0.0f;
+    {   // how much the level moves: RMS in 10 ms steps, their spread against their mean
+        const int step = (int) (0.01 * sr);
+        std::vector<float> e;
+        for (size_t st = 0; st + (size_t) step <= mono.size(); st += (size_t) step)
+        {
+            double a = 0.0; for (int i = 0; i < step; ++i) a += (double) mono[st + (size_t) i] * mono[st + (size_t) i];
+            e.push_back ((float) std::sqrt (a / step));
+        }
+        double m = 0.0, v = 0.0; for (float q : e) m += q; m /= juce::jmax ((size_t) 1, e.size());
+        for (float q : e) v += (q - m) * (q - m); v /= juce::jmax ((size_t) 1, e.size());
+        h.mod = m > 1.0e-6 ? (float) (std::sqrt (v) / m) : 0.0f;
+    }
+    j.onlyPair = -1;
     return h;
 }
 
@@ -2276,7 +2312,7 @@ void NektarProcessor::runJudge()
             {
                 if (! changing[slot]) continue;
                 const float lo = bHi >= bLo ? bLo - 0.5f : now[slot].bright - 1.0f, hi = bHi >= bLo ? bHi + 0.5f : now[slot].bright + 1.0f;
-                float bMin = 1.0e9f, bMax = -1.0e9f;
+                float bMin = 1.0e9f, bMax = -1.0e9f, mMin = 1.0e9f, mMax = -1.0e9f;
                 for (int c = 0; c < 4; ++c)
                 {
                     const auto h = listen (slot, (c & 1) ? 1.0f : 0.0f, (c & 2) ? 1.0f : 0.0f);
@@ -2286,15 +2322,42 @@ void NektarProcessor::runJudge()
                     sc -= 2.0f * (h.bright < lo ? lo - h.bright : (h.bright > hi ? h.bright - hi : 0.0f)); // fits the others' brightness
                     sc -= 8.0f * juce::jmax (0.0f, h.flat - now[slot].flat - 0.05f);   // stays as tonal as it was (not turned into noise)
                     bMin = juce::jmin (bMin, h.bright); bMax = juce::jmax (bMax, h.bright);
+                    mMin = juce::jmin (mMin, h.mod); mMax = juce::jmax (mMax, h.mod);
                 }
-                sc += 0.5f * juce::jmin (1.5f, bMax - bMin);                             // some difference between the corners
+                // the corners should differ, in colour or in how they move (a Glitch differs in its motion more than its colour)
+                const float differ = juce::jmax (bMax - bMin, 2.0f * (mMax - mMin));
+                sc += 0.5f * juce::jmin (1.5f, differ);
+                if (differ < 0.3f) sc -= 3.0f * (0.3f - differ) / 0.3f;
+                {   // the middle of the pad should be a blend of the corners, not something else (no cliffs)
+                    const auto mid = listen (slot, 0.5f, 0.5f);
+                    const float out = mid.bright < bMin - 0.25f ? bMin - 0.25f - mid.bright : (mid.bright > bMax + 0.25f ? mid.bright - bMax - 0.25f : 0.0f);
+                    sc -= 2.0f * out;
+                    if (mid.db < now[slot].db - 6.0f) sc -= 0.5f * (now[slot].db - 6.0f - mid.db); // no hole in the middle
+                }
             }
             if (sc > bestScore) { bestScore = sc; job.best[pair] = d; }
         }
-        if (! job.drafts[pair].empty())
-        {   // the copy keeps the chosen version (it becomes how things are), baked in the background before the next Make
-            j.applyVector (pair, job.drafts[pair][(size_t) job.best[pair]]);
+        if (! job.drafts[pair].empty() && ! exitNow())
+        {   // the copy keeps the chosen version (it becomes how things are); its pad is measured on a 3x3 grid, both sounds of
+            // the pair together, and a level correction makes it equally loud everywhere (the stick changes colour, not volume)
+            auto chosen = job.drafts[pair][(size_t) job.best[pair]];
+            chosen.padDb.fill (0.0f);
+            auto meas = chosen;
+            meas.swell = false; // Swell breathes on purpose: the pad is measured without it, so the breathing stays
+            j.applyVector (pair, meas);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
+            settle();
+            float db[9]; int n = 0; double sum = 0.0;
+            for (int g = 0; g < 9 && ! exitNow(); ++g)
+            {
+                db[g] = listen (-1, (float) (g % 3) * 0.5f, (float) (g / 3) * 0.5f, pair).db;
+                if (db[g] > -70.0f) { sum += db[g]; ++n; }
+            }
+            if (chosen.swell) j.applyVector (pair, chosen);
+            const float target = n > 0 ? (float) (sum / n) : 0.0f;
+            for (int g = 0; g < 9; ++g) chosen.padDb[(size_t) g] = db[g] > -70.0f ? juce::jlimit (-12.0f, 9.0f, target - db[g]) : 0.0f;
+            const juce::ScopedLock sl (judgeLock);
+            judgeJob.drafts[pair][(size_t) job.best[pair]].padDb = chosen.padDb;
         }
     }
     {
