@@ -1518,6 +1518,12 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                 e.c[c] = juce::jlimit (0.0f, 1.0f, now4[c] + a * reach[c] * (target - now4[c]));
             }
         }
+        if (id.startsWith ("sfiltype"))
+        {   // the Type knob has four zones (Ladder, SVF, Comb, Formant); crossing from one to the next switches the filter at
+            // once, a jump on the stick. The corners stay in the zone of the first corner
+            const int zone = juce::jlimit (0, 3, (int) (e.c[0] * 3.999f));
+            for (auto& c : e.c) c = juce::jlimit ((float) zone * 0.25f, (float) zone * 0.25f + 0.249f, c);
+        }
         out.push_back (e);
         return (int) out.size() - 1;
     };
@@ -1546,6 +1552,23 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                 for (int b2 = 0; b2 < bins; ++b2) { lv[(size_t) b2] = smp->play.getRMSLevel (0, b2 * w, w); mx = juce::jmax (mx, lv[(size_t) b2]); }
                 for (int b2 = 0; b2 < bins; ++b2) if (lv[(size_t) b2] >= 0.35f * mx) loud.push_back (((float) b2 + 0.5f) / (float) bins);
             }
+            // the stick slides the position between the corners: if the corners sit in two loud places with a quiet or different
+            // stretch between them, the slide passes through it (a hole, a jump). So the corners share one unbroken loud stretch
+            // (Glitch keeps its broken pieces from anywhere: jumping is its point)
+            std::vector<float> run;
+            if (! loud.empty() && character != 7)
+            {
+                std::vector<std::vector<float>> runs;
+                for (size_t i = 0; i < loud.size(); ++i)
+                {
+                    if (i == 0 || loud[i] - loud[i - 1] > 1.5f / 32.0f) runs.emplace_back();
+                    runs.back().push_back (loud[i]);
+                }
+                int total = 0; for (auto& r : runs) total += (int) r.size();
+                int pick = rnd.nextInt (juce::jmax (1, total));
+                for (auto& r : runs) { if (pick < (int) r.size()) { run = r; break; } pick -= (int) r.size(); }
+            }
+            const auto& places = run.empty() ? loud : run;
             const auto it = modIdxById.find (("grpos" + sfx).toStdString());
             if (it != modIdxById.end())
             {   // positions are picked outright (no spreading around a centre: a place between two loud places may be silent)
@@ -1553,11 +1576,11 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                 float now4[4];
                 nowOf (e.idx, now4);
                 const float a = amount[k][0];
-                const float first = loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())];
+                const float first = places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())];
                 for (int c = 0; c < 4; ++c)
                 {   // with the rhythm amount, a corner may take the grains from another place
                     if (rnd.nextFloat() >= a * reach[c]) { e.c[c] = now4[c]; continue; }
-                    e.c[c] = (character == 7 || rnd.nextFloat() < a) ? (loud.empty() ? rnd.nextFloat() : loud[(size_t) rnd.nextInt ((int) loud.size())]) : first;
+                    e.c[c] = (character == 7 || rnd.nextFloat() < a) ? (places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())]) : first;
                 }
                 out.push_back (e);
             }
@@ -2153,7 +2176,7 @@ float NektarProcessor::resMixNow() const noexcept
 // that falls silent, and with some difference between its corners. Using the spectral centroid as the main correlate of
 // perceived brightness follows the timbre literature (e.g. Grey & Gordon 1978; McAdams et al. 1995); the limits and weights
 // below are our own choices, to be judged by ear.
-NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int pairOnly)
+NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int pairOnly, float measSec)
 {
     auto& j = *judge;
     const int pair = slot >= 0 ? slot / 2 : pairOnly;
@@ -2162,7 +2185,7 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) pa->setValueNotifyingHost (y);
     j.setSolo (slot >= 0 ? slot : -1);
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
-    const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (0.5 * sr / bs), tail = (int) (0.2 * sr / bs);
+    const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (measSec * sr / bs), tail = (int) (juce::jmin (0.2f, 0.4f * measSec) * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
     constexpr int order = 10, n = 1 << order;
     juce::dsp::FFT fft (order);
@@ -2303,7 +2326,12 @@ void NektarProcessor::runJudge()
         for (int d = 0; d < (int) job.drafts[pair].size() && ! exitNow(); ++d)
         {
             judgeStep = judgeStep.load() + 1;
-            j.applyVector (pair, job.drafts[pair][(size_t) d]);
+            {   // heard without Swell: it breathes on purpose and would make every measurement depend on the moment
+                auto meas = job.drafts[pair][(size_t) d];
+                meas.swell = false;
+                meas.padDb.fill (0.0f);
+                j.applyVector (pair, meas);
+            }
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (changing[slot]) j.scheduleClean (slot);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) j.cleanDirty[(size_t) slot] = false;
             settle();
@@ -2328,34 +2356,38 @@ void NektarProcessor::runJudge()
                 const float differ = juce::jmax (bMax - bMin, 2.0f * (mMax - mMin));
                 sc += 0.5f * juce::jmin (1.5f, differ);
                 if (differ < 0.3f) sc -= 3.0f * (0.3f - differ) / 0.3f;
-                {   // the middle of the pad should be a blend of the corners, not something else (no cliffs)
-                    const auto mid = listen (slot, 0.5f, 0.5f);
-                    const float out = mid.bright < bMin - 0.25f ? bMin - 0.25f - mid.bright : (mid.bright > bMax + 0.25f ? mid.bright - bMax - 0.25f : 0.0f);
-                    sc -= 2.0f * out;
-                    if (mid.db < now[slot].db - 6.0f) sc -= 0.5f * (now[slot].db - 6.0f - mid.db); // no hole in the middle
+            }
+            if (sc > bestScore) // (the grid only takes points away: a draft already behind the best cannot win, so it is not heard twice)
+            {   // the pair as it is heard, on a 3x3 grid: the middle of each edge and of the pad should be a blend of the
+                // corners next to it, not something else (no cliffs, no holes); the levels also give the pad's loudness map
+                Heard g[9];
+                for (int k = 0; k < 9 && ! exitNow(); ++k) g[k] = listen (-1, (float) (k % 3) * 0.5f, (float) (k / 3) * 0.5f, pair, 0.3f);
+                auto blendOf = [&] (int m, std::initializer_list<int> cs)
+                {
+                    float lo = 1.0e9f, hi = -1.0e9f, dLo = 1.0e9f;
+                    for (int c : cs) { lo = juce::jmin (lo, g[c].bright); hi = juce::jmax (hi, g[c].bright); dLo = juce::jmin (dLo, g[c].db); }
+                    const float b = g[m].bright;
+                    sc -= 2.0f * (b < lo - 0.3f ? lo - 0.3f - b : (b > hi + 0.3f ? b - hi - 0.3f : 0.0f));
+                    if (g[m].db < dLo - 6.0f) sc -= 0.5f * (dLo - 6.0f - g[m].db);
+                };
+                blendOf (1, { 0, 2 }); blendOf (3, { 0, 6 }); blendOf (5, { 2, 8 }); blendOf (7, { 6, 8 }); blendOf (4, { 0, 2, 6, 8 });
+                float sum = 0.0f; int n = 0;
+                for (auto& h : g) if (h.db > -70.0f) { sum += h.db; ++n; }
+                const float target = n > 0 ? sum / (float) n : 0.0f;
+                auto& pd = job.drafts[pair][(size_t) d].padDb;
+                for (int k = 0; k < 9; ++k)
+                {
+                    pd[(size_t) k] = g[k].db > -70.0f ? juce::jlimit (-12.0f, 9.0f, target - g[k].db) : 0.0f;
+                    if (g[k].db > -70.0f && target - g[k].db > 9.0f) sc -= 0.5f * (target - g[k].db - 9.0f); // a hole the map cannot fill
                 }
             }
             if (sc > bestScore) { bestScore = sc; job.best[pair] = d; }
         }
         if (! job.drafts[pair].empty() && ! exitNow())
-        {   // the copy keeps the chosen version (it becomes how things are); its pad is measured on a 3x3 grid, both sounds of
-            // the pair together, and a level correction makes it equally loud everywhere (the stick changes colour, not volume)
-            auto chosen = job.drafts[pair][(size_t) job.best[pair]];
-            chosen.padDb.fill (0.0f);
-            auto meas = chosen;
-            meas.swell = false; // Swell breathes on purpose: the pad is measured without it, so the breathing stays
-            j.applyVector (pair, meas);
+        {   // the copy keeps the chosen version (it becomes how things are), with the loudness map measured while judging
+            const auto& chosen = job.drafts[pair][(size_t) job.best[pair]];
+            j.applyVector (pair, chosen);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
-            settle();
-            float db[9]; int n = 0; double sum = 0.0;
-            for (int g = 0; g < 9 && ! exitNow(); ++g)
-            {
-                db[g] = listen (-1, (float) (g % 3) * 0.5f, (float) (g / 3) * 0.5f, pair).db;
-                if (db[g] > -70.0f) { sum += db[g]; ++n; }
-            }
-            if (chosen.swell) j.applyVector (pair, chosen);
-            const float target = n > 0 ? (float) (sum / n) : 0.0f;
-            for (int g = 0; g < 9; ++g) chosen.padDb[(size_t) g] = db[g] > -70.0f ? juce::jlimit (-12.0f, 9.0f, target - db[g]) : 0.0f;
             const juce::ScopedLock sl (judgeLock);
             judgeJob.drafts[pair][(size_t) job.best[pair]].padDb = chosen.padDb;
         }

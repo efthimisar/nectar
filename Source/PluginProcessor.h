@@ -224,7 +224,7 @@ private:
     juce::String makeMessage;
     void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount);
     void runJudge();                                     // judge thread
-    Heard listen (int slot, float x, float y, int pairOnly = -1); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
+    Heard listen (int slot, float x, float y, int pairOnly = -1, float measSec = 0.5f); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
     void finishMake();                                   // message thread
     VecSnapshot vectorNow (int pair);
     void applyVector (int pair, const VecSnapshot& snap);

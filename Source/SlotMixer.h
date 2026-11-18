@@ -14,6 +14,7 @@ public:
 
     void prepare (double sampleRate, int maxBlock)
     {
+        rate = sampleRate;
         juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) juce::jmax (1, maxBlock), 2 };
         for (auto& pr : pairs)
         {
@@ -148,9 +149,13 @@ public:
             {
                 auto& P = pairs[(size_t) pr];
                 if (! P.active) { P.lp.reset(); P.hp.reset(); P.active = true; }
-                const float hz = crossoverHz (imorph[(size_t) pr]);
-                P.lp.setCutoffFrequency (hz);
-                P.hp.setCutoffFrequency (hz);
+                // the two sounds meet at the crossover; near 0 the edges start far apart (the first sound keeps almost all
+                // of its highs, the second almost all of its lows) and close in as the knob turns, so there is no jump
+                // from "off" to a split at 100 Hz (on the joystick, a corner at 0 next to a corner above 0 was a cliff)
+                const float a = imorph[(size_t) pr], hz = crossoverHz (a), t = juce::jmin (1.0f, a / kOpen);
+                const float top = juce::jmin (20000.0f, 0.45f * (float) rate);
+                P.lp.setCutoffFrequency (std::pow (top, 1.0f - t) * std::pow (hz, t));
+                P.hp.setCutoffFrequency (std::pow (20.0f, 1.0f - t) * std::pow (hz, t));
                 juce::dsp::AudioBlock<float> ba (scratch[(size_t) a]), bb (scratch[(size_t) b]);
                 auto sa = ba.getSubBlock (0, (size_t) numSamples);
                 auto sb = bb.getSubBlock (0, (size_t) numSamples);
@@ -168,6 +173,8 @@ public:
     }
 
 private:
+    static constexpr float kOpen = 0.2f; // below this the split opens up gradually
+    double rate = 48000.0;
     struct Pair
     {
         juce::dsp::LinkwitzRileyFilter<float> lp, hp;
