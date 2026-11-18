@@ -181,11 +181,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             for (int k = 0; k < 12; ++k) { keys.add (juce::String (Tonality::noteName (k)) + " major"); keys.add (juce::String (Tonality::noteName (k)) + " minor"); }
             l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "skey" + sfx, 1 }, "Key of sound" + nm, keys, 0));
         }
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tail" + sfx, 1 }, "Tail" + nm,
-                                                             NormalisableRange<float> (0.01f, 5.0f, 0.001f, 0.4f), 0.25f,
-                                                             juce::AudioParameterFloatAttributes().withLabel ("s")));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "pan" + sfx, 1 }, "Pan" + nm,
-                                                             NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
         {
             static const float defAz[4] = { -60.0f, -20.0f, 20.0f, 60.0f };
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spaz" + sfx, 1 }, "Space direction" + nm,
@@ -201,9 +196,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.35f));
         }
         {   // v2: every sample has its own time / colour controls (sample 1 keeps the old ids) and its own filter
-            static const char* const ids[kCol] = { "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise" };
-            static const char* const names[kCol] = { "Keep length", "Stretch", "Blur", "Freeze", "Body tone", "Body focus", "Body size", "Grit", "Model", "Model noise" };
-            static const float defs[kCol] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 0.0f };
+            static const char* const ids[kCol] = { "blur", "bodytone", "bodyfocus", "bodysize", "srcrough" };
+            static const char* const names[kCol] = { "Blur", "Body tone", "Body focus", "Body size", "Grit" };
+            static const float defs[kCol] = { 0.0f, 0.5f, 0.5f, 0.5f, 0.0f };
             if (slot > 0)
                 for (int i = 0; i < kCol; ++i)
                     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { ids[i] + sfx, 1 }, names[i] + nm,
@@ -214,7 +209,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                                  NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
             l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ring" + sfx, 1 }, "Ring" + nm,
                                                                  NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-            l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "rev" + sfx, 1 }, "Reverse" + nm, false));
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
             static const char* const fnames[4] = { "Sample filter type", "Sample filter cutoff", "Sample filter reso", "Sample filter mix" };
             static const float fdefs[4] = { 0.0f, 1.0f, 0.3f, 1.0f };
@@ -248,17 +242,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Make colour" + nm, 0.0f, 1.0f, 0.5f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mktex" + sfx, 1 }, "Make texture" + nm, 0.0f, 1.0f, 0.5f));
     }
-    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "autolevel", 1 }, "Auto level", true));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "keeplength", 1 }, "Keep length",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "stretch", 1 }, "Stretch",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bright", 1 }, "Bright",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "blur", 1 }, "Blur",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph", 1 }, "Morph",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bodytone", 1 }, "Body tone",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
@@ -266,15 +253,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bodysize", 1 }, "Body size",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "model", 1 }, "Model (sine waves)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "modelnoise", 1 }, "Model noise (residual)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "spspk", 1 }, "Space: speaker check mode", false));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spfar", 1 }, "Space: distance effect",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spback", 1 }, "Space: darker behind",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph12", 1 }, "Intermorph 1+2 (0 = off, then crossover)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "imorph34", 1 }, "Intermorph 3+4 (0 = off, then crossover)",
@@ -334,8 +313,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                           juce::StringArray { "As is", "One key", "Chord" }, 1));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
                                                          NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
 }
 
@@ -358,13 +335,11 @@ NektarProcessor::NektarProcessor()
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
         levelP[(size_t) slot] = apvts.getRawParameterValue ("level" + sfx);
         pitchP[(size_t) slot] = apvts.getRawParameterValue ("pitch" + sfx);
-        tailP[(size_t) slot] = apvts.getRawParameterValue ("tail" + sfx);
-        panP[(size_t) slot] = apvts.getRawParameterValue ("pan" + sfx);
         {
             static const char* const ids[kGr] = { "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev", "grspread", "grgate", "grpat" };
             for (int i = 0; i < kGr; ++i)
                 grP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (ids[i] + sfx);
-            static const char* const cids[kCol] = { "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize", "srcrough", "model", "modelnoise" };
+            static const char* const cids[kCol] = { "blur", "bodytone", "bodyfocus", "bodysize", "srcrough" };
             for (int i = 0; i < kCol; ++i)
                 colP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (cids[i] + sfx);
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
@@ -373,8 +348,6 @@ NektarProcessor::NektarProcessor()
             airP[(size_t) slot] = apvts.getRawParameterValue ("air" + sfx);
             fshiftP[(size_t) slot] = apvts.getRawParameterValue ("fshift" + sfx);
             ringP[(size_t) slot] = apvts.getRawParameterValue ("ring" + sfx);
-            revP[(size_t) slot] = apvts.getRawParameterValue ("rev" + sfx);
-            apvts.addParameterListener ("rev" + sfx, this);
             apvts.addParameterListener ("air" + sfx, this);
         }
         spAzP[(size_t) slot] = apvts.getRawParameterValue ("spaz" + sfx);
@@ -393,20 +366,11 @@ NektarProcessor::NektarProcessor()
     }
     startTimer (100);
     brightP = apvts.getRawParameterValue ("bright");
-    blurP = apvts.getRawParameterValue ("blur");
-    freezeP = apvts.getRawParameterValue ("freeze");
-    morphP = apvts.getRawParameterValue ("morph");
-    bodyToneP = apvts.getRawParameterValue ("bodytone");
-    bodyFocusP = apvts.getRawParameterValue ("bodyfocus");
-    bodySizeP = apvts.getRawParameterValue ("bodysize");
-    srcRoughP = apvts.getRawParameterValue ("srcrough");
     imorphP[0] = apvts.getRawParameterValue ("imorph12");
     imorphP[1] = apvts.getRawParameterValue ("imorph34");
     xmorphP[0] = apvts.getRawParameterValue ("xmorph12");
     xmorphP[1] = apvts.getRawParameterValue ("xmorph34");
     buildModTable();
-    modelP = apvts.getRawParameterValue ("model");
-    modelNoiseP = apvts.getRawParameterValue ("modelnoise");
     resTuneP = apvts.getRawParameterValue ("restune");
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
@@ -431,8 +395,6 @@ NektarProcessor::NektarProcessor()
     vecXP[1] = apvts.getRawParameterValue ("vec2x"); vecYP[1] = apvts.getRawParameterValue ("vec2y");
     keyP = apvts.getRawParameterValue ("key");
     spSpkP = apvts.getRawParameterValue ("spspk");
-    spFarP = apvts.getRawParameterValue ("spfar");
-    spBackP = apvts.getRawParameterValue ("spback");
     mSpeedP = apvts.getRawParameterValue ("mspeed");
     mWeightP = apvts.getRawParameterValue ("mweight");
     mLightP = apvts.getRawParameterValue ("mlight");
@@ -449,9 +411,7 @@ NektarProcessor::~NektarProcessor()
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
-        apvts.removeParameterListener ("noise" + sfx, this);
-        apvts.removeParameterListener ("hum" + sfx, this);
-        apvts.removeParameterListener ("lowcut" + sfx, this);
+        apvts.removeParameterListener ("air" + sfx, this);
     }
     cleanPool.removeAllJobs (true, 20000);
 }
@@ -463,11 +423,11 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
     const int slot = pairId ? (id.endsWith ("34") ? 2 : 0) : ((last >= '2' && last <= '4') ? (int) (last - '1') : 0);
     if (pairId && grP[(size_t) slot][0]->load() < 0.5f)
         return; // without grains the morph is made live
-    const bool colour = id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough") || id.startsWith ("model");
+    const bool colour = id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough");
     if (colour && grP[(size_t) slot][0]->load() < 0.5f)
         return; // without grains the colour is made live
     // choosing a part of the sound is quick, so it only waits a moment; cleaning waits until the knob stops
-    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || id.startsWith ("rev") || pairId || colour ? 190u : 0u);
+    cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter() - (id.startsWith ("gr") || id.startsWith ("air") || pairId || colour ? 190u : 0u);
     cleanDirty[(size_t) slot] = true;
 }
 
@@ -505,16 +465,16 @@ void NektarProcessor::scheduleClean (int slot)
     SampleCleaner::CleanParams cp;      // analysis only: noise, hum and low cut stay off (they had no place on the main screen)
     SampleCleaner::NoiseProfile room;
     SpectralBody bd;
-    bd.tone = colP[(size_t) slot][4]->load(); bd.focus = colP[(size_t) slot][5]->load(); bd.size = colP[(size_t) slot][6]->load(); bd.rough = colP[(size_t) slot][7]->load();
+    bd.tone = colP[(size_t) slot][kTone]->load(); bd.focus = colP[(size_t) slot][kFocus]->load(); bd.size = colP[(size_t) slot][kSize]->load(); bd.rough = colP[(size_t) slot][kGrit]->load();
     // the colour is baked as it is, or once per corner of the pair joystick
-    const float blurBase = colP[(size_t) slot][2]->load(), airBase = airP[(size_t) slot]->load();
+    const float blurBase = colP[(size_t) slot][kBlur]->load(), airBase = airP[(size_t) slot]->load();
     ColourMove mv;
     for (auto& c : mv.c) { c.body = bd; c.blur = blurBase; c.air = airBase; }
     if (grP[(size_t) slot][0]->load() > 0.5f && vecOn[(size_t) (slot / 2)].load())
     {   // the pair joystick: one coloured copy per corner, blended by the stick
         const juce::SpinLock::ScopedLockType lk (vecLock);
-        const std::pair<int, const std::atomic<float>*> ks[6] = { { 4, colP[(size_t) slot][4] }, { 5, colP[(size_t) slot][5] }, { 6, colP[(size_t) slot][6] },
-                                                                 { 2, colP[(size_t) slot][2] }, { 7, colP[(size_t) slot][7] }, { 100, airP[(size_t) slot] } };
+        const std::pair<int, const std::atomic<float>*> ks[6] = { { kTone, colP[(size_t) slot][kTone] }, { kFocus, colP[(size_t) slot][kFocus] }, { kSize, colP[(size_t) slot][kSize] },
+                                                                 { kBlur, colP[(size_t) slot][kBlur] }, { kGrit, colP[(size_t) slot][kGrit] }, { 100, airP[(size_t) slot] } };
         for (const auto& k : ks)
         {
             const auto it = modIdxByRaw.find (k.second);
@@ -524,11 +484,11 @@ void NektarProcessor::scheduleClean (int slot)
                     for (int i = 0; i < 4; ++i)
                         switch (k.first)
                         {
-                            case 4: mv.c[i].body.tone = e.c[i]; break;
-                            case 5: mv.c[i].body.focus = e.c[i]; break;
-                            case 6: mv.c[i].body.size = e.c[i]; break;
-                            case 2: mv.c[i].blur = e.c[i]; break;
-                            case 7: mv.c[i].body.rough = e.c[i]; break;
+                            case kTone: mv.c[i].body.tone = e.c[i]; break;
+                            case kFocus: mv.c[i].body.focus = e.c[i]; break;
+                            case kSize: mv.c[i].body.size = e.c[i]; break;
+                            case kBlur: mv.c[i].blur = e.c[i]; break;
+                            case kGrit: mv.c[i].body.rough = e.c[i]; break;
                             default: mv.c[i].air = e.c[i]; break;
                         }
         }
@@ -538,8 +498,8 @@ void NektarProcessor::scheduleClean (int slot)
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
                                     grP[(size_t) slot][1]->load(), grP[(size_t) slot][2]->load(),
                                     grP[(size_t) slot][0]->load() > 0.5f, bd,
-                                    blurBase, colP[(size_t) slot][8]->load(), colP[(size_t) slot][9]->load(),
-                                    airP[(size_t) slot]->load(), revP[(size_t) slot]->load() > 0.5f,
+                                    blurBase, 0.0f, 0.0f,
+                                    airP[(size_t) slot]->load(), false,
                                     slot % 2 == 0 ? getSample (slot + 1) : nullptr, slot % 2 == 0 ? pairMorphP[(size_t) (slot / 2)]->load() : 0.0f,
                                     apvts.getRawParameterValue ("autolevel")->load() > 0.5f, mv), true);
 }
@@ -673,22 +633,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     hostBpmAtomic.store (hostNow.has ? hostNow.bpm : 0.0);
     updateMods (buffer.getNumSamples());
     SamplePlayer::Params p;
-    p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
-    p.keepLength = modded (apvts.getRawParameterValue ("keeplength"));
-    p.stretch = modded (apvts.getRawParameterValue ("stretch"));
-    p.blur = modded (blurP);
-    p.freeze = modded (freezeP);
-    p.morph = modded (morphP);
-    p.body.tone = modded (bodyToneP);
-    p.body.focus = modded (bodyFocusP);
-    p.body.size = modded (bodySizeP);
-    p.body.rough = modded (srcRoughP);
-    p.model = modded (modelP);
-    p.modelNoise = modded (modelNoiseP);
     // Morph: slot 1 takes its colour from slot 2, slot 3 from slot 4 (slots 2 and 4 keep playing as they are)
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());
-    // Chromophonic: each slot of a pair takes the body of the other (both ways)
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;
@@ -736,10 +683,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         p.autoGain = apvts.getRawParameterValue ("autolevel")->load() > 0.5f ? pl.getSample()->autoGain : 1.0f;
         {
             const auto& c = colP[(size_t) slot];
-            p.keepLength = modded (c[0]); p.stretch = modded (c[1]); p.blur = modded (c[2]); p.freeze = modded (c[3]);
-            p.body.tone = modded (c[4]); p.body.focus = modded (c[5]); p.body.size = modded (c[6]); p.body.rough = modded (c[7]);
-            p.modelNoise = modded (c[9]);
-            p.model = modded (c[8]);
+            p.blur = modded (c[kBlur]);
+            p.body.tone = modded (c[kTone]); p.body.focus = modded (c[kFocus]); p.body.size = modded (c[kSize]); p.body.rough = modded (c[kGrit]);
+            p.model = 0.0f; p.modelNoise = 0.0f;
         }
         {   // Morph of the pair: the first sound of the pair turns into the second (partials paired and moved, MorphVoice);
             // the second sound itself steps back, because it is now heard inside the morph
@@ -758,7 +704,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             p.level *= std::sqrt (1.0f - juce::jmin (1.0f, modded (pairMorphP[(size_t) (slot / 2)]) * 50.0f)); // heard inside the morph of its pair
         p.pitchSemis = modded (pitchP[(size_t) slot]);
         p.tempoRatio = tempoRatioFor (slot, pl.getSample().get(), hostBpm, hostHasBpm);
-        p.releaseSec = modded (tailP[(size_t) slot]);
+        p.releaseSec = kTail;
         pl.setVoiceLimit (limit);
         auto view = mixer.scratchFor (slot, buffer.getNumSamples());
         const auto& gp = grP[(size_t) slot];
@@ -785,7 +731,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             const auto smpNow = pl.getSample();
             const bool baked = smpNow->grainSrc.getNumSamples() == smpNow->play.getNumSamples();
             const int nPlay = smpNow->play.getNumSamples();
-            auto knobNow = [&] (int id) { return id == 200 ? vecXs[(size_t) (slot / 2)] : id == 201 ? vecYs[(size_t) (slot / 2)] : id == 100 ? modded (airP[(size_t) slot]) : modded (colP[(size_t) slot][(size_t) id]); };
+            auto knobNow = [&] (int id) { return id == 200 ? vecXs[(size_t) (slot / 2)] : id == 201 ? vecYs[(size_t) (slot / 2)] : id == 100 ? modded (airP[(size_t) slot]) : modded (colP[(size_t) slot][(size_t) id]); }; // (ids: the colour indices, 100 air, 200 / 201 the stick)
             if (baked && smpNow->moveParam >= 0 && smpNow->grainSrcHi.getNumSamples() == nPlay)
             {
                 g.src2 = &smpNow->grainSrcHi;
@@ -818,13 +764,13 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             slotLevel[(size_t) slot].store (m);
         }
         loadedNow[(size_t) slot] = true;
-        pans[(size_t) slot] = modded (panP[(size_t) slot]);
+        pans[(size_t) slot] = 0.0f; // the space places the sounds
     }
     SlotMixer::Space space;
     space.mix = 1.0f; // the sounds are always placed (the old Amount knob is gone: what the pad shows is what is heard)
     space.speakers = spSpkP->load() > 0.5f;
-    space.far = modded (spFarP);
-    space.back = modded (spBackP);
+    space.far = 0.5f;  // how much distance is heard (level, air, dryness): the fixed middle
+    space.back = 0.7f; // how much darker the sounds behind are
     for (int slot = 0; slot < kSlots; ++slot)
     {
         // the place on the pad, and its movement around it (our own design, no source)
@@ -964,7 +910,7 @@ juce::String NektarProcessor::loadSample (const juce::File& file, int slot)
 
 void NektarProcessor::publishSample (std::shared_ptr<Sample> s, int slot)
 {
-    s->partA = grP[(size_t) slot][1]->load(); s->partB = grP[(size_t) slot][2]->load(); s->reverse = revP[(size_t) slot]->load() > 0.5f;
+    s->partA = grP[(size_t) slot][1]->load(); s->partB = grP[(size_t) slot][2]->load();
     SamplePlayer::makePlayable (*s, hostRate.load());
     {
         const juce::SpinLock::ScopedLockType lock (sampleLock);
@@ -1064,9 +1010,9 @@ juce::String NektarProcessor::stopRecording()
         return {};
     {   // the changes are now inside the sound: its own processing goes back to neutral, so nothing is heard twice
         const juce::String sfx = target == 0 ? juce::String() : juce::String (target + 1);
-        for (auto* id : { "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev",
-                          "grspread", "grgate", "grpat", "groct", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize",
-                          "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev",
+        for (auto* id : { "pitch", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev",
+                          "grspread", "grgate", "grpat", "groct", "blur", "bodytone", "bodyfocus", "bodysize",
+                          "srcrough", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring",
                            })
             if (auto* p = apvts.getParameter (juce::String (id) + sfx))
                 p->setValueNotifyingHost (p->getDefaultValue());

@@ -10,7 +10,7 @@
 #include "AdditiveVoice.h"
 #include "MorphVoice.h"
 
-// A loaded sound. The UI shows `data`; the audio thread plays `play` / `playLoop` (prepared at the host sample rate).
+// A loaded sound. The UI shows `data`; the audio thread plays `play` (prepared at the host sample rate).
 #include "Tonality.h"
 #include "TempoFind.h"
 
@@ -40,9 +40,7 @@ struct Sample
 
     juce::AudioBuffer<float> play;     // data converted to the host sample rate
     float autoGain = 1.0f;             // gain that brings the loud parts of this sound to a common A-weighted level (Auto level)
-    juce::AudioBuffer<float> playLoop; // same, with a smooth cross-fade baked in at the loop seam
-    double playRate = 0.0;             // host rate that play/playLoop were made for
-    int loopStart = 0, loopEnd = 0;    // sustain loop (in play/playLoop samples)
+    double playRate = 0.0;             // host rate that play was made for
 
     std::shared_ptr<const SineModel> model; // sine-wave description of `play` (made in the background; may be missing)
     double modelRate = 0.0;                  // host rate the model was made for
@@ -67,7 +65,6 @@ public:
         float pitchSemis = 0.0f; // -12..+12
         float releaseSec = 0.25f;
         float keepLength = 1.0f; // 0..1
-        bool loop = false;       // sustain: a smooth loop in a steady part of the sound
         double tempoRatio = 1.0; // host tempo / the sound's tempo: how much faster the sound is read (pitch kept)
         float stretch = 0.0f;    // 0 = off, otherwise extreme stretch (see stretchFactor)
         float blur = 0.0f;       // 0..1 smooths the spectrum (spectral voices)

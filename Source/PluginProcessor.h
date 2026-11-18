@@ -181,11 +181,13 @@ private:
     std::array<SamplePlayer, kSlots> players;
     std::array<GrainPlayer, kSlots> grainPlayers;
     static constexpr int kGr = 13;
-    static constexpr int kCol = 10; // per-sample colour/time: keeplength, stretch, blur, freeze, bodytone, bodyfocus, bodysize, srcrough, model, modelnoise
+    static constexpr int kCol = 5;  // per-sample colour: blur, body tone, body focus, body size, grit
+    enum { kBlur = 0, kTone, kFocus, kSize, kGrit };
+    static constexpr float kTail = 0.25f; // release of a note (s)
     std::array<std::array<std::atomic<float>*, kCol>, kSlots> colP {};
     std::array<std::array<std::atomic<float>*, 4>, kSlots> sfilP {}; // per-sample filter: type, cutoff, reso, mix
     std::array<CharacterFilter, kSlots> slotFilter;
-    std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {}, revP {};
+    std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {};
     std::array<Shifter, kSlots> shifters;
     std::array<std::atomic<float>*, 2> pairMorphP {};
     std::atomic<float>* keyP = nullptr;
@@ -245,10 +247,8 @@ private:
     std::atomic<float>* masterP = nullptr;
     float lastMaster = 1.0f;
     SlotMixer mixer;
-    std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
     std::atomic<float>* spSpkP = nullptr;
-    std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
     std::array<std::atomic<float>*, kSlots> spMoveP {}, spSpeedP {};
     std::array<double, kSlots> spPhase {};
     std::array<std::atomic<float>, kSlots> spAzShown {}, spDistShown {};
@@ -275,17 +275,8 @@ private:
     std::array<std::shared_ptr<const Sample>, kSlots> pendingSamples; // handed to the audio thread
     std::array<bool, kSlots> samplePending {};
     std::atomic<int> recSlot { 0 };
-    std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {}, tailP {};
+    std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {};
     std::atomic<float>* brightP = nullptr;
-    std::atomic<float>* blurP = nullptr;
-    std::atomic<float>* freezeP = nullptr;
-    std::atomic<float>* morphP = nullptr;
-    std::atomic<float>* bodyToneP = nullptr;
-    std::atomic<float>* bodyFocusP = nullptr;
-    std::atomic<float>* bodySizeP = nullptr;
-    std::atomic<float>* srcRoughP = nullptr;
-    std::atomic<float>* modelP = nullptr;
-    std::atomic<float>* modelNoiseP = nullptr;
 
     // cleaning (analysis, noise, hum, low cut) runs in a background thread; the result replaces the sound of the slot
     std::array<std::atomic<bool>, kSlots> cleanDirty {};

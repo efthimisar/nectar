@@ -155,87 +155,6 @@ void SamplePlayer::makePlayable (Sample& s, double hostRate)
     }
     s.playRate = hostRate;
 
-    // 2. find a steady region for the sustain loop
-    const int N = s.play.getNumSamples();
-    const int hop = 512, win = 1024;
-    const int frames = juce::jmax (1, (N - win) / hop + 1);
-    std::vector<float> env ((size_t) frames, 0.0f);
-    float maxEnv = 1.0e-9f;
-    int peak = 0;
-    for (int k = 0; k < frames; ++k)
-    {
-        double sum = 0.0;
-        const int a = k * hop, b = juce::jmin (N, a + win);
-        for (int c = 0; c < ch; ++c)
-        {
-            const float* d = s.play.getReadPointer (c);
-            for (int i = a; i < b; ++i)
-                sum += (double) d[i] * d[i];
-        }
-        env[(size_t) k] = (float) std::sqrt (sum / (double) juce::jmax (1, (b - a) * ch));
-        if (env[(size_t) k] > maxEnv) { maxEnv = env[(size_t) k]; peak = k; }
-    }
-    int lastLoud = peak;
-    for (int k = 0; k < frames; ++k)
-        if (env[(size_t) k] >= 0.25f * maxEnv)
-            lastLoud = k;
-
-    const int minLen = juce::jmin (N, (int) (0.15 * hostRate));
-    const int maxLen = juce::jmin (N, (int) (2.0 * hostRate));
-    int loopEnd = juce::jmin (N, lastLoud * hop + win);
-    int loopStart = juce::jmax (0, N - minLen);
-    if (loopEnd - minLen >= peak * hop)
-    {
-        float best = 1.0e9f;
-        for (int k = peak; k * hop <= loopEnd - minLen; ++k)
-        {
-            const int len = loopEnd - k * hop;
-            if (len > maxLen)
-                continue;
-            const float score = std::abs (env[(size_t) k] - env[(size_t) lastLoud]) / maxEnv
-                              - 0.02f * (float) len / (float) maxLen;
-            if (score < best) { best = score; loopStart = k * hop; }
-        }
-    }
-    else
-        loopEnd = N;
-    if (loopEnd <= loopStart + 8)
-    {
-        loopStart = 0;
-        loopEnd = N;
-    }
-    s.loopStart = loopStart;
-    s.loopEnd = loopEnd;
-
-    // 3. bake a smooth cross-fade into the end of the loop (equal-power), so the seam does not click
-    s.playLoop = s.play;
-    const int Lr = loopEnd - loopStart;
-    const int X = juce::jmin (juce::jmin (Lr / 3, (int) (0.08 * hostRate)), loopStart);
-    // Equal-power fade for unrelated material, equal-gain fade for matching material (no loudness bump on tones).
-    double ab = 0.0, aa = 0.0, bb = 0.0;
-    for (int c = 0; c < ch; ++c)
-    {
-        const float* d = s.play.getReadPointer (c);
-        for (int i = 0; i < X; ++i)
-        {
-            const double a = d[loopEnd - X + i], b = d[loopEnd - X + i - Lr];
-            ab += a * b; aa += a * a; bb += b * b;
-        }
-    }
-    const float corr = juce::jlimit (0.0f, 1.0f, (float) (ab / std::sqrt (aa * bb + 1.0e-20)));
-    const float e = 1.0f + corr;
-    for (int c = 0; c < ch; ++c)
-    {
-        const float* d = s.play.getReadPointer (c);
-        float* o = s.playLoop.getWritePointer (c);
-        for (int i = 0; i < X; ++i)
-        {
-            const int p = loopEnd - X + i;
-            const float w = ((float) i + 0.5f) / (float) X;
-            o[p] = std::pow (std::cos (w * juce::MathConstants<float>::halfPi), e) * d[p]
-                 + std::pow (std::sin (w * juce::MathConstants<float>::halfPi), e) * d[p - Lr];
-        }
-    }
     s.autoGain = measureAutoGain (s.play, hostRate);
 
     // the sudden hits: where a fast level follower (2 ms) rises well above a slow one (60 ms)
@@ -306,17 +225,14 @@ void SamplePlayer::setSample (std::shared_ptr<const Sample> s)
 
 void SamplePlayer::fillInput (Voice& v, int count, const Params& p, float* l, float* r)
 {
-    const auto& d = p.loop ? sample->playLoop : sample->play;
+    juce::ignoreUnused (p);
+    const auto& d = sample->play;
     const int n = d.getNumSamples();
     const float* sl = d.getReadPointer (0);
     const float* sr_ = d.getNumChannels() > 1 ? d.getReadPointer (1) : sl;
-    const int ls = sample->loopStart, le = sample->loopEnd;
     for (int i = 0; i < count; ++i)
     {
-        int pos = (int) v.pos;
-        if (p.loop && le > ls)
-            while (pos >= le)
-                pos -= le - ls;
+        const int pos = (int) v.pos;
         if (pos >= 0 && pos < n)
         {
             l[i] = sl[pos];
@@ -399,9 +315,8 @@ void SamplePlayer::noteOff (int note, const Params& p)
 
 void SamplePlayer::renderTape (Voice& v, juce::AudioBuffer<float>& out, int start, int num, const Params& p)
 {
-    const auto& d = p.loop ? sample->playLoop : sample->play;
+    const auto& d = sample->play;
     const int n = d.getNumSamples();
-    const int ls = p.loop ? sample->loopStart : 0, le = p.loop ? sample->loopEnd : 0;
     const double ratio = std::pow (2.0, ((double) (v.note - 60) + (double) p.pitchSemis) / 12.0);
     const float cut = juce::jlimit (0.25f, 1.0f, (float) (1.0 / ratio));
     const float gain = p.level * p.level * p.autoGain * v.velocity;
@@ -412,18 +327,15 @@ void SamplePlayer::renderTape (Voice& v, juce::AudioBuffer<float>& out, int star
 
     for (int i = 0; i < num; ++i)
     {
-        if (p.loop && le > ls)
-            while (v.pos >= (double) le)
-                v.pos -= (double) (le - ls);
-        else if (v.pos >= (double) n)
+        if (v.pos >= (double) n)
         {
             v.active = false;
             return;
         }
         const float env = v.adsr.getNextSample() * gain;
-        oL[start + i] += sincRead (srcL, n, v.pos, cut, ls, le) * env;
+        oL[start + i] += sincRead (srcL, n, v.pos, cut, 0, 0) * env;
         if (oR != nullptr)
-            oR[start + i] += sincRead (srcR, n, v.pos, cut, ls, le) * env;
+            oR[start + i] += sincRead (srcR, n, v.pos, cut, 0, 0) * env;
         v.pos += ratio;
         if (! v.adsr.isActive())
         {
@@ -463,7 +375,7 @@ void SamplePlayer::renderStretch (int index, Voice& v, juce::AudioBuffer<float>&
                 oR[start + done + i] += outR[(size_t) i] * env;
         }
         done += chunk;
-        const bool ended = ! p.loop && v.pos >= (double) (n + 2 * st.blockSamples());
+        const bool ended = v.pos >= (double) (n + 2 * st.blockSamples());
         if (ended || ! v.adsr.isActive())
         {
             v.active = false;
