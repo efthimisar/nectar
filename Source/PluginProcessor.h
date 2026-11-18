@@ -57,31 +57,19 @@ public:
     static constexpr double kMaxRecordSeconds = 60.0;
     bool canRecord() const { return recordingAllowed; }
     static constexpr int kToLibrary = -2; // a recording or resample that becomes a new sound in the library
-    void startRecording (int slot);  // the recording goes into this slot when it stops (-1 = room tone, kToLibrary = a new sound in the library)
+    void startRecording (int slot);  // the recording goes into this slot when it stops (kToLibrary = a new sound in the library)
     juce::String stopRecording();    // message thread: turns what was recorded into the sound of that slot; returns a message, if any
-    bool isRecordingRoomTone() const { return recState.load() == 1 && recSlot.load() < 0; }
-    bool hasRoomTone() const;
     bool isRecording() const { return recState.load() == 1; }
     int recordingSlot() const { return recSlot.load(); }
     // Resample: records the output of the synth itself (all slots, resonator, tilt) into a slot. Works in the plugin too.
     void startResample (int slot);
     bool isResampling() const { return recState.load() == 1 && recSource.load() == 1; }
-    void recleanAll();               // runs the cleaning again for every slot (e.g. after a new room tone)
     bool recordingFinishedByLimit() const { return recState.load() == 2; }
     double getRecordedSeconds() const;
     float getInputLevel() const { return inputLevel.load(); }
     juce::String saveToLibrary (int slot); // writes the slot as a WAV into the library folder; returns a message
     static juce::File getLibraryFolder();
 
-    // Modulation: every knob can follow a source (LFO 1, LFO 2, envelope, joystick ...) by an amount (-1..1 of the knob's range).
-    enum ModSrc { kModNone = 0, kModLfo1, kModLfo2, /* 3..5 were the slicers: the numbers stay free so saved sounds keep their sources */ kModEnv = 6, kModJoyX, kModJoyY, kModVel, kModKey, kModRamp, kModCount };
-    struct ModRoute { int src = 0; float amount = 0.0f; };
-    ModRoute getModRoute (const juce::String& paramId) const;
-    void setModRoute (const juce::String& paramId, ModRoute r);
-    bool joyIsRecording() const { return joyRecState.load() == 1; }
-    bool joyIsArmed() const { return joyRecState.load() == 2; }
-    bool joyHasPath() const { return joyLen.load() > 0; }
-    void joyClearPath() { joyLen.store (0); }
     // Pair joystick (pair 0 = samples 1+2, pair 1 = samples 3+4)
     // "New": four fresh corner settings in the chosen Character (0 = a random seed).
     // parts: bit 0 = the first sound of the pair, bit 1 = the second, bit 2 = how the two blend (Cross, Inter); a part that
@@ -159,7 +147,6 @@ public:
     float vectorX (int pair) const { return vecXShown[(size_t) pair].load(); }
     float vectorY (int pair) const { return vecYShown[(size_t) pair].load(); }
     bool vectorOn (int pair) const { return vecOn[(size_t) pair].load(); }
-    float modSourceNow (int src) const { return modShown[(size_t) juce::jlimit (0, (int) kModCount - 1, src)].load(); }
 
     // Presets: all knob values plus the four sounds, as one small file in "Nektar Library/Presets".
     // A sound that has no file of its own (a recording, a resample) is written into the library first.
@@ -201,15 +188,13 @@ private:
     std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {}, revP {};
     std::array<Shifter, kSlots> shifters;
     std::array<std::atomic<float>*, 2> pairMorphP {};
-    std::atomic<float>* scaleP = nullptr;
     std::atomic<float>* keyP = nullptr;
-    std::array<juce::int8, 128> scaleMap {}; // which note a held key was turned into (for its note-off)
     std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
     TiltFilter tilt;
 
-    // modulation (audio thread reads the routes; the message thread writes them)
-    float modded (const std::atomic<float>* raw) const noexcept; // value of a knob including its modulation
-    void updateMods (int numSamples, const juce::MidiBuffer& midi);
+    // a knob as it sounds: its own value, or what the pair joystick makes of it
+    float modded (const std::atomic<float>* raw) const noexcept;
+    void updateMods (int numSamples);
     void buildModTable();
     void addModToState (juce::ValueTree& state);
     void readModFromState (const juce::ValueTree& state);
@@ -252,58 +237,17 @@ private:
     juce::Random vecMoveRnd;
     std::array<float, 2> vecXs { { 0.5f, 0.5f } }, vecYs { { 0.5f, 0.5f } }; // smoothed stick position (audio thread)
     std::array<std::atomic<float>, 2> vecXShown { { { 0.5f }, { 0.5f } } }, vecYShown { { { 0.5f }, { 0.5f } } };
-    std::vector<std::atomic<int>> routeSrc;
-    std::vector<std::atomic<float>> routeAmt;
     std::vector<juce::NormalisableRange<float>> modRanges;
     std::unordered_map<const void*, int> modIdxByRaw;
     std::unordered_map<std::string, int> modIdxById;
     std::vector<juce::String> modIds;
-    std::array<float, kModCount> modVal {};
-    std::array<std::atomic<float>, kModCount> modShown {};
-    std::atomic<float>* lfoRateP[2] {};
-    std::atomic<float>* lfoShapeP[2] {};
-    double lfoPhase[2] { 0.0, 0.0 };
-    float lfoHold[2] { 0.0f, 0.0f };
-    juce::Random lfoRng;
-    float lfoPrev[2] { 0.0f, 0.0f }, lfoNext[2] { 0.0f, 0.0f };
-    // envelope (ADSR) driven by the held keys
     std::array<juce::ValueTree, 2> snapshots;
-    double lfoAge = 1.0e9;                 // seconds since the first key of a phrase (LFO delay / fade)
-    std::atomic<float>* lfoDelayP = nullptr;
-    std::atomic<float>* lfoFadeP = nullptr;
-    std::atomic<float>* lfoSpiralP = nullptr;
     std::atomic<float>* masterP = nullptr;
-    std::atomic<float>* widthP = nullptr;
-    float lastWidth = 1.0f;
     float lastMaster = 1.0f;
-    float rampLevel = 1.0f;                // 0 -> 1 over the Ramp time after a note starts with no key held
-    std::atomic<float>* rampTimeP = nullptr;
-    std::array<std::atomic<float>*, 2> chromoP {};
-    std::atomic<float>* chromoMoveP = nullptr;
-    std::atomic<float>* chromoBackP = nullptr;
-    std::atomic<float>* chromoSpeedP = nullptr;
-    std::atomic<float>* chromoDullP = nullptr;
-    int heldNotes = 0;
-    float lastVel = 0.0f, lastKey = 0.0f; // last note-on: velocity 0..1, key relative to C3 (-1..1 over +-3 octaves)
-    int envStage = 0; // 0 idle, 1 attack, 2 decay, 3 sustain, 4 release
-    float envLevel = 0.0f;
-    std::atomic<float>* envP[4] {};
-    // joystick: a path of (x, y) samples at 200 Hz, recorded while Rec is on and looped while Play is on
-    static constexpr int kJoyMax = 200 * 30;
-    std::vector<float> joyPathX, joyPathY;
-    std::atomic<int> joyLen { 0 }, joyRecState { 0 };
-    double joyAcc = 0.0, joyPlayPos = 0.0;
-    bool joyWasRec = false;
-    // armed recording / note-triggered playback (audio thread only; joyResetReq is set from the message thread)
-    bool joyRunning = false, joyHaveHold = false;
-    float joyArmX = 0.5f, joyArmY = 0.5f;
-    std::atomic<bool> joyResetReq { false };
-    std::atomic<float>* joyXP = nullptr; std::atomic<float>* joyYP = nullptr;
-    std::atomic<float>* joyRecP = nullptr; std::atomic<float>* joyPlayP = nullptr;
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> panP {};
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
-    std::atomic<float>* spMixP = nullptr; std::atomic<float>* spSpkP = nullptr;
+    std::atomic<float>* spSpkP = nullptr;
     std::atomic<float>* spFarP = nullptr; std::atomic<float>* spBackP = nullptr;
     std::array<std::atomic<float>*, kSlots> spMoveP {}, spSpeedP {};
     std::array<double, kSlots> spPhase {};
@@ -320,19 +264,11 @@ private:
     std::array<float, kSlots> harmonyShift {};
     std::array<std::atomic<float>*, 2> imorphP {};
     std::array<std::atomic<float>*, 2> xmorphP {};
-    Resonator resonator, resonatorB;
-    juce::AudioBuffer<float> dryScratch, resBScratch;
-    CharacterFilter charFilter;
-    std::atomic<float>* filTypeP = nullptr;
-    std::atomic<float>* filCutP = nullptr;
-    std::atomic<float>* filResP = nullptr;
-    std::atomic<float>* filMixP = nullptr;
+    Resonator resonator;
     std::atomic<float>* resTuneP = nullptr;
     std::atomic<float>* resDecayP = nullptr;
     std::atomic<float>* resMatP = nullptr;
     std::atomic<float>* resMixP = nullptr;
-    std::atomic<float>* resTuneBP = nullptr;
-    std::atomic<float>* resMixBP = nullptr;
     juce::AudioFormatManager formats;
     mutable juce::SpinLock sampleLock;
     std::array<std::shared_ptr<const Sample>, kSlots> currentSamples; // owned by the UI side
@@ -340,7 +276,6 @@ private:
     std::array<bool, kSlots> samplePending {};
     std::atomic<int> recSlot { 0 };
     std::array<std::atomic<float>*, kSlots> levelP {}, pitchP {}, tailP {};
-    std::array<std::atomic<float>*, kSlots> noiseP {}, humP {}, lowCutP {};
     std::atomic<float>* brightP = nullptr;
     std::atomic<float>* blurP = nullptr;
     std::atomic<float>* freezeP = nullptr;
@@ -359,8 +294,6 @@ private:
     std::array<int, kSlots> serials {};                       // message thread only
     juce::CriticalSection resultLock;
     std::array<std::shared_ptr<Sample>, kSlots> results;      // finished by the background thread, waiting to be installed
-    mutable juce::CriticalSection roomLock;
-    SampleCleaner::NoiseProfile roomProfile;                  // recorded room tone (all slots), not saved with the project
     juce::ThreadPool cleanPool { 1 };
     std::atomic<double> hostRate { 44100.0 };
 

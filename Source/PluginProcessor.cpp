@@ -247,12 +247,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkrhy" + sfx, 1 }, "Make rhythm" + nm, 0.0f, 1.0f, 0.5f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Make colour" + nm, 0.0f, 1.0f, 0.5f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mktex" + sfx, 1 }, "Make texture" + nm, 0.0f, 1.0f, 0.5f));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "noise" + sfx, 1 }, "Noise" + nm,
-                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "hum" + sfx, 1 }, "Hum" + nm,
-                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lowcut" + sfx, 1 }, "Low cut" + nm,
-                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     }
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "loop", 1 }, "Loop", false));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "autolevel", 1 }, "Auto level", true));
@@ -275,40 +269,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "model", 1 }, "Model (sine waves)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "modelnoise", 1 }, "Model noise (residual)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    for (int i = 0; i < 2; ++i)
-    {
-        const juce::String n (i + 1);
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "rate", 1 }, "LFO " + n + " rate",
-                                                             NormalisableRange<float> (0.02f, 20.0f, 0.001f, 0.35f), i == 0 ? 0.5f : 0.2f,
-                                                             juce::AudioParameterFloatAttributes().withLabel ("Hz")));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfo" + n + "shape", 1 }, "LFO " + n + " shape",
-                                                             NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    }
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filtype", 1 }, "Filter type (ladder, SVF, comb, formant)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filcut", 1 }, "Filter cutoff",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filres", 1 }, "Filter resonance",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "filmix", 1 }, "Filter mix (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envatk", 1 }, "Envelope attack",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.1f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envdec", 1 }, "Envelope decay",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envsus", 1 }, "Envelope sustain",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.6f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "envrel", 1 }, "Envelope release",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "joyx", 1 }, "Joystick X",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "joyy", 1 }, "Joystick Y",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "joyrec", 1 }, "Joystick record", false));
-    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "joyplay", 1 }, "Joystick play path",
-                                                          juce::StringArray { "Off", "1shot", "Repeat", "Free" }, 0));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spmix", 1 }, "Space amount (0 = plain pan)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "spspk", 1 }, "Space: speaker check mode", false));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "spfar", 1 }, "Space: distance effect",
@@ -334,37 +294,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmix", 1 }, "Resonator mix",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "restuneb", 1 }, "Resonator B tune",
-                                                         NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 7.0f,
-                                                         juce::AudioParameterFloatAttributes().withLabel ("st")));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "resmixb", 1 }, "Resonator B mix (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromo12", 1 }, "Chromophonic 1<>2 (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromo34", 1 }, "Chromophonic 3<>4 (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromomove", 1 }, "Chromophonic move",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromospeed", 1 }, "Chromophonic move speed",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromoback", 1 }, "Chromophonic back level",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chromodull", 1 }, "Chromophonic back dullness",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph12", 1 }, "Morph 1 > 2 (0 = sound 1, 1 = sound 2 at the pitch of 1)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "morph34", 1 }, "Morph 3 > 4 (0 = sound 3, 1 = sound 4 at the pitch of 3)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character", 1 }, "Joystick character",
-                                                          juce::StringArray { "Cloud", "Rhythm", "Metal", "Air", "Reverse" }, 0));
     // the three big knobs of the main screen (0.5 = as made)
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mspeed", 1 }, "Motion: slow (0) to fast (1)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mweight", 1 }, "Weight: thin (0) to heavy (1)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mlight", 1 }, "Light: dull (0) to bright (1)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "wild", 1 }, "Joystick: gentle (0) to wild (1)",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     // the joysticks can move by themselves: a shape (0 = none, 1.. = shape) around the place where the stick was left, at one of
     // five speeds (16, 8, 4, 2, 1 s per round, as the Orb of Flow)
@@ -375,8 +314,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     for (const char* id : { "vec1x", "vec1y", "vec2x", "vec2y" })
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { id, 1 }, juce::String ("Pair joystick ") + id,
                                                              NormalisableRange<float> (0.0f, 1.0f, 0.0001f), 0.5f));
-    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "scale", 1 }, "Scale lock",
-                                                          juce::StringArray { "Off", "Major", "Minor", "Pentatonic", "Minor pentatonic", "Dorian", "Harmonic minor", "Whole tone" }, 0));
     l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "key", 1 }, "Scale key (0 = C)", 0, 11, 0));
     // Each joystick has its own character (what Make builds) and its own Gentle - Wild
     {
@@ -384,7 +321,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         for (int pr = 1; pr <= 2; ++pr)
         {
             l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character" + juce::String (pr), 1 }, "Character " + juce::String (pr), chars, pr == 1 ? 0 : 1));
-            l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "wild" + juce::String (pr), 1 }, "Gentle - Wild " + juce::String (pr), 0.0f, 1.0f, 0.5f));
             l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "swell" + juce::String (pr), 1 }, "Swell " + juce::String (pr), false));
         }
         // how the two pairs behave towards each other
@@ -396,18 +332,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     // Harmony: the four sounds as recorded, all moved into one key, or their keynotes on the notes of one chord
     l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "harmony", 1 }, "Harmony",
                                                           juce::StringArray { "As is", "One key", "Chord" }, 1));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "width", 1 }, "Stereo width (0 = mono, middle = as it is, 1 = wide)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
                                                          NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfospiral", 1 }, "LFO spiral (rate sweeps slow to fast over the Ramp time, 0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfodelay", 1 }, "LFO fade-in time (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "lfofade", 1 }, "LFO fade-out time (0 = off)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
-    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "ramptime", 1 }, "Ramp time (0.05 .. 20 s)",
-                                                         NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "freeze", 1 }, "Freeze",
                                                          NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
     return l;
@@ -455,9 +381,6 @@ NektarProcessor::NektarProcessor()
         spDistP[(size_t) slot] = apvts.getRawParameterValue ("spdist" + sfx);
         spMoveP[(size_t) slot] = apvts.getRawParameterValue ("spmove" + sfx);
         spSpeedP[(size_t) slot] = apvts.getRawParameterValue ("spspeed" + sfx);
-        noiseP[(size_t) slot] = apvts.getRawParameterValue ("noise" + sfx);
-        humP[(size_t) slot] = apvts.getRawParameterValue ("hum" + sfx);
-        lowCutP[(size_t) slot] = apvts.getRawParameterValue ("lowcut" + sfx);
         apvts.addParameterListener ("noise" + sfx, this);
         apvts.addParameterListener ("hum" + sfx, this);
         apvts.addParameterListener ("lowcut" + sfx, this);
@@ -481,11 +404,6 @@ NektarProcessor::NektarProcessor()
     imorphP[1] = apvts.getRawParameterValue ("imorph34");
     xmorphP[0] = apvts.getRawParameterValue ("xmorph12");
     xmorphP[1] = apvts.getRawParameterValue ("xmorph34");
-    for (int i = 0; i < 2; ++i)
-    {
-        lfoRateP[i] = apvts.getRawParameterValue ("lfo" + juce::String (i + 1) + "rate");
-        lfoShapeP[i] = apvts.getRawParameterValue ("lfo" + juce::String (i + 1) + "shape");
-    }
     buildModTable();
     modelP = apvts.getRawParameterValue ("model");
     modelNoiseP = apvts.getRawParameterValue ("modelnoise");
@@ -493,14 +411,7 @@ NektarProcessor::NektarProcessor()
     resDecayP = apvts.getRawParameterValue ("resdecay");
     resMatP = apvts.getRawParameterValue ("resmat");
     resMixP = apvts.getRawParameterValue ("resmix");
-    resTuneBP = apvts.getRawParameterValue ("restuneb");
-    rampTimeP = apvts.getRawParameterValue ("ramptime");
-    chromoP[0] = apvts.getRawParameterValue ("chromo12");
-    chromoP[1] = apvts.getRawParameterValue ("chromo34");
-    chromoMoveP = apvts.getRawParameterValue ("chromomove");
-    lfoDelayP = apvts.getRawParameterValue ("lfodelay");
     masterP = apvts.getRawParameterValue ("master");
-    widthP = apvts.getRawParameterValue ("width");
     pairMorphP[0] = apvts.getRawParameterValue ("morph12");
     pairMorphP[1] = apvts.getRawParameterValue ("morph34");
     apvts.addParameterListener ("morph12", this);
@@ -518,36 +429,13 @@ NektarProcessor::NektarProcessor()
     for (auto& a : spPh) for (auto& v : a) v = vecMoveRnd.nextFloat() * juce::MathConstants<float>::twoPi;
     vecXP[0] = apvts.getRawParameterValue ("vec1x"); vecYP[0] = apvts.getRawParameterValue ("vec1y");
     vecXP[1] = apvts.getRawParameterValue ("vec2x"); vecYP[1] = apvts.getRawParameterValue ("vec2y");
-    scaleP = apvts.getRawParameterValue ("scale");
     keyP = apvts.getRawParameterValue ("key");
-    for (int i = 0; i < 128; ++i) scaleMap[(size_t) i] = (juce::int8) i;
-    lfoSpiralP = apvts.getRawParameterValue ("lfospiral");
-    lfoFadeP = apvts.getRawParameterValue ("lfofade");
-    chromoBackP = apvts.getRawParameterValue ("chromoback");
-    chromoSpeedP = apvts.getRawParameterValue ("chromospeed");
-    chromoDullP = apvts.getRawParameterValue ("chromodull");
-    resMixBP = apvts.getRawParameterValue ("resmixb");
-    filTypeP = apvts.getRawParameterValue ("filtype");
-    filCutP = apvts.getRawParameterValue ("filcut");
-    filResP = apvts.getRawParameterValue ("filres");
-    filMixP = apvts.getRawParameterValue ("filmix");
-    envP[0] = apvts.getRawParameterValue ("envatk");
-    envP[1] = apvts.getRawParameterValue ("envdec");
-    envP[2] = apvts.getRawParameterValue ("envsus");
-    envP[3] = apvts.getRawParameterValue ("envrel");
-    spMixP = apvts.getRawParameterValue ("spmix");
     spSpkP = apvts.getRawParameterValue ("spspk");
     spFarP = apvts.getRawParameterValue ("spfar");
     spBackP = apvts.getRawParameterValue ("spback");
     mSpeedP = apvts.getRawParameterValue ("mspeed");
     mWeightP = apvts.getRawParameterValue ("mweight");
     mLightP = apvts.getRawParameterValue ("mlight");
-    joyXP = apvts.getRawParameterValue ("joyx");
-    joyYP = apvts.getRawParameterValue ("joyy");
-    joyRecP = apvts.getRawParameterValue ("joyrec");
-    joyPlayP = apvts.getRawParameterValue ("joyplay");
-    joyPathX.assign ((size_t) kJoyMax, 0.5f);
-    joyPathY.assign ((size_t) kJoyMax, 0.5f);
     recordingAllowed = juce::JUCEApplicationBase::isStandaloneApp();
     formats.registerBasicFormats();
 }
@@ -614,18 +502,11 @@ void NektarProcessor::scheduleClean (int slot)
     auto base = getSample (slot);
     if (base == nullptr)
         return;
-    SampleCleaner::CleanParams cp;
-    cp.noise = noiseP[(size_t) slot]->load();
-    cp.hum = humP[(size_t) slot]->load();
-    cp.lowCut = lowCutP[(size_t) slot]->load();
+    SampleCleaner::CleanParams cp;      // analysis only: noise, hum and low cut stay off (they had no place on the main screen)
     SampleCleaner::NoiseProfile room;
-    {
-        const juce::ScopedLock sl (roomLock);
-        room = roomProfile;
-    }
     SpectralBody bd;
     bd.tone = colP[(size_t) slot][4]->load(); bd.focus = colP[(size_t) slot][5]->load(); bd.size = colP[(size_t) slot][6]->load(); bd.rough = colP[(size_t) slot][7]->load();
-    // colour knobs that something moves (LFO, envelope ...): the colour is baked at the ends of the movement
+    // the colour is baked as it is, or once per corner of the pair joystick
     const float blurBase = colP[(size_t) slot][2]->load(), airBase = airP[(size_t) slot]->load();
     ColourMove mv;
     for (auto& c : mv.c) { c.body = bd; c.blur = blurBase; c.air = airBase; }
@@ -652,53 +533,6 @@ void NektarProcessor::scheduleClean (int slot)
                         }
         }
         mv.n = 4; mv.param[0] = 200; mv.param[1] = 201; mv.lo[0] = mv.lo[1] = 0.0f; mv.hi[0] = mv.hi[1] = 1.0f;
-    }
-    else if (grP[(size_t) slot][0]->load() > 0.5f)
-    {
-        struct K { int id; const std::atomic<float>* raw; float v = 0, amt = 0; int src = 0, axis = 0; };
-        K ks[6] = { { 4, colP[(size_t) slot][4] }, { 5, colP[(size_t) slot][5] }, { 6, colP[(size_t) slot][6] },
-                    { 2, colP[(size_t) slot][2] }, { 7, colP[(size_t) slot][7] }, { 100, airP[(size_t) slot] } };
-        int ax[2] = { -1, -1 };
-        for (int k = 0; k < 6; ++k)
-        {
-            auto& q = ks[k];
-            q.v = q.raw->load();
-            const auto it = modIdxByRaw.find (q.raw);
-            if (it == modIdxByRaw.end()) continue;
-            q.amt = routeAmt[(size_t) it->second].load();
-            q.src = routeSrc[(size_t) it->second].load();
-            if (q.src <= 0 || std::abs (q.amt) < 0.01f) { q.src = 0; continue; }
-            if (ax[0] < 0) ax[0] = k;
-            else if (ax[1] < 0 && q.src != ks[ax[0]].src) ax[1] = k;
-        }
-        for (auto& q : ks)
-            if (q.src > 0) q.axis = (ax[1] >= 0 && q.src == ks[ax[1]].src) ? 2 : 1;
-        mv.n = ax[1] >= 0 ? 4 : (ax[0] >= 0 ? 2 : 1);
-        for (int a = 0; a < 2; ++a)
-            if (ax[a] >= 0)
-            {
-                mv.param[a] = ks[ax[a]].id;
-                mv.lo[a] = juce::jlimit (0.0f, 1.0f, ks[ax[a]].v - std::abs (ks[ax[a]].amt));
-                mv.hi[a] = juce::jlimit (0.0f, 1.0f, ks[ax[a]].v + std::abs (ks[ax[a]].amt));
-            }
-        for (int i = 0; i < mv.n; ++i)
-            for (const auto& q : ks)
-            {
-                if (q.src <= 0) continue;
-                const auto& ref = ks[ax[q.axis - 1]];
-                const float dir = (q.amt * ref.amt >= 0.0f ? 1.0f : -1.0f) * (((i >> (q.axis - 1)) & 1) ? 1.0f : -1.0f);
-                const float val = juce::jlimit (0.0f, 1.0f, q.v + std::abs (q.amt) * dir);
-                auto& c = mv.c[i];
-                switch (q.id)
-                {
-                    case 4: c.body.tone = val; break;
-                    case 5: c.body.focus = val; break;
-                    case 6: c.body.size = val; break;
-                    case 2: c.blur = val; break;
-                    case 7: c.body.rough = val; break;
-                    default: c.air = val; break;
-                }
-            }
     }
     const int gen = ++latestJob[(size_t) slot];
     cleanPool.addJob (new CleanJob (*this, slot, gen, base, cp, std::move (room), hostRate.load(),
@@ -734,18 +568,6 @@ void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
     sendChangeMessage();
 }
 
-void NektarProcessor::recleanAll()
-{
-    for (int slot = 0; slot < kSlots; ++slot)
-        scheduleClean (slot);
-}
-
-bool NektarProcessor::hasRoomTone() const
-{
-    const juce::ScopedLock sl (roomLock);
-    return roomProfile.valid;
-}
-
 void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     fxRack.prepare (sampleRate, samplesPerBlock);
@@ -761,11 +583,6 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     tilt.prepare (sampleRate);
     macroTone.prepare (sampleRate);
     resonator.prepare (sampleRate);
-    resonatorB.prepare (sampleRate);
-    dryScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
-    resBScratch.setSize (2, juce::jmax (samplesPerBlock, 8192));
-    envStage = 0; envLevel = 0.0f; heldNotes = 0; rampLevel = 1.0f;
-    charFilter.prepare (sampleRate, samplesPerBlock);
     keyboardState.reset();
     if (recState.load() == 0) // the buffer also serves Resample, which works in the plugin too
         recBuffer.setSize (2, (int) (sampleRate * kMaxRecordSeconds));
@@ -844,38 +661,6 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
 
-    // Scale lock: a key that is not in the scale plays the nearest note of the scale (the lower one on a tie)
-    {
-        static const int masks[8] = { 0xfff, 0xab5, 0x5ad, 0x295, 0x4a9, 0x6ad, 0x9ad, 0x555 }; // bit n = n semitones above the key note
-        const int sc = juce::jlimit (0, 7, juce::roundToInt (scaleP->load())), key = juce::roundToInt (keyP->load());
-        juce::MidiBuffer mapped;
-        bool changed = false;
-        for (const auto meta : midi)
-        {
-            auto m = meta.getMessage();
-            if (m.isNoteOn())
-            {
-                int n = m.getNoteNumber();
-                if (sc > 0)
-                    for (int d = 0; d < 7; ++d)
-                    {
-                        const int lo = n - d, hi = n + d;
-                        if (lo >= 0 && ((masks[sc] >> (((lo - key) % 12 + 12) % 12)) & 1)) { n = lo; break; }
-                        if (hi <= 127 && ((masks[sc] >> (((hi - key) % 12 + 12) % 12)) & 1)) { n = hi; break; }
-                    }
-                scaleMap[(size_t) m.getNoteNumber()] = (juce::int8) n;
-                if (n != m.getNoteNumber()) { m.setNoteNumber (n); changed = true; }
-            }
-            else if (m.isNoteOff())
-            {
-                const int n = scaleMap[(size_t) m.getNoteNumber()];
-                if (n != m.getNoteNumber()) { m.setNoteNumber (n); changed = true; }
-            }
-            mapped.addEvent (m, meta.samplePosition);
-        }
-        if (changed) midi.swapWith (mapped);
-    }
-
     {   // the host's tempo and position, for the tempo lock and the movements that follow the beat
         hostNow = {};
         if (auto* phd = getPlayHead())
@@ -886,7 +671,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             }
     }
     hostBpmAtomic.store (hostNow.has ? hostNow.bpm : 0.0);
-    updateMods (buffer.getNumSamples(), midi);
+    updateMods (buffer.getNumSamples());
     SamplePlayer::Params p;
     p.loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
     p.keepLength = modded (apvts.getRawParameterValue ("keeplength"));
@@ -904,10 +689,6 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     players[0].setPartner (players[1].getSample());
     players[2].setPartner (players[3].getSample());
     // Chromophonic: each slot of a pair takes the body of the other (both ways)
-    players[0].setBodyPartner (players[1].getSample());
-    players[1].setBodyPartner (players[0].getSample());
-    players[2].setBodyPartner (players[3].getSample());
-    players[3].setBodyPartner (players[2].getSample());
 
     // the voices are shared between the slots that have a sound (a fixed budget keeps the CPU load in check)
     int loaded = 0;
@@ -953,17 +734,12 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (! pl.hasSample())
             continue;
         p.autoGain = apvts.getRawParameterValue ("autolevel")->load() > 0.5f ? pl.getSample()->autoGain : 1.0f;
-        p.chromo = modded (chromoP[(size_t) (slot / 2)]);
-        p.chromoMove = modded (chromoMoveP);
-        p.chromoBack = modded (chromoBackP);
-        p.chromoSpeed = modded (chromoSpeedP);
-        p.chromoDull = modded (chromoDullP);
         {
             const auto& c = colP[(size_t) slot];
             p.keepLength = modded (c[0]); p.stretch = modded (c[1]); p.blur = modded (c[2]); p.freeze = modded (c[3]);
             p.body.tone = modded (c[4]); p.body.focus = modded (c[5]); p.body.size = modded (c[6]); p.body.rough = modded (c[7]);
             p.modelNoise = modded (c[9]);
-            p.model = juce::jmax (modded (c[8]), p.chromo); // Chromophonic plays the sine model
+            p.model = modded (c[8]);
         }
         {   // Morph of the pair: the first sound of the pair turns into the second (partials paired and moved, MorphVoice);
             // the second sound itself steps back, because it is now heard inside the morph
@@ -1091,57 +867,17 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         mixLevel.store (m);
     }
 
-    // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s
-    // Resonator B runs beside A on the same input (parallel, "Mix"): out = A + B - dry, so each mix knob keeps its meaning.
-    // B shares Decay and Material with A and has its own Tune and Mix.
+    // Resonator: strings tuned to the held keys, fed by the sound of the slots; decay 0..1 -> 0.1 .. 8 s (opened by Harmony -> Chord)
     {
         const float decaySec = 0.1f * std::pow (80.0f, modded (resDecayP)), mat = modded (resMatP);
-        const float mixB = modded (resMixBP);
-        if (mixB > 0.005f)
-        {
-            const int n = buffer.getNumSamples(), chs = juce::jmin (2, buffer.getNumChannels());
-            if (dryScratch.getNumSamples() < n) { dryScratch.setSize (2, n, false, false, true); resBScratch.setSize (2, n, false, false, true); }
-            for (int c = 0; c < chs; ++c) { dryScratch.copyFrom (c, 0, buffer, c, 0, n); resBScratch.copyFrom (c, 0, buffer, c, 0, n); }
-            juce::AudioBuffer<float> viewB (resBScratch.getArrayOfWritePointers(), chs, n); // only the first n samples
-            resonatorB.process (viewB, midi, modded (resTuneBP), decaySec, mat, mixB);
-            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, resMixNow());
-            for (int c = 0; c < juce::jmin (2, buffer.getNumChannels()); ++c)
-                juce::FloatVectorOperations::add (buffer.getWritePointer (c), resBScratch.getReadPointer (c), buffer.getNumSamples()),
-                juce::FloatVectorOperations::subtract (buffer.getWritePointer (c), dryScratch.getReadPointer (c), buffer.getNumSamples());
-        }
-        else
-        {
-            resonatorB.process (buffer, midi, 0.0f, decaySec, mat, 0.0f); // off: lets its strings go
-            resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, resMixNow());
-        }
+        resonator.process (buffer, midi, modded (resTuneP), decaySec, mat, resMixNow());
     }
-
-    // Filter with character (ladder, SVF, comb, formant)
-    charFilter.process (buffer, buffer.getNumSamples(), modded (filTypeP), modded (filCutP), modded (filResP), modded (filMixP));
 
     // Bright: tilt of the whole sound (0.5 = off)
     tilt.setTilt ((modded (brightP) - 0.5f) * 2.0f * 9.0f);
     tilt.process (buffer);
     macroTone.process (buffer, modded (mWeightP), modded (mLightP));
 
-    // Stereo width: the side part (left minus right) is turned down to mono or up to twice (mid / side)
-    if (buffer.getNumChannels() > 1)
-    {
-        const float w = modded (widthP) * 2.0f;
-        if (std::abs (w - 1.0f) > 1.0e-3f || std::abs (lastWidth - 1.0f) > 1.0e-3f)
-        {
-            auto* L = buffer.getWritePointer (0);
-            auto* R = buffer.getWritePointer (1);
-            const int n = buffer.getNumSamples();
-            for (int i = 0; i < n; ++i)
-            {
-                const float ww = lastWidth + (w - lastWidth) * (float) i / (float) n;
-                const float m = 0.5f * (L[i] + R[i]), sd = 0.5f * (L[i] - R[i]) * ww;
-                L[i] = m + sd; R[i] = m - sd;
-            }
-            lastWidth = w;
-        }
-    }
 
     // Master out: the last gain, before the safety knee (smoothed over the block)
     fxRack.process (buffer, midi); // the user's own effects (VST3), on the whole sound
@@ -1246,7 +982,7 @@ void NektarProcessor::startRecording (int slot)
     if (! recordingAllowed || recState.load() == 1)
         return;
     recSource.store (0);
-    recSlot.store (juce::jlimit (kToLibrary, kSlots - 1, slot));
+    recSlot.store (slot == kToLibrary ? kToLibrary : juce::jlimit (0, kSlots - 1, slot));
     recChannels.store (juce::jlimit (1, 2, getTotalNumInputChannels()));
     recBuffer.clear();
     recPos.store (0);
@@ -1311,21 +1047,8 @@ juce::String NektarProcessor::stopRecording()
         rescanLibrary();
         return "New sound in the library: " + dir.getFileName() + " / " + file.getFileNameWithoutExtension();
     }
-    if (target < 0) // room tone: only the noise profile is kept
-    {
-        if (n < (int) (hostRate.load() * 0.5))
-            return "Room tone is too short (0.5 s or more).";
-        juce::AudioBuffer<float> room (ch, n);
-        for (int c = 0; c < ch; ++c)
-            room.copyFrom (c, 0, recBuffer, c, 0, n);
-        auto prof = SampleCleaner::estimateProfile (room, hostRate.load(), false);
-        {
-            const juce::ScopedLock sl (roomLock);
-            roomProfile = prof;
-        }
-        recleanAll();
-        return "Room tone saved.";
-    }
+    if (target < 0)
+        return {};
     if (n < (int) (hostRate.load() * 0.1)) // shorter than 0.1 s: ignore
         return {};
 
@@ -1344,7 +1067,7 @@ juce::String NektarProcessor::stopRecording()
         for (auto* id : { "pitch", "tail", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev",
                           "grspread", "grgate", "grpat", "groct", "keeplength", "stretch", "blur", "freeze", "bodytone", "bodyfocus", "bodysize",
                           "srcrough", "model", "modelnoise", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "rev",
-                          "noise", "hum", "lowcut" })
+                           })
             if (auto* p = apvts.getParameter (juce::String (id) + sfx))
                 p->setValueNotifyingHost (p->getDefaultValue());
     }
@@ -1412,7 +1135,7 @@ juce::String NektarProcessor::deletePreset (const juce::File& file)
 
 juce::StringArray NektarProcessor::factoryNames()
 {
-    return { "Init (all knobs to default)", "Chromophonic pairs", "Spiral rise", "Slow bloom" };
+    return { "Init (all knobs to default)" };
 }
 
 juce::String NektarProcessor::loadFactory (int index)
@@ -1420,27 +1143,7 @@ juce::String NektarProcessor::loadFactory (int index)
     for (auto* prm : apvts.processor.getParameters())
         if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (prm))
             r->setValueNotifyingHost (r->getDefaultValue());
-    readModFromState (juce::ValueTree ("EMPTY")); // no routes, no joystick path
-    auto set = [this] (const char* id, float v)
-    {
-        if (auto* r = apvts.getParameter (id))
-            r->setValueNotifyingHost (r->convertTo0to1 (v));
-    };
-    switch (index)
-    {
-        case 1: // Chromophonic on both pairs
-            set ("chromo12", 1.0f); set ("chromo34", 1.0f);
-            break;
-        case 2: // LFO 1 on the pitch speeding up from very slow to very fast
-            set ("lfo1rate", 3.0f); set ("lfospiral", 0.9f); set ("ramptime", 0.85f); set ("lfo1shape", 0.0f);
-            setModRoute ("pitch", { kModLfo1, 0.12f });
-            break;
-        case 3: // LFO 1 slowly opening the tone, fading in
-            set ("lfo1rate", 0.3f); set ("lfodelay", 0.7f); set ("lfo1shape", 0.0f);
-            setModRoute ("bodytone", { kModLfo1, 0.3f });
-            break;
-        default: break;
-    }
+    readModFromState (juce::ValueTree ("EMPTY")); // no joystick corners
     const auto names = factoryNames();
     return "Factory: " + names[juce::jlimit (0, names.size() - 1, index)];
 }
@@ -1623,38 +1326,9 @@ void NektarProcessor::buildModTable()
                 modIds.push_back (rp->paramID);
                 modRanges.push_back (rp->getNormalisableRange());
             }
-    routeSrc = std::vector<std::atomic<int>> (modIds.size());
-    routeAmt = std::vector<std::atomic<float>> (modIds.size());
     vecVal = std::vector<std::atomic<float>> (modIds.size());
     vecAct = std::vector<std::atomic<bool>> (modIds.size());
     for (auto& a : vecAct) a.store (false);
-    for (auto& a : routeSrc) a.store (0);
-    for (auto& a : routeAmt) a.store (0.0f);
-    for (auto& a : modShown) a.store (0.0f);
-}
-
-NektarProcessor::ModRoute NektarProcessor::getModRoute (const juce::String& id) const
-{
-    const auto it = modIdxById.find (id.toStdString());
-    if (it == modIdxById.end())
-        return {};
-    return { routeSrc[(size_t) it->second].load(), routeAmt[(size_t) it->second].load() };
-}
-
-void NektarProcessor::setModRoute (const juce::String& id, ModRoute r)
-{
-    const auto it = modIdxById.find (id.toStdString());
-    if (it == modIdxById.end())
-        return;
-    routeAmt[(size_t) it->second].store (juce::jlimit (-1.0f, 1.0f, r.amount));
-    routeSrc[(size_t) it->second].store (juce::jlimit (0, (int) kModCount - 1, r.src));
-    if (id.startsWith ("body") || id.startsWith ("blur") || id.startsWith ("srcrough") || id.startsWith ("air"))
-    {   // a colour knob got (or lost) something that moves it: the colour for the grains is baked again
-        const juce::juce_wchar last = id.getLastCharacter();
-        const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
-        cleanChangedAt[(size_t) slot] = juce::Time::getMillisecondCounter();
-        cleanDirty[(size_t) slot] = true;
-    }
 }
 
 void NektarProcessor::setVectorOn (int pair, bool on)
@@ -2053,15 +1727,9 @@ float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
     if (it == modIdxByRaw.end())
         return v;
     const size_t i = (size_t) it->second;
-    const bool vec = vecAct[i].load(); // the pair joystick sets this knob
-    const int src = routeSrc[i].load();
-    if (! vec && src <= 0)
+    if (! vecAct[i].load()) // the pair joystick does not set this knob
         return v;
-    const auto& r = modRanges[i];
-    float n = vec ? vecVal[i].load() : r.convertTo0to1 (v);
-    if (src > 0)
-        n = juce::jlimit (0.0f, 1.0f, n + routeAmt[i].load() * modVal[(size_t) src]);
-    return r.convertFrom0to1 (n);
+    return modRanges[i].convertFrom0to1 (vecVal[i].load());
 }
 
 // Sources are updated once per block (-1..1, the envelope 0..1).
@@ -2069,32 +1737,7 @@ float NektarProcessor::modded (const std::atomic<float>* raw) const noexcept
 // stairs (4 steps), half sine, exponential decay, double sine, then five shapes after the Hartmann Neuron manual p. 118
 // (the steps in the stepped shapes are drawn from the picture, not specified): positive triangle, positive sine,
 // positive square (these three run 0..1), stepped triangle, stepped saw down.
-static float lfoShapeValue (int shape, float t, float hold, float prev, float next)
-{
-    constexpr float twoPi = juce::MathConstants<float>::twoPi;
-    switch (shape)
-    {
-        case 0:  return std::sin (twoPi * t);
-        case 1:  return 1.0f - 4.0f * std::abs (t - 0.5f);
-        case 2:  return 2.0f * t - 1.0f;
-        case 3:  return 1.0f - 2.0f * t;
-        case 4:  return t < 0.5f ? 1.0f : -1.0f;
-        case 5:  return t < 0.25f ? 1.0f : -1.0f;
-        case 6:  return hold;
-        case 7:  { const float c = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * t); return prev + (next - prev) * c; }
-        case 8:  return std::floor (t * 4.0f) / 1.5f - 1.0f;
-        case 9:  return std::sin (juce::MathConstants<float>::pi * t) * 2.0f - 1.0f;
-        case 10: return 2.0f * std::exp (-5.0f * t) - 1.0f;
-        case 11: return 0.5f * std::sin (twoPi * t) + 0.5f * std::sin (2.0f * twoPi * t);
-        case 12: return 1.0f - 2.0f * std::abs (t - 0.5f);
-        case 13: return 0.5f + 0.5f * std::sin (twoPi * t);
-        case 14: return t < 0.5f ? 1.0f : 0.0f;
-        case 15: { const float u = 1.0f - 4.0f * std::abs (t - 0.5f); return std::round (u * 3.0f) / 3.0f; }
-        default: return 1.0f - std::floor (t * 8.0f) / 3.5f;
-    }
-}
-
-void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
+void NektarProcessor::updateMods (int numSamples)
 {
     const double sr = hostRate.load() > 0.0 ? hostRate.load() : 44100.0;
     const double blockSec = (double) numSamples / sr;
@@ -2152,190 +1795,13 @@ void NektarProcessor::updateMods (int numSamples, const juce::MidiBuffer& midi)
             vecAct[(size_t) e.idx].store (true);
         }
     }
-    for (int i = 0; i < 2; ++i)
-    {
-        const double prev = lfoPhase[i];
-        // Spiral: the rate sweeps from far below the Rate knob to far above it (up to +-10 octaves) while the Ramp rises
-        const float spiral = lfoSpiralP->load();
-        double rate = (double) lfoRateP[i]->load() * std::pow (2.0, 4.0 * ((double) juce::jlimit (0.0f, 1.0f, mSpeedP->load()) - 0.5));
-        if (spiral > 0.001f)
-            rate = juce::jlimit (0.01, 400.0, rate * std::pow (2.0, 10.0 * (double) spiral * (2.0 * (double) rampLevel - 1.0)));
-        double ph = prev + rate * blockSec;
-        const bool wrapped = ph >= 1.0;
-        ph -= std::floor (ph);
-        lfoPhase[i] = ph;
-        if (wrapped)
-        {
-            lfoHold[i] = lfoRng.nextFloat() * 2.0f - 1.0f;
-            lfoPrev[i] = lfoNext[i];
-            lfoNext[i] = lfoHold[i];
-        }
-        const int shape = juce::jlimit (0, 16, (int) (lfoShapeP[i]->load() * 16.999f));
-        const float v = lfoShapeValue (shape, (float) ph, lfoHold[i], lfoPrev[i], lfoNext[i]);
-        modVal[(size_t) (kModLfo1 + i)] = v;
-        modShown[(size_t) (kModLfo1 + i)].store (v);
-    }
-
-    // Envelope: gate = at least one key held; a new key restarts the attack from the current level
-    bool retrigger = false;
-    const int heldBefore = heldNotes;
-    for (const auto meta : midi)
-    {
-        const auto m = meta.getMessage();
-        if (m.isNoteOn())       { ++heldNotes; retrigger = true; lastVel = m.getFloatVelocity(); lastKey = juce::jlimit (-1.0f, 1.0f, (float) (m.getNoteNumber() - 60) / 36.0f); }
-        else if (m.isNoteOff()) heldNotes = juce::jmax (0, heldNotes - 1);
-        else if (m.isAllNotesOff() || m.isAllSoundOff()) heldNotes = 0;
-    }
-    if (retrigger) envStage = 1;
-    else if (heldNotes == 0 && envStage >= 1 && envStage <= 3) envStage = 4;
-    // times: 0..1 -> 1 ms .. 5 s (attack, decay), 10 ms .. 8 s (release); exponential knob law
-    const float atk = 0.001f * std::pow (5000.0f, envP[0]->load());
-    const float dec = 0.001f * std::pow (5000.0f, envP[1]->load());
-    const float sus = envP[2]->load();
-    const float rel = 0.01f * std::pow (800.0f, envP[3]->load());
-    const float bs = (float) blockSec;
-    switch (envStage)
-    {
-        case 1: envLevel += bs / atk; if (envLevel >= 1.0f) { envLevel = 1.0f; envStage = 2; } break;
-        case 2: envLevel -= (1.0f - sus) * bs / dec; if (envLevel <= sus) { envLevel = sus; envStage = 3; } break;
-        case 3: envLevel = sus; break;
-        case 4: envLevel -= bs / rel; if (envLevel <= 0.0f) { envLevel = 0.0f; envStage = 0; } break;
-        default: break;
-    }
-    modVal[(size_t) kModEnv] = envLevel;
-    modShown[(size_t) kModEnv].store (envLevel);
-    // Ramp (the Neuron's dynamic crossmorph time, up to 20 s): restarts with the first key of a phrase, then stays at 1
-    if (retrigger && heldBefore == 0) { rampLevel = 0.0f; lfoAge = 0.0; } else lfoAge += blockSec;
-    {   // LFO delay: the LFOs fade in over the fade-in time after the first key of a phrase, and (if set) fade out again over the fade-out time
-        const auto secs = [] (float k) { return k < 0.01f ? 0.0 : 0.05 * std::pow (200.0, (double) k); }; // up to 10 s
-        const double tin = secs (lfoDelayP->load()), tout = secs (lfoFadeP->load());
-        double g = tin > 0.0 ? juce::jmin (1.0, lfoAge / tin) : 1.0;
-        if (tout > 0.0) g *= juce::jmax (0.0, 1.0 - juce::jmax (0.0, lfoAge - tin) / tout);
-        for (int i = 0; i < 2; ++i)
-        {
-            modVal[(size_t) (kModLfo1 + i)] *= (float) g;
-            modShown[(size_t) (kModLfo1 + i)].store (modVal[(size_t) (kModLfo1 + i)]);
-        }
-    }
-    rampLevel = juce::jmin (1.0f, rampLevel + (float) blockSec / (0.05f * std::pow (400.0f, rampTimeP->load())));
-    modVal[(size_t) kModRamp] = rampLevel;
-    modShown[(size_t) kModRamp].store (rampLevel);
-    modVal[(size_t) kModVel] = lastVel;
-    modShown[(size_t) kModVel].store (lastVel);
-    modVal[(size_t) kModKey] = lastKey;
-    modShown[(size_t) kModKey].store (lastKey);
-
-    // Joystick (after the Hartmann Neuron manual p. 89-92 and 41):
-    // Rec = standby, the recording starts when the stick moves or a key is pressed (200 points a second, up to 30 s).
-    // Play: 1shot = a note starts the path once, Repeat = it cycles while keys stay held, Free = loops all the time.
-    // After a 1shot or after the keys are released the value stays where the path stopped.
-    {
-        const bool firstNote = retrigger && heldBefore == 0;
-        if (joyResetReq.exchange (false))
-        {
-            joyRunning = false;
-            joyHaveHold = false;
-            joyWasRec = false;
-            joyRecState.store (0);
-        }
-        const bool rec = joyRecP->load() > 0.5f;
-        const int mode = juce::jlimit (0, 3, (int) std::lround (joyPlayP->load()));
-        const float liveX = joyXP->load(), liveY = joyYP->load();
-        float x = liveX, y = liveY;
-        if (rec && ! joyWasRec)
-        {
-            joyRecState.store (2); // standby
-            joyArmX = liveX; joyArmY = liveY;
-            joyRunning = false; joyHaveHold = false;
-        }
-        if (rec)
-        {
-            if (joyRecState.load() == 2 && (retrigger || std::abs (liveX - joyArmX) + std::abs (liveY - joyArmY) > 0.002f))
-            {
-                joyLen.store (0);
-                joyAcc = 1.0; // store the first point at once
-                joyRecState.store (1);
-            }
-            if (joyRecState.load() == 1)
-            {
-                joyAcc += blockSec * 200.0;
-                int len = joyLen.load();
-                while (joyAcc >= 1.0 && len < kJoyMax)
-                {
-                    joyPathX[(size_t) len] = liveX;
-                    joyPathY[(size_t) len] = liveY;
-                    ++len;
-                    joyAcc -= 1.0;
-                }
-                joyLen.store (len);
-            }
-        }
-        else
-        {
-            joyRecState.store (0);
-            const int len = joyLen.load();
-            if (mode == 0 || len < 2)
-            {
-                joyRunning = false;
-                joyHaveHold = false;
-            }
-            else if (mode == 3)
-            {
-                joyRunning = true;
-                joyHaveHold = false;
-                joyPlayPos += blockSec * 200.0;
-                if (joyPlayPos >= (double) len) joyPlayPos = std::fmod (joyPlayPos, (double) len);
-            }
-            else
-            {
-                if (firstNote && ! joyRunning)
-                {
-                    joyRunning = true;
-                    joyHaveHold = true;
-                    joyPlayPos = 0.0;
-                }
-                else if (joyRunning)
-                {
-                    joyPlayPos += blockSec * 200.0;
-                    if (joyPlayPos >= (double) (len - 1))
-                    {
-                        if (mode == 2 && heldNotes > 0) joyPlayPos = std::fmod (joyPlayPos, (double) (len - 1));
-                        else { joyPlayPos = (double) (len - 1); joyRunning = false; }
-                    }
-                    else if (mode == 2 && heldNotes == 0)
-                        joyRunning = false;
-                }
-            }
-            if (len >= 2 && (joyRunning || joyHaveHold))
-            {
-                const int i0 = juce::jmin ((int) joyPlayPos, len - 1), i1 = juce::jmin (i0 + 1, len - 1);
-                const float f = (float) (joyPlayPos - (double) i0);
-                x = joyPathX[(size_t) i0] + f * (joyPathX[(size_t) i1] - joyPathX[(size_t) i0]);
-                y = joyPathY[(size_t) i0] + f * (joyPathY[(size_t) i1] - joyPathY[(size_t) i0]);
-            }
-        }
-        joyWasRec = rec;
-        modVal[(size_t) kModJoyX] = x * 2.0f - 1.0f;
-        modVal[(size_t) kModJoyY] = y * 2.0f - 1.0f;
-        modShown[(size_t) kModJoyX].store (x * 2.0f - 1.0f);
-        modShown[(size_t) kModJoyY].store (y * 2.0f - 1.0f);
-    }
 }
 
 void NektarProcessor::addModToState (juce::ValueTree& state)
 {
-    for (int i = state.getNumChildren(); --i >= 0;)
+    for (int i = state.getNumChildren(); --i >= 0;) // (older versions also kept modulation routes and a joystick path here)
         if (state.getChild (i).hasType ("MOD") || state.getChild (i).hasType ("JOYPATH"))
             state.removeChild (i, nullptr);
-    for (size_t i = 0; i < modIds.size(); ++i)
-        if (routeSrc[i].load() > 0)
-        {
-            juce::ValueTree m ("MOD");
-            m.setProperty ("id", modIds[i], nullptr);
-            m.setProperty ("src", routeSrc[i].load(), nullptr);
-            m.setProperty ("amount", (double) routeAmt[i].load(), nullptr);
-            state.appendChild (m, nullptr);
-        }
     // pair joysticks: the four corner values of every knob they set
     for (int i = state.getNumChildren(); --i >= 0;)
         if (state.getChild (i).hasType ("VEC"))
@@ -2352,33 +1818,10 @@ void NektarProcessor::addModToState (juce::ValueTree& state)
         v.setProperty ("corners", data, nullptr);
         state.appendChild (v, nullptr);
     }
-    // the recorded joystick path (16-bit values, base64)
-    const int len = joyLen.load();
-    if (len > 1)
-    {
-        juce::MemoryBlock bx ((size_t) len * 2), by ((size_t) len * 2);
-        for (int i = 0; i < len; ++i)
-        {
-            const auto qx = (uint16_t) juce::roundToInt (juce::jlimit (0.0f, 1.0f, joyPathX[(size_t) i]) * 65535.0f);
-            const auto qy = (uint16_t) juce::roundToInt (juce::jlimit (0.0f, 1.0f, joyPathY[(size_t) i]) * 65535.0f);
-            bx[(size_t) i * 2] = (char) (qx & 0xff); bx[(size_t) i * 2 + 1] = (char) (qx >> 8);
-            by[(size_t) i * 2] = (char) (qy & 0xff); by[(size_t) i * 2 + 1] = (char) (qy >> 8);
-        }
-        juce::ValueTree j ("JOYPATH");
-        j.setProperty ("len", len, nullptr);
-        j.setProperty ("x", bx.toBase64Encoding(), nullptr);
-        j.setProperty ("y", by.toBase64Encoding(), nullptr);
-        state.appendChild (j, nullptr);
-    }
 }
 
 void NektarProcessor::readModFromState (const juce::ValueTree& state)
 {
-    for (size_t i = 0; i < modIds.size(); ++i)
-    {
-        routeSrc[i].store (0);
-        routeAmt[i].store (0.0f);
-    }
     {   // pair joysticks
         std::array<std::vector<VecEntry>, 2> got;
         for (int i = 0; i < state.getNumChildren(); ++i)
@@ -2410,35 +1853,6 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
             setVectorOn (pair, ! got[(size_t) pair].empty());
         }
     }
-    for (int i = 0; i < state.getNumChildren(); ++i)
-    {
-        const auto c = state.getChild (i);
-        if (c.hasType ("MOD"))
-            setModRoute (c.getProperty ("id").toString(), { (int) c.getProperty ("src"), (float) (double) c.getProperty ("amount") });
-    }
-    // joystick path: a preset without one clears the path; recording never starts by itself after loading
-    joyLen.store (0);
-    for (int i = 0; i < state.getNumChildren(); ++i)
-    {
-        const auto c = state.getChild (i);
-        if (! c.hasType ("JOYPATH"))
-            continue;
-        juce::MemoryBlock bx, by;
-        const int len = juce::jlimit (0, kJoyMax, (int) c.getProperty ("len"));
-        if (bx.fromBase64Encoding (c.getProperty ("x").toString()) && by.fromBase64Encoding (c.getProperty ("y").toString())
-            && bx.getSize() >= (size_t) len * 2 && by.getSize() >= (size_t) len * 2)
-        {
-            for (int k = 0; k < len; ++k)
-            {
-                joyPathX[(size_t) k] = (float) ((uint8_t) bx[(size_t) k * 2] | ((uint8_t) bx[(size_t) k * 2 + 1] << 8)) / 65535.0f;
-                joyPathY[(size_t) k] = (float) ((uint8_t) by[(size_t) k * 2] | ((uint8_t) by[(size_t) k * 2 + 1] << 8)) / 65535.0f;
-            }
-            joyLen.store (len);
-        }
-    }
-    if (auto* r = apvts.getParameter ("joyrec"))
-        r->setValueNotifyingHost (0.0f);
-    joyResetReq.store (true);
 }
 
 // ---- the main screen: Make / Back / random sounds / random space

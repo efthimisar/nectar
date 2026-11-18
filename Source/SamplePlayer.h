@@ -76,11 +76,6 @@ public:
         SpectralBody body;       // Tone / Focus / Size of the spectral envelope (0.5 = untouched)
         float modelNoise = 0.0f; // 0..1 level of the residual (shaped noise) of the sine model
         float model = 0.0f;      // 0..1 blend from the normal engine to the sine-wave (additive) model
-        float chromo = 0.0f;     // 0..1 Chromophonic: this sound's partials take the body of the body partner (needs the model)
-        float chromoMove = 0.0f; // 0..1 depth of the slow travelling filter sweep that goes with it
-        float chromoSpeed = 0.5f; // 0..1 speed of the sweep (0.03 .. 1 turn per second, 0.5 = about 0.17)
-        float chromoBack = 0.5f; // 0..1 how far back the lower sound of the pair is pushed (level, 0.5 = -6 dB)
-        float chromoDull = 0.5f; // 0..1 how dull the back sound is (high-frequency slope, 0.5 = -2 dB/oct above 1 kHz)
     };
 
     SamplePlayer();
@@ -103,8 +98,6 @@ public:
     std::shared_ptr<const Sample> getSample() const { return sample; }
     // The sound this one morphs towards (set from the audio thread; nullptr = none).
     void setPartner (const std::shared_ptr<const Sample>& s) { if (s.get() != partner.get()) partner = s; }
-    // The sound whose body (see SineModel::body) this one takes on in Chromophonic (set from the audio thread).
-    void setBodyPartner (const std::shared_ptr<const Sample>& s) { if (s.get() != bodyPartner.get()) bodyPartner = s; }
     // How many voices a new note may use (the processor shares a fixed budget between the loaded slots).
     void setVoiceLimit (int n) noexcept { voiceLimit = juce::jlimit (1, kVoices, n); }
     static constexpr int kMaxVoices = 32;
@@ -153,10 +146,7 @@ private:
     std::array<AdditiveVoice, kSpectralVoices> additives;
     std::array<MorphVoice, kSpectralVoices> morphs;
     std::vector<float> inL, inR, outL, outR, specL, specR, addL, addR;
-    std::shared_ptr<const Sample> sample, partner, bodyPartner;
-    std::array<float, SineModel::kBodyBins> bodyRatio {};
-    AdditiveVoice::BodyShape bodyShape;
-    bool bodyShapeOn = false;
+    std::shared_ptr<const Sample> sample, partner;
     double sr = 44100.0;
     int voiceLimit = 32;
     juce::uint64 counter = 0;

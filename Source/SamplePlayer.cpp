@@ -545,7 +545,7 @@ void SamplePlayer::renderAdditive (int index, Voice& v, juce::AudioBuffer<float>
         }
         else
             {
-                additives[(size_t) index].setShape (bodyShapeOn ? &bodyShape : nullptr);
+                additives[(size_t) index].setShape (nullptr);
                 additives[(size_t) index].process (*sample->model, advance, R, addL.data(), addR.data(), chunk, p.modelNoise);
             }
         if (v.spectral)
@@ -630,53 +630,6 @@ void SamplePlayer::process (juce::AudioBuffer<float>& out, const juce::MidiBuffe
         }
         done = upTo;
     };
-
-    // Chromophonic: gain per twelfth of an octave that turns this sound's body into the partner's (at most +-12 dB).
-    // The pair as a whole keeps its loudness (energy of the bodies), whatever is made quieter at the back.
-    bodyShapeOn = false;
-    if (p.chromo > 0.001f && sample != nullptr && bodyPartner != nullptr && sample->model != nullptr && bodyPartner->model != nullptr
-        && sample->model->body.size() == (size_t) SineModel::kBodyBins && bodyPartner->model->body.size() == (size_t) SineModel::kBodyBins)
-    {
-        const float wv = 1.6f * p.chromoMove;
-        float i0 = 1.0f, term = 1.0f; // I0(2 wv): the sweep raises the average level, take that out
-        for (int k = 1; k < 20; ++k) { term *= (wv * wv) / (float) (k * k); i0 += term; }
-        const float sweepNorm = 1.0f / std::sqrt (juce::jmax (1.0f, i0));
-        auto centroid = [] (const std::vector<float>& b) { double a = 0.0, w = 0.0; for (int i = 0; i < SineModel::kBodyBins; ++i) { a += (double) i * b[(size_t) i]; w += b[(size_t) i]; } return w > 0.0 ? a / w : 0.0; };
-        const bool selfBack = centroid (sample->model->body) < centroid (bodyPartner->model->body);
-        // shaping gains of one sound (src) towards the other (dst); the lower sound of the pair is the "back" one:
-        // quieter, duller, and without the lows (below ~250 Hz). Returns the energy it will have.
-        auto shape = [&] (const std::vector<float>& src, const std::vector<float>& dst, bool back, float* g)
-        {
-            double eOut = 0.0, sumS = 0.0, sumD = 0.0; // only the colour is moved, not the level difference between the sounds
-            for (int b = 0; b < SineModel::kBodyBins; ++b) { sumS += (double) src[(size_t) b]; sumD += (double) dst[(size_t) b]; }
-            const double lvl = sumS > 0.0 ? sumD / sumS : 1.0;
-            for (int b = 0; b < SineModel::kBodyBins; ++b)
-            {
-                float r = std::pow (juce::jlimit (0.25f, 4.0f, (float) std::sqrt (dst[(size_t) b] / (src[(size_t) b] * lvl))), p.chromo) * sweepNorm;
-                if (back)
-                {
-                    const double f = SineModel::kBodyLow * std::pow (2.0, ((double) b + 0.5) / 12.0);
-                    r *= std::pow (10.0f, -12.0f * p.chromoBack * p.chromo / 20.0f); // the back effects grow with the amount
-                    if (f > 1000.0) r *= std::pow (10.0f, -4.0f * p.chromoDull * p.chromo * (float) std::log2 (f / 1000.0) / 20.0f);
-                    if (f < 130.0) r *= (float) (1.0 - (double) p.chromo * juce::jmin (1.0f, 2.0f * p.chromoBack) * (1.0 - juce::jlimit (0.0, 1.0, (f - 80.0) / 50.0))); // only the rumble below ~100 Hz goes (the grain that needed 300 Hz came from STFT)
-                }
-                g[b] = r;
-                eOut += (double) src[(size_t) b] * (double) r * (double) r;
-            }
-            return eOut;
-        };
-        std::array<float, SineModel::kBodyBins> gp {};
-        const double eSelf = shape (sample->model->body, bodyPartner->model->body, selfBack, bodyRatio.data());
-        const double ePart = shape (bodyPartner->model->body, sample->model->body, ! selfBack, gp.data());
-        double eIn = 0.0;
-        for (int b = 0; b < SineModel::kBodyBins; ++b) eIn += (double) sample->model->body[(size_t) b] + (double) bodyPartner->model->body[(size_t) b];
-        const float pairGain = (eSelf + ePart) > 0.0 ? (float) std::sqrt (eIn / (eSelf + ePart)) : 1.0f;
-        for (auto& r : bodyRatio) r *= pairGain * sample->model->levelFix;
-        bodyShape.ratio = bodyRatio.data();
-        bodyShape.wave = 1.6f * p.chromoMove;
-        bodyShape.rate = 0.03f * std::pow (33.3f, p.chromoSpeed);
-        bodyShapeOn = true;
-    }
 
     for (const auto meta : midi)
     {
