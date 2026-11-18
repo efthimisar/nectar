@@ -172,8 +172,9 @@ public:
         }
     }
 
+    static constexpr float kOpen = 0.2f; // Intermorph: below this the split opens up gradually
+
 private:
-    static constexpr float kOpen = 0.2f; // below this the split opens up gradually
     double rate = 48000.0;
     struct Pair
     {

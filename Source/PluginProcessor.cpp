@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include <thread>
 #include "PluginEditor.h"
 #include "BodyBake.h"
 
@@ -38,11 +39,21 @@ public:
             s->cleaned.setSize (0, 0);
         if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
             return jobHasFinished;
-        s->partA = partA; s->partB = partB; s->reverse = reverse;
-        SamplePlayer::makePlayable (*s, hostRate);
         // the sine-wave description of what is played (kept when the sound itself did not change)
         const bool soundSame = (! params.any() ? base->cleaned.getNumSamples() == 0 : sameClean)
                                && std::abs (base->partA - partA) < 1.0e-5f && std::abs (base->partB - partB) < 1.0e-5f && base->reverse == reverse;
+        s->partA = partA; s->partB = partB; s->reverse = reverse;
+        if (soundSame && base->plainPlay.getNumSamples() > 0 && std::abs (base->plainRate - hostRate) < 0.5)
+        {   // only the colour changed: the sound is already converted (and its hits found); start again from the plain copy
+            s->play = base->plainPlay;
+            s->playRate = hostRate;
+        }
+        else
+        {
+            SamplePlayer::makePlayable (*s, hostRate);
+            s->plainPlay = s->play;
+            s->plainRate = hostRate;
+        }
         // the colour baked in for the grains
         auto bakeOne = [this] (Sample& smp, const SpectralBody& body, float blur)
         {
@@ -107,16 +118,26 @@ public:
         if (grains && mv.n > 1)
         {   // something moves colour knobs: the grains get a coloured copy for every end of the movement and blend between them
             const juce::AudioBuffer<float> plain (s->play);
-            juce::AudioBuffer<float> copies[4];
-            for (int i = mv.n - 1; i >= 0; --i)
+            juce::AudioBuffer<float> copies[4], firstPlay;
+            auto one = [&] (int i)
+            {   // each corner on its own (they are baked at the same time, one core each)
+                Sample t;
+                t.play = plain; t.model = s->model; t.modelRate = s->modelRate; t.modelGain = s->modelGain; t.autoGain = s->autoGain;
+                t.hitGate = s->hitGate; t.transient = s->transient;
+                if (std::abs (mv.c[i].air - 0.5f) >= 0.01f && t.model != nullptr) applyAir (t.play, *t.model, mv.c[i].air);
+                bakeOne (t, mv.c[i].body, mv.c[i].blur);
+                copies[i] = t.grainSrc.getNumSamples() > 0 ? std::move (t.grainSrc) : t.play;
+                if (i == 0) firstPlay = std::move (t.play);
+            };
             {
-                s->play = plain;
-                if (std::abs (mv.c[i].air - 0.5f) >= 0.01f && s->model != nullptr) applyAir (s->play, *s->model, mv.c[i].air);
-                bakeOne (*s, mv.c[i].body, mv.c[i].blur);
-                copies[i] = s->grainSrc.getNumSamples() > 0 ? s->grainSrc : s->play;
-                if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
-                    return jobHasFinished;
+                std::vector<std::thread> others;
+                for (int i = 1; i < mv.n; ++i) others.emplace_back (one, i);
+                one (0);
+                for (auto& th : others) th.join();
             }
+            if (shouldExit() || generation != owner.latestJob[(size_t) slot].load())
+                return jobHasFinished;
+            s->play = std::move (firstPlay);
             s->grainSrc = std::move (copies[0]); // s->play is now the sound with the first setting
             s->grainSrcHi = std::move (copies[1]);
             s->moveParam = mv.param[0]; s->moveLo = mv.lo[0]; s->moveHi = mv.hi[0];
@@ -502,6 +523,17 @@ void NektarProcessor::scheduleClean (int slot)
                                     airP[(size_t) slot]->load(), false,
                                     slot % 2 == 0 ? getSample (slot + 1) : nullptr, slot % 2 == 0 ? pairMorphP[(size_t) (slot / 2)]->load() : 0.0f,
                                     apvts.getRawParameterValue ("autolevel")->load() > 0.5f, mv), true);
+}
+
+void NektarProcessor::adoptSample (int slot, std::shared_ptr<Sample> s)
+{
+    ++latestJob[(size_t) slot]; // anything still being baked here for this slot is out of date
+    serials[(size_t) slot] = s->serial;
+    cleanDirty[(size_t) slot] = false;
+    const juce::SpinLock::ScopedLockType lock (sampleLock);
+    currentSamples[(size_t) slot] = s;
+    pendingSamples[(size_t) slot] = s;
+    samplePending[(size_t) slot] = true;
 }
 
 void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
@@ -1606,7 +1638,23 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
     if (character == 11) // Melt: the Morph of the pair moves with the stick
         add (pair == 0 ? "morph12" : "morph34", [&rnd] { return 0.15f + 0.85f * rnd.nextFloat(); });
     const int crossAt = add (pair == 0 ? "xmorph12" : "xmorph34", [&rnd] { return rnd.nextFloat(); });
-    add (pair == 0 ? "imorph12" : "imorph34", [&rnd] { return rnd.nextFloat() < 0.5f ? 0.1f + 0.5f * rnd.nextFloat() : 0.0f; });
+    bool splitOn = false;
+    {   // Intermorph: on in all four corners or off in all four. Between "off" and "on" the split has to open up, and on the
+        // stick that opening is squeezed into a short stretch next to the "off" corner (heard as a quick lurch); when it is
+        // on everywhere, the stick only slides the crossover, an even glide
+        const int at = add (pair == 0 ? "imorph12" : "imorph34", [&rnd] { return SlotMixer::kOpen + (0.6f - SlotMixer::kOpen) * rnd.nextFloat(); });
+        if (at >= 0)
+        {
+            auto& e = out[(size_t) at];
+            int on = 0; for (float c : e.c) if (c > 0.001f) ++on;
+            const bool keepOn = on == 4 || (on > 0 && rnd.nextFloat() < 0.5f);
+            splitOn = keepOn;
+            for (auto& c : e.c) c = keepOn ? juce::jlimit (SlotMixer::kOpen, 1.0f, c > 0.001f ? c : SlotMixer::kOpen + (0.6f - SlotMixer::kOpen) * rnd.nextFloat()) : 0.0f;
+        }
+    if (crossAt >= 0 && splitOn)
+        for (auto& c : out[(size_t) crossAt].c) // with Intermorph each sound carries only its part of the range (lows / highs):
+            c = juce::jlimit (0.2f, 0.8f, c);   // a corner with one sound alone would be only lows or only highs
+    }
     if (levelAt[0] >= 0 && levelAt[1] >= 0)
         for (int c = 0; c < 4; ++c)
         {   // the sound that Cross favours in this corner is clearly heard
@@ -2184,6 +2232,8 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1x" : "vec2x")) pa->setValueNotifyingHost (x);
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) pa->setValueNotifyingHost (y);
     j.setSolo (slot >= 0 ? slot : -1);
+    for (auto& gp : j.grainPlayers) gp.restart(); // the same random grains for every measurement: drafts are compared on equal terms
+    j.freeBeats = 0.0;                            // and the rhythm starts on the same beat
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
     const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (measSec * sr / bs), tail = (int) (juce::jmin (0.2f, 0.4f * measSec) * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
@@ -2278,6 +2328,14 @@ void NektarProcessor::runJudge()
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
             if (auto* q = j.apvts.getParameter (rp->paramID); q != nullptr && std::abs (q->getValue() - rp->getValue()) > 1.0e-6f)
                 q->setValueNotifyingHost (rp->getValue());
+    {   // the copy listens to the stick where it is put: no motion shapes, no moving places in the space, no Shadow or
+        // Call and response (they move the stick or the level by themselves, and every measurement would depend on the moment)
+        auto zero = [&j] (const juce::String& id) { if (auto* q = j.apvts.getParameter (id)) q->setValueNotifyingHost (q->convertTo0to1 (0.0f)); };
+        zero ("vec1shape"); zero ("vec2shape");
+        for (const char* id : { "spmove", "spmove2", "spmove3", "spmove4" }) zero (id);
+        const int rel = juce::roundToInt (j.apvts.getRawParameterValue ("relation")->load());
+        if (rel == 2 || rel == 3) zero ("relation");
+    }
     for (int slot = 0; slot < kSlots; ++slot)
         if (const auto s = getSample (slot); s != nullptr && s->serial != judgeSeen[(size_t) slot])
         {   // a new sound in this slot (the same sound baked again keeps its serial)
@@ -2302,8 +2360,20 @@ void NektarProcessor::runJudge()
             j.applyVector (pair, v);
         else
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (! anyNew) j.cleanDirty[(size_t) slot] = false; // already baked as it is
+    bool mainReady = cleanPool.getNumJobs() == 0;
+    for (int slot = 0; slot < kSlots; ++slot) mainReady = mainReady && ! cleanDirty[(size_t) slot].load();
+    {
+        const juce::ScopedLock sl (resultLock);
+        for (auto& r : results) mainReady = mainReady && r == nullptr;
+    }
     for (int slot = 0; slot < kSlots; ++slot)
-        if (anyNew || j.cleanDirty[(size_t) slot].load()) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
+        if (anyNew || j.cleanDirty[(size_t) slot].load())
+        {
+            const auto mine = getSample (slot);
+            if (mainReady && mine != nullptr && mine->model != nullptr)
+                j.adoptSample (slot, std::make_shared<Sample> (*mine)); // already prepared as things are now: no second baking
+            else { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
+        }
     settle();
     // 2. how the sounds are now: loudness of each, brightness of the ones that stay as they are
     const float x0[2] = { j.apvts.getRawParameterValue ("vec1x")->load(), j.apvts.getRawParameterValue ("vec2x")->load() };
@@ -2371,6 +2441,14 @@ void NektarProcessor::runJudge()
                     if (g[m].db < dLo - 6.0f) sc -= 0.5f * (dLo - 6.0f - g[m].db);
                 };
                 blendOf (1, { 0, 2 }); blendOf (3, { 0, 6 }); blendOf (5, { 2, 8 }); blendOf (7, { 6, 8 }); blendOf (4, { 0, 2, 6, 8 });
+                for (int c = 0; c < 4 && ! exitNow(); ++c)
+                {   // a corner unlike the pad just next to it is heard only at the very corner: one small move and it is gone
+                    // (a dull corner among bright ones turns bright at once). An eighth of the way in, it should still be itself
+                    const float cx = (c & 1) ? 1.0f : 0.0f, cy = (c & 2) ? 1.0f : 0.0f;
+                    const auto in = listen (-1, cx + (cx > 0.5f ? -0.125f : 0.125f), cy + (cy > 0.5f ? -0.125f : 0.125f), pair, 0.3f);
+                    const auto& at = g[(c & 1) * 2 + (c & 2) * 3];
+                    sc -= 2.0f * juce::jmax (0.0f, std::abs (in.bright - at.bright) - 0.4f);
+                }
                 float sum = 0.0f; int n = 0;
                 for (auto& h : g) if (h.db > -70.0f) { sum += h.db; ++n; }
                 const float target = n > 0 ? sum / (float) n : 0.0f;

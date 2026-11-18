@@ -46,6 +46,7 @@ public:
     void reset() { for (auto& g : grains) g.on = false; untilNext = 0.0; scanPos = 0.0; step = 0; }
     void noteOn (int midiNote, float vel) { note = midiNote; velocity = vel; held = true; env = juce::jmax (env, 0.0f); reset(); }
     void noteOff() { held = false; }
+    void restart (int seed) { rnd.setSeed (seed); reset(); held = false; env = 0.0f; } // the same grains every time (the judge compares like with like)
     int getNote() const { return note; }
     bool isHeld() const { return held; }
     bool active() const { if (held || env > 1.0e-4f) return true; for (auto& g : grains) if (g.on) return true; return false; }
@@ -181,6 +182,7 @@ public:
     void prepare (double sr) { for (auto& v : voices) v.prepare (sr); }
     bool active() const { for (auto& v : voices) if (v.active()) return true; return false; }
     void allOff() { for (auto& v : voices) v.noteOff(); }
+    void restart() { int i = 0; for (auto& v : voices) v.restart (1234 + 7 * i++); next = 0; }
 
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const juce::AudioBuffer<float>& src, const GrainVoice::Params& p)
     {

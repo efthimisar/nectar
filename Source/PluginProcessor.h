@@ -178,6 +178,7 @@ private:
     void timerCallback() override;
     void scheduleClean (int slot);
     void installResult (int slot, std::shared_ptr<Sample> s);
+    void adoptSample (int slot, std::shared_ptr<Sample> s); // the hidden copy takes a sound the main one has already prepared (no baking again)
     friend class CleanJob;
 
     std::array<SamplePlayer, kSlots> players;
@@ -288,7 +289,7 @@ private:
     std::array<int, kSlots> serials {};                       // message thread only
     juce::CriticalSection resultLock;
     std::array<std::shared_ptr<Sample>, kSlots> results;      // finished by the background thread, waiting to be installed
-    juce::ThreadPool cleanPool { 1 };
+    juce::ThreadPool cleanPool { 2 }; // two sounds baked at the same time (each bakes its corners on cores of its own)
     std::atomic<double> hostRate { 44100.0 };
 
     bool recordingAllowed = false;

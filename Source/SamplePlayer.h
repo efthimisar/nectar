@@ -39,6 +39,8 @@ struct Sample
     float partA = 0.0f, partB = 1.0f; // chosen part of the sound (0..1); everything that is played is made from this part only
 
     juce::AudioBuffer<float> play;     // data converted to the host sample rate
+    juce::AudioBuffer<float> plainPlay; // `play` before any colour is baked into it (kept so baking again need not convert the sound again)
+    double plainRate = 0.0;
     float autoGain = 1.0f;             // gain that brings the loud parts of this sound to a common A-weighted level (Auto level)
     double playRate = 0.0;             // host rate that play was made for
 
