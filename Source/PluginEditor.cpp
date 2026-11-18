@@ -1405,6 +1405,17 @@ void NektarEditor::toggleRoomTone()
 void NektarEditor::timerCallback()
 {
     if (const auto m = proc.takeMakeMessage(); m.isNotEmpty()) { say (m); repaint(); }
+    if (proc.baking() && proc.judgeSteps.load() > 0 && proc.judgeStep.load() <= proc.judgeSteps.load() && message.startsWith ("Listening"))
+    {
+        const juce::String m = "Listening to version " + juce::String (juce::jmax (1, proc.judgeStep.load())) + " of " + juce::String (proc.judgeSteps.load()) + "...";
+        if (m != message) { say (m); repaint(); }
+    }
+    if (proc.fxRack.scanning())
+    {   // which plug-in is being looked at (if one makes Nektar crash, it is skipped the next time)
+        const auto f = juce::File (proc.fxRack.scanName).getFileNameWithoutExtension();
+        const juce::String m = "Looking for effects " + juce::String (juce::roundToInt (100.0f * proc.fxRack.scanProgress)) + "%" + (f.isNotEmpty() ? ": " + f : juce::String());
+        if (m != message) { say (m); repaint(); }
+    }
     if (resampleArmTicks > 0 && --resampleArmTicks == 0)
     {
         resampleArmedSlot = -1;

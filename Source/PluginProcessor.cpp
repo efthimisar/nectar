@@ -2474,13 +2474,15 @@ juce::String NektarProcessor::makeAll (int target)
         for (int pair = 0; pair < 2; ++pair)
         {
             job.parts[pair] = parts[pair];
-            if (parts[pair] != 0) newVectorCore (pair, 0, parts[pair], &job.drafts[pair], target >= 0 ? 6 : 4);
+            if (parts[pair] != 0) newVectorCore (pair, 0, parts[pair], &job.drafts[pair], target >= 0 ? 4 : 3);
         }
         {
             const juce::ScopedLock sl (judgeLock);
             judgeJob = std::move (job);
         }
         judgeDone = false;
+        judgeStep = 0;
+        judgeSteps = (int) (job.drafts[0].size() + job.drafts[1].size());
         judging = true;
         struct T : juce::Thread { NektarProcessor& o; explicit T (NektarProcessor& p) : juce::Thread ("Make listens"), o (p) {} void run() override { o.runJudge(); } };
         if (judgeThread != nullptr) judgeThread->stopThread (4000);
@@ -2777,9 +2779,9 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y)
     if (auto* pa = j.apvts.getParameter (pair == 0 ? "vec1y" : "vec2y")) pa->setValueNotifyingHost (y);
     j.setSolo (slot);
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
-    const int bs = 512, warm = (int) (0.25 * sr / bs), meas = (int) (0.75 * sr / bs), tail = (int) (0.3 * sr / bs);
+    const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (0.5 * sr / bs), tail = (int) (0.2 * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
-    constexpr int order = 11, n = 1 << order;
+    constexpr int order = 10, n = 1 << order;
     juce::dsp::FFT fft (order);
     std::vector<float> win ((size_t) n), work ((size_t) (2 * n));
     for (int i = 0; i < n; ++i) win[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (n - 1));
@@ -2851,17 +2853,38 @@ void NektarProcessor::runJudge()
         for (int i = 0; i < 4; ++i) { j.timerCallback(); b.clear(); juce::MidiBuffer m; j.processBlock (b, m); }
     };
     // 1. the copy gets the same settings and sounds as now
+    // (only what changed since the last Make: the sounds are copied and prepared once, the second Make is quick)
+    bool anyNew = false;
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
-            if (auto* q = j.apvts.getParameter (rp->paramID)) q->setValueNotifyingHost (rp->getValue());
+            if (auto* q = j.apvts.getParameter (rp->paramID); q != nullptr && std::abs (q->getValue() - rp->getValue()) > 1.0e-6f)
+                q->setValueNotifyingHost (rp->getValue());
     for (int slot = 0; slot < kSlots; ++slot)
-        if (const auto s = getSample (slot); s != nullptr)
-        {
-            auto copy = std::make_shared<Sample> (*s);
-            j.publishSample (copy, slot);
+        if (const auto s = getSample (slot); s != nullptr && s->serial != judgeSeen[(size_t) slot])
+        {   // a new sound in this slot (the same sound baked again keeps its serial)
+            judgeSeen[(size_t) slot] = s->serial;
+            j.publishSample (std::make_shared<Sample> (*s), slot);
+            anyNew = true;
         }
-    for (int pair = 0; pair < 2; ++pair) j.applyVector (pair, vectorNow (pair));
-    for (int slot = 0; slot < kSlots; ++slot) j.scheduleClean (slot);
+    auto same = [] (const VecSnapshot& a, const VecSnapshot& b)
+    {
+        if (a.entries.size() != b.entries.size() || a.swell != b.swell) return false;
+        for (int k = 0; k < 2; ++k)
+            if (a.grMode[k] != b.grMode[k] || a.grPat[k] != b.grPat[k] || a.grOct[k] != b.grOct[k] || a.grArp[k] != b.grArp[k]) return false;
+        for (size_t i = 0; i < a.entries.size(); ++i)
+        {
+            if (a.entries[i].idx != b.entries[i].idx) return false;
+            for (int c = 0; c < 4; ++c) if (std::abs (a.entries[i].c[c] - b.entries[i].c[c]) > 1.0e-6f) return false;
+        }
+        return true;
+    };
+    for (int pair = 0; pair < 2; ++pair)
+        if (const auto v = vectorNow (pair); ! same (v, j.vectorNow (pair)) || j.vecOn[(size_t) pair].load() != vecOn[(size_t) pair].load())
+            j.applyVector (pair, v);
+        else
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (! anyNew) j.cleanDirty[(size_t) slot] = false; // already baked as it is
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (anyNew || j.cleanDirty[(size_t) slot].load()) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
     settle();
     // 2. how the sounds are now: loudness of each, brightness of the ones that stay as they are
     const float x0[2] = { j.apvts.getRawParameterValue ("vec1x")->load(), j.apvts.getRawParameterValue ("vec2x")->load() };
@@ -2883,6 +2906,7 @@ void NektarProcessor::runJudge()
         float bestScore = -1.0e9f;
         for (int d = 0; d < (int) job.drafts[pair].size() && ! exitNow(); ++d)
         {
+            judgeStep = judgeStep.load() + 1;
             j.applyVector (pair, job.drafts[pair][(size_t) d]);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (changing[slot]) j.scheduleClean (slot);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) j.cleanDirty[(size_t) slot] = false;
@@ -2907,7 +2931,11 @@ void NektarProcessor::runJudge()
             }
             if (sc > bestScore) { bestScore = sc; job.best[pair] = d; }
         }
-        j.applyVector (pair, vectorNow (pair)); // the copy goes back to how things are now
+        if (! job.drafts[pair].empty())
+        {   // the copy keeps the chosen version (it becomes how things are), baked in the background before the next Make
+            j.applyVector (pair, job.drafts[pair][(size_t) job.best[pair]]);
+            for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
+        }
     }
     {
         const juce::ScopedLock sl (judgeLock);

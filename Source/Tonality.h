@@ -10,7 +10,8 @@
 // Krumhansl 1990, "Cognitive Foundations of Musical Pitch"; checked against several independent implementations,
 // 17 Nov 2026, the original tables not seen). The best key wins.
 // Our own choices (not from a source): amplitude weighting, the frequency limits, and when a sound counts as having a key
-// at all (best correlation >= 0.55 and a profile that is not flat), so noises and hits are left alone.
+// at all (best correlation >= 0.55 and a clearly uneven profile, spread >= 0.6 of the mean; raised from 0.25 on 18 Nov 2026
+// so that doors, chains and hats are left alone rather than given a key they do not have).
 struct Tonality
 {
     bool tonal = false;   // a key was found
@@ -61,7 +62,7 @@ struct Tonality
                 if (c > best) { best = c; t.tonic = root; t.minor = mi == 1; }
             }
         t.fit = (float) best;
-        t.tonal = best >= 0.55 && sd / mean >= 0.25;
+        t.tonal = best >= 0.55 && sd / mean >= 0.6;
         return t;
     }
 

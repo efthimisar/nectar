@@ -224,7 +224,11 @@ private:
     struct JudgeJob { std::vector<VecSnapshot> drafts[2]; int parts[2] = { 0, 0 }; int target = -1; std::vector<VecSnapshot> chosen; int best[2] = { 0, 0 }; };
     std::unique_ptr<NektarProcessor> judge;              // the hidden copy (made on the message thread, used by the judge thread)
     std::unique_ptr<juce::Thread> judgeThread;
+    std::array<int, 4> judgeSeen { { -1, -1, -1, -1 } }; // the sounds (by serial) the copy already has
     std::atomic<bool> judging { false }, judgeDone { false };
+public:
+    std::atomic<int> judgeStep { 0 }, judgeSteps { 0 };   // how far Make has listened (shown under Make)
+private:
     juce::CriticalSection judgeLock;
     JudgeJob judgeJob;
     juce::String makeMessage;

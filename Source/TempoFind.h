@@ -17,6 +17,7 @@ struct TempoFind
     float bpm = 0.0f;      // 0 = no tempo
     bool fromName = false;
     float clarity = 0.0f;
+    float pulse = 0.0f;   // onsets on the best pulse train, relative to chance (1 = chance)
 
     static float fromFileName (const juce::String& name)
     {
@@ -129,6 +130,7 @@ struct TempoFind
         }
         if (bestB <= 0.0 || bestAc < 0.35 || secs * bestB / 60.0 < 4.0) return t;
         t.clarity = (float) bestAc;
+        t.pulse = (float) pulse (bestB);
         t.bpm = (float) bestB;
         // a loop of whole bars: take the exact tempo its length gives, if it is close
         for (double bars : { 1.0, 2.0, 4.0, 8.0, 16.0, 32.0 })

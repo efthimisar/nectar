@@ -19,10 +19,7 @@ public:
             known.recreateFromXml (*xml);
     }
 
-    ~FxRack()
-    {
-        if (scanner != nullptr) scanner->stopThread (10000);
-    }
+    ~FxRack() = default;
 
     void prepare (double sampleRate, int blockSize)
     {
@@ -96,14 +93,15 @@ public:
         return r;
     }
 
-    bool scanning() const { return scanner != nullptr && scanner->isThreadRunning(); }
+    bool scanning() const { return scanner != nullptr && scanner->running; }
 
-    // looks for VST3 effects in the usual folders, in the background; done() is called on the message thread
+    // looks for VST3 effects in the usual folders (message thread, step by step); done() is called on the message thread
     void scan (std::function<void()> done)
     {
         if (scanning()) return;
+        scanName = {};
+        scanProgress = 0.0f;
         scanner = std::make_unique<Scan> (*this, std::move (done));
-        scanner->startThread();
     }
 
     // saved with the sound (presets and the host's project)
@@ -146,24 +144,42 @@ public:
 
 private:
     struct Slot { std::unique_ptr<juce::AudioPluginInstance> inst; std::atomic<bool> on { true }; juce::PluginDescription desc; };
-    struct Scan : juce::Thread
+    // Many plug-ins on the Mac may only be opened on the main (message) thread: looking at them from another thread can crash.
+    // So the scan runs on the message thread, one plug-in file per tick, and the screen stays alive in between.
+    struct Scan : juce::Timer
     {
-        Scan (FxRack& r, std::function<void()> d) : juce::Thread ("Nektar FX scan"), rack (r), done (std::move (d)) {}
-        void run() override
+        Scan (FxRack& r, std::function<void()> d) : rack (r), done (std::move (d))
         {
             for (auto* f : rack.formats.getFormats())
+                scanners.push_back (std::make_unique<juce::PluginDirectoryScanner> (rack.known, *f, f->getDefaultLocationsToSearch(), true, rack.pedalFile(), true));
+            startTimer (30);
+        }
+        void timerCallback() override
+        {
+            stopTimer();
+            while (current < scanners.size())
             {
-                juce::PluginDirectoryScanner sc (rack.known, *f, f->getDefaultLocationsToSearch(), true, rack.pedalFile(), true);
                 juce::String name;
-                while (! threadShouldExit() && sc.scanNextFile (true, name)) {}
+                rack.scanName = scanners[current]->getNextPluginFileThatWillBeScanned();
+                if (scanners[current]->scanNextFile (true, name)) { rack.scanProgress = scanners[current]->getProgress(); startTimer (5); return; }
+                ++current;
             }
             if (auto xml = rack.known.createXml()) { rack.listFile().getParentDirectory().createDirectory(); xml->writeTo (rack.listFile()); }
+            running = false;
             auto d = done;
             juce::MessageManager::callAsync ([d] { if (d) d(); });
         }
         FxRack& rack;
         std::function<void()> done;
+        std::vector<std::unique_ptr<juce::PluginDirectoryScanner>> scanners;
+        size_t current = 0;
+        bool running = true;
     };
+    friend struct Scan;
+public:
+    juce::String scanName;          // the plug-in being looked at right now
+    float scanProgress = 0.0f;
+private:
 
     static juce::File folder() { return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Prisma Audio").getChildFile ("Nektar"); }
     juce::File listFile() const { return folder().getChildFile ("fx-list.xml"); }
