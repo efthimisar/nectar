@@ -716,7 +716,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 gsum *= pr == 0 ? std::cos (th) : std::sin (th);
             }
             {   // the pad's level correction where the stick is now (bilinear between the 3x3 points)
-                const float x = juce::jlimit (0.0f, 1.0f, vecXShown[(size_t) pr].load()) * 2.0f, y = juce::jlimit (0.0f, 1.0f, vecYShown[(size_t) pr].load()) * 2.0f;
+                const float x = 1.0f, y = juce::jlimit (0.0f, 1.0f, vecYShown[(size_t) pr].load()) * 2.0f; // (across: the middle column of the map)
                 const int ix = juce::jmin (1, (int) x), iy = juce::jmin (1, (int) y);
                 const float fx = x - (float) ix, fy = y - (float) iy;
                 auto at = [this, pr] (int gx, int gy) { return padDbNow[(size_t) pr][(size_t) (gy * 3 + gx)].load(); };
@@ -777,7 +777,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             g.rhythmic = grMode == 2;
             g.start = 0.0f; g.end = 1.0f; // the sound that is played is already the chosen part
              g.position = modded (gp[3]); g.scan = modded (gp[4]) * motion * (float) tempoRatioFor (slot, getSample (slot).get(), hostBpm, hostHasBpm);
-            g.spray = modded (gp[5]); g.sizeMs = modded (gp[6]); g.density = modded (gp[7]); g.jitter = modded (gp[8]);
+            g.spray = modded (gp[5]); g.sizeMs = modded (gp[6]); g.density = modded (gp[7]) * (1.0f + convDens[(size_t) slot]); g.jitter = modded (gp[8]);
             g.reverse = modded (gp[9]); g.spread = modded (gp[10]); g.gate = modded (gp[11]);
             g.sizeMs /= std::sqrt (motion); // slower motion = longer grains, so they follow each other more slowly
             g.pattern = (juce::uint32) juce::roundToInt (gp[12]->load());
@@ -863,6 +863,47 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         spAzShown[(size_t) slot].store (az); spDistShown[(size_t) slot].store (di);
         space.azDeg[(size_t) slot] = az;
         space.dist[(size_t) slot] = di;
+    }
+    // ---- Conversation (across on each joystick): one sound leads the other's rhythm. Left of the middle sound 1 (or 3)
+    // leads, right of it sound 2 (or 4); the further from the middle, the stronger. The follower is heard where the
+    // leader plays (its loudness follows the leader's accents: 5 ms up, 80 ms down, against the leader's own average),
+    // and its grains grow denser there. In the middle the two go their own ways. (Our own design.)
+    {
+        const int n = buffer.getNumSamples();
+        const float sr = (float) getSampleRate();
+        const float up = 1.0f - std::exp (-1.0f / (0.005f * sr)), down = 1.0f - std::exp (-1.0f / (0.08f * sr)), peakFall = std::exp (-1.0f / (2.0f * sr));
+        for (int pr = 0; pr < 2; ++pr)
+        {
+            const float sx = vecXShown[(size_t) pr].load();
+            const float d = juce::jlimit (0.0f, 1.0f, std::abs (sx - 0.5f) * 2.4f - 0.1f); // a small dead zone in the middle
+            const int lead = sx < 0.5f ? pr * 2 : pr * 2 + 1, foll = sx < 0.5f ? pr * 2 + 1 : pr * 2;
+            auto& cs = conv[(size_t) pr];
+            if (d <= 0.0f || ! loadedNow[(size_t) lead] || ! loadedNow[(size_t) foll])
+            {
+                convDens[(size_t) pr * 2] = convDens[(size_t) pr * 2 + 1] = 0.0f;
+                cs.gainWas = 1.0f;
+                continue;
+            }
+            auto L = mixer.viewOf (lead, n), F = mixer.viewOf (foll, n);
+            float sumGate = 0.0f;
+            for (int i = 0; i < n; ++i)
+            {
+                const float a = 0.5f * (std::abs (L.getSample (0, i)) + std::abs (L.getSample (1, i)));
+                cs.env += (a - cs.env) * (a > cs.env ? up : down);
+                cs.peak += (cs.env - cs.peak) * (1.0f - peakFall); // the leader's average level over the last two seconds
+                // how far the leader is above or below its own average: its accents open the follower, its pauses close it
+                const float e = cs.peak > 1.0e-5f ? cs.env / cs.peak : 0.0f;
+                const float gate = juce::jlimit (0.0f, 1.0f, (e - 0.75f) * 2.0f);
+                sumGate += gate;
+                // the follower is lifted a little as the gate deepens, so it does not simply get quieter
+                const float g = (1.0f - d) + d * gate * 1.4f;
+                cs.gainWas += (g - cs.gainWas) * 0.02f; // (no step from one sample to the next)
+                F.setSample (0, i, F.getSample (0, i) * cs.gainWas);
+                F.setSample (1, i, F.getSample (1, i) * cs.gainWas);
+            }
+            convDens[(size_t) foll] = d * 1.5f * (sumGate / (float) juce::jmax (1, n)); // denser where the leader plays (next block)
+            convDens[(size_t) lead] = 0.0f;
+        }
     }
     mixer.setSolo (soloSlot.load());
     mixer.setCross ({ modded (xmorphP[0]), modded (xmorphP[1]) });
@@ -2053,7 +2094,8 @@ void NektarProcessor::updateMods (int numSamples)
             const auto& e = vecEntries[(size_t) pair][ei];
             float cv[4];
             for (int c = 0; c < 4; ++c) cv[c] = withOff ? juce::jlimit (0.0f, 1.0f, e.c[c] + offs[ei][(size_t) c]) : e.c[c];
-            const float a = cv[0] + (cv[1] - cv[0]) * xs, b = cv[2] + (cv[3] - cv[2]) * xs;
+            // left and right corners are one: across, the stick now leads the Conversation of the two sounds (below)
+            const float a = 0.5f * (cv[0] + cv[1]), b = 0.5f * (cv[2] + cv[3]);
             vecVal[(size_t) e.idx].store (a + (b - a) * ys);
             vecAct[(size_t) e.idx].store (true);
         }

@@ -46,6 +46,11 @@ public:
 
     // The scratch buffer a slot should be rendered into (cleared here).
     // Returns a view of exactly numSamples samples (the buffer itself may be longer).
+    juce::AudioBuffer<float> viewOf (int slot, int numSamples) // what a sound wrote this block (not cleared)
+    {
+        auto& b = scratch[(size_t) slot];
+        return juce::AudioBuffer<float> (b.getArrayOfWritePointers(), 2, juce::jmin (numSamples, b.getNumSamples()));
+    }
     juce::AudioBuffer<float> scratchFor (int slot, int numSamples)
     {
         auto& b = scratch[(size_t) slot];

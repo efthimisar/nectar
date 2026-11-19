@@ -1430,6 +1430,16 @@ void NektarEditor::drawFace (Graphics& g)
             g.setGradientFill (ColourGradient (Colour (0xff35332f), cx - 60.0f, cy - 75.0f, Colour (0xff45423d), cx + 100.0f, cy + 115.0f, true));
             g.fillEllipse (cx - R, cy - R, 2 * R, 2 * R);
         }
+        {   // Conversation, across: which sound leads the other's rhythm (left: the first sound, right: the second)
+            g.setFont (11.0f);
+            for (int c = 0; c < 2; ++c)
+            {
+                g.setColour (kWada[(pr * 2 + c) % 5].withAlpha (0.85f));
+                const float x = kPadCx[pr] + (c == 0 ? -96.0f : 70.0f);
+                g.drawText (c == 0 ? juce::String (pr * 2 + 1) + " leads" : juce::String (pr * 2 + 2) + " leads",
+                            juce::Rectangle<float> (x, kPadCy - 7.0f, 26.0f, 14.0f).expanded (14.0f, 0.0f), juce::Justification::centred);
+            }
+        }
         // the main flavour of each sound of the pair, at its lower corner (sound 1 / 3 left, 2 / 4 right)
         for (int c = 0; c < 2; ++c)
         {

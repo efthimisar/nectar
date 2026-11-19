@@ -263,6 +263,9 @@ private:
     std::atomic<float>* masterP = nullptr;
     float lastMaster = 1.0f;
     float limGain = 1.0f;                       // the peak limiter's gain now (audio thread)
+    struct Conv { float env = 0.0f, peak = 0.0f, gainWas = 1.0f; };
+    std::array<Conv, 2> conv {};                 // the Conversation of each pair (audio thread)
+    std::array<float, 4> convDens {};            // extra grain density of a following sound (audio thread)
     std::atomic<float> limGainShown { 1.0f };   // the lowest since the screen last looked
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
