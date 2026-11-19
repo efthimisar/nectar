@@ -43,10 +43,10 @@ inline juce::Point<float> charAt (int pair, int i)
     return { kPadCx[pair] + kCharR * std::cos (a), kPadCy + kCharR * std::sin (a) };
 }
 inline juce::Rectangle<float> charBtn (int pair) { return { (pair == 0 ? 180.0f : 860.0f) - 139.0f, 198.0f, 32.0f, 32.0f }; }
-inline juce::Rectangle<float> kCharPanelR() { return { 20.0f, 300.0f, 1000.0f, 282.0f }; }
-inline juce::Rectangle<float> charStrip (int i) { return { 26.0f + (float) i * 76.0f, 306.0f, 70.0f, 270.0f }; }
-inline juce::Point<float> charKnobAt (int i, int k) { const auto r = charStrip (i); return { r.getCentreX(), r.getY() + 84.0f + (float) k * 50.0f }; }
-inline juce::Point<float> charSwitchAt (int i) { const auto r = charStrip (i); return { r.getCentreX(), r.getBottom() - 22.0f }; }
+inline juce::Rectangle<float> kCharPanelR() { return { 10.0f, 468.0f, 1020.0f, 190.0f }; } // the place of the bottom panel
+inline juce::Rectangle<float> charStrip (int i) { return { 18.0f + (float) i * 77.5f, 474.0f, 72.0f, 178.0f }; }
+inline juce::Point<float> charKnobAt (int i, int k) { const auto r = charStrip (i); return { r.getCentreX(), r.getY() + 62.0f + (float) k * 40.0f }; }
+inline juce::Point<float> charSwitchAt (int i) { const auto r = charStrip (i); return { r.getRight() - 14.0f, r.getY() + 14.0f }; }
 inline juce::Point<float> shapeAt (int pair) { return { pair == 0 ? 34.0f : 714.0f, 92.0f }; }
 inline juce::Rectangle<float> speedDots (int pair) { const auto c = shapeAt (pair); return { c.x + 20.0f, c.y - 6.0f, 40.0f, 12.0f }; }
 inline juce::Rectangle<float> cardRect (int slot) { return { (slot < 2 ? 20.0f : 700.0f) + (float) (slot % 2) * 166.0f, 322.0f, 154.0f, 128.0f }; }
@@ -1875,22 +1875,22 @@ void NektarEditor::drawCharPanel (juce::Graphics& g)
         const auto st = charStrip (i);
         g.setColour (lit ? fc.withAlpha (0.16f) : Colour (0xff333230)); g.fillRoundedRectangle (st, 6.0f);
         g.setColour (lit ? fc : kLight.withAlpha (0.18f)); g.drawRoundedRectangle (st, 6.0f, lit ? 1.6f : 1.0f);
-        charSymbol (g, ch, { st.getCentreX(), st.getY() + 20.0f }, 7.0f, lit ? fc : kLight.withAlpha (0.6f));
+        charSymbol (g, ch, { st.getX() + 14.0f, st.getY() + 14.0f }, 6.5f, lit ? fc : kLight.withAlpha (0.6f));
         g.setColour (kLight.withAlpha (lit ? 0.95f : 0.55f)); g.setFont (12.0f);
-        g.drawText (kCharNames[ch], st.withY (st.getY() + 34.0f).withHeight (16.0f), juce::Justification::centred);
+        g.drawText (kCharNames[ch], st.withY (st.getY() + 26.0f).withHeight (14.0f), juce::Justification::centred);
         for (int k = 0; k < 3; ++k)
         {
             const auto c = charKnobAt (i, k);
             const float v = proc.apvts.getRawParameterValue ("chk" + juce::String (pr + 1) + "_" + juce::String (ch) + "_" + juce::String (k))->load();
-            g.setColour (kLight.withAlpha (0.2f)); g.drawEllipse (c.x - 15.0f, c.y - 15.0f, 30.0f, 30.0f, 3.0f);
-            juce::Path a; a.addCentredArc (c.x, c.y, 15.0f, 15.0f, 0.0f, -2.4f, -2.4f + 4.8f * v, true);
-            g.setColour (lit ? fc : kLight.withAlpha (0.45f)); g.strokePath (a, juce::PathStrokeType (3.0f));
-            g.setFont (10.5f); g.setColour (kLight.withAlpha (0.55f));
-            g.drawText (proc.charKnobName (ch, k), juce::Rectangle<float> (st.getX(), c.y + 16.0f, st.getWidth(), 13.0f), juce::Justification::centred);
+            g.setColour (kLight.withAlpha (0.2f)); g.drawEllipse (c.x - 11.0f, c.y - 11.0f, 22.0f, 22.0f, 2.5f);
+            juce::Path a; a.addCentredArc (c.x, c.y, 11.0f, 11.0f, 0.0f, -2.4f, -2.4f + 4.8f * v, true);
+            g.setColour (lit ? fc : kLight.withAlpha (0.45f)); g.strokePath (a, juce::PathStrokeType (2.5f));
+            g.setFont (10.0f); g.setColour (kLight.withAlpha (0.55f));
+            g.drawText (proc.charKnobName (ch, k), juce::Rectangle<float> (st.getX(), c.y + 12.0f, st.getWidth(), 12.0f), juce::Justification::centred);
         }
         const auto sw = charSwitchAt (i);
         g.setColour (lit ? fc : kLight.withAlpha (0.35f));
-        if (lit) g.fillEllipse (sw.x - 8.0f, sw.y - 8.0f, 16.0f, 16.0f); else g.drawEllipse (sw.x - 8.0f, sw.y - 8.0f, 16.0f, 16.0f, 1.4f);
+        if (lit) g.fillEllipse (sw.x - 7.0f, sw.y - 7.0f, 14.0f, 14.0f); else g.drawEllipse (sw.x - 7.0f, sw.y - 7.0f, 14.0f, 14.0f, 1.4f);
     }
 }
 
@@ -1914,7 +1914,7 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
     {
         const int ch = kCharOrder[i];
         const juce::String sfx = juce::String (pr + 1) + "_" + juce::String (ch);
-        if (p.getDistanceFrom (charSwitchAt (i)) <= 12.0f)
+        if (p.getDistanceFrom (charSwitchAt (i)) <= 11.0f)
         {
             auto* pa = proc.apvts.getParameter ("chon" + sfx);
             const bool on = pa->getValue() > 0.5f;
@@ -1925,7 +1925,7 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
             repaint(); return true;
         }
         for (int k = 0; k < 3; ++k)
-            if (p.getDistanceFrom (charKnobAt (i, k)) <= 17.0f)
+            if (p.getDistanceFrom (charKnobAt (i, k)) <= 14.0f)
             {
                 chkDrag = ch * 3 + k; chkY = p.y;
                 chkFrom = proc.apvts.getRawParameterValue ("chk" + sfx + "_" + juce::String (k))->load();
