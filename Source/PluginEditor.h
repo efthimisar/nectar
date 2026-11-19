@@ -184,6 +184,11 @@ private:
     int riverAt = 0;
     float lastBeat = 0.0f;
     int arcDrag = -1;                   // which of Motion / Weight / Light is being dragged
+    int charPanel = -1;                 // the characters' panel open for joystick 0 or 1 (-1: closed)
+    int chkDrag = -1;                   // a knob of the panel being dragged: character * 3 + knob
+    float chkFrom = 0.0f, chkY = 0.0f;
+    void drawCharPanel (juce::Graphics& g);
+    bool charPanelClick (juce::Point<float> p);
     float arcFrom = 0.5f, arcY = 0.0f;
     juce::String hoverSaid;
     void faceClick (const juce::MouseEvent& e, juce::Point<float> p);
