@@ -562,6 +562,7 @@ void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
 
 void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    limGain = 1.0f;
     fxRack.prepare (sampleRate, samplesPerBlock);
     mixer.prepare (sampleRate, samplesPerBlock);
     for (auto& pl : players)
@@ -870,7 +871,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     fxRack.process (buffer, midi); // the user's own effects (VST3), on the whole sound
 
     {
-        const float g = std::pow (10.0f, masterP->load() / 20.0f);
+        // 6 dB of headroom built in: two notes of four sounds peaked at -3 dBFS before, so chords and lively characters
+        // ran into the limiter; now they have room (Master out can still raise it)
+        const float g = std::pow (10.0f, masterP->load() / 20.0f) * 0.5f;
         if (std::abs (g - 1.0f) > 1.0e-4f || std::abs (lastMaster - 1.0f) > 1.0e-4f)
         {
             buffer.applyGainRamp (0, buffer.getNumSamples(), lastMaster, g);
@@ -882,6 +885,20 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         float pk = 0.0f;
         for (int ch = 0; ch < juce::jmin (2, buffer.getNumChannels()); ++ch) pk = juce::jmax (pk, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
         if (pk > outPeak.load()) outPeak.store (pk);
+    }
+    {   // Peak limiter: when a peak would pass -1.5 dBFS the whole sound (both sides together) is turned down at once and
+        // comes back over 150 ms, so peaks are lowered without bending the waveform (the knee below only catches what is left)
+        const int n = buffer.getNumSamples(), chs = juce::jmin (2, buffer.getNumChannels());
+        const float thr = 0.84f, rel = 1.0f - std::exp (-1.0f / (0.15f * (float) getSampleRate()));
+        for (int i = 0; i < n; ++i)
+        {
+            float a = 0.0f;
+            for (int ch = 0; ch < chs; ++ch) a = juce::jmax (a, std::abs (buffer.getSample (ch, i)));
+            const float want = a * limGain > thr ? thr / a : 1.0f;
+            limGain = want < limGain ? want : limGain + (1.0f - limGain) * rel;
+            if (limGain < 0.9999f) for (int ch = 0; ch < chs; ++ch) buffer.setSample (ch, i, buffer.getSample (ch, i) * limGain);
+        }
+        limGainShown.store (juce::jmin (limGainShown.load(), limGain));
     }
     // Safety: a soft knee above -0.9 dBFS-ish (0.9 linear) keeps peaks below 1.0; identical below 0.9
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -1628,7 +1645,23 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                         if (keep[c] && ! inRun (run, now4[c]))
                             now4[c] = juce::jlimit (run.front(), run.back(), now4[c]);
                 }
-                const auto& places = run.empty() ? loud : run;
+                // and close to each other: sliding through a long stretch still passes through other notes and colours (an arp, a
+                // phrase), heard as a jump in the middle of the pad. The corners keep within half of the sound (Glitch excepted)
+                std::vector<float> places = run.empty() ? loud : run;
+                float centre = places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())];
+                {
+                    std::vector<float> kept;
+                    for (int c = 0; c < 4; ++c) if (keep[c]) kept.push_back (now4[c]);
+                    if (! kept.empty()) { std::sort (kept.begin(), kept.end()); centre = kept[kept.size() / 2]; }
+                }
+                if (character != 7)
+                {
+                    constexpr float span = 0.25f;
+                    std::vector<float> near;
+                    for (float v : places) if (std::abs (v - centre) <= span) near.push_back (v);
+                    places = near.empty() ? std::vector<float> { centre } : near;
+                    for (int c = 0; c < 4; ++c) if (keep[c]) now4[c] = juce::jlimit (centre - span, centre + span, now4[c]);
+                }
                 const float first = places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())];
                 for (int c = 0; c < 4; ++c)
                 {
@@ -2011,6 +2044,7 @@ bool NektarProcessor::backAll()
 void NektarProcessor::clearSlotVector (int slot)
 {
     const int pair = slot / 2;
+    for (auto& d : padDbNow[(size_t) pair]) d.store (0.0f); // the loudness map was measured for the sounds that were here
     {
         const juce::SpinLock::ScopedLockType lk (vecLock);
         auto& v = vecEntries[(size_t) pair];
@@ -2264,7 +2298,7 @@ float NektarProcessor::resMixNow() const noexcept
 // that falls silent, and with some difference between its corners. Using the spectral centroid as the main correlate of
 // perceived brightness follows the timbre literature (e.g. Grey & Gordon 1978; McAdams et al. 1995); the limits and weights
 // below are our own choices, to be judged by ear.
-NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int pairOnly, float measSec)
+NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int pairOnly, float measSec, float warmSec)
 {
     auto& j = *judge;
     const int pair = slot >= 0 ? slot / 2 : pairOnly;
@@ -2285,7 +2319,7 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
         j.vecXShown[(size_t) pair] = x; j.vecYShown[(size_t) pair] = y;
     }
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
-    const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (measSec * sr / bs), tail = (int) (juce::jmin (0.2f, 0.4f * measSec) * sr / bs);
+    const int bs = 512, warm = (int) (warmSec * sr / bs), meas = (int) (measSec * sr / bs), tail = (int) (juce::jmin (0.2f, 0.4f * measSec) * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
     constexpr int order = 10, n = 1 << order;
     juce::dsp::FFT fft (order);
@@ -2350,6 +2384,13 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
         double m = 0.0, v = 0.0; for (float q : e) m += q; m /= juce::jmax ((size_t) 1, e.size());
         for (float q : e) v += (q - m) * (q - m); v /= juce::jmax ((size_t) 1, e.size());
         h.mod = m > 1.0e-6 ? (float) (std::sqrt (v) / m) : 0.0f;
+        // loudness of what sounds: the 10 ms steps more than 10 dB below the average are left out (a gated mean, the way
+        // loudness meters treat pauses), so a sound with gaps is judged by its notes, not by its silences
+        double eSum = 0.0; for (float q : e) eSum += (double) q * q;
+        const double gate = 0.1 * eSum / juce::jmax ((size_t) 1, e.size());
+        double gSum = 0.0; int gN = 0;
+        for (float q : e) if ((double) q * q >= gate) { gSum += (double) q * q; ++gN; }
+        h.loud = gN > 0 ? (float) (10.0 * std::log10 (gSum / gN + 1.0e-12)) : -100.0f;
     }
     j.onlyPair = -1;
     return h;
@@ -2417,6 +2458,7 @@ void NektarProcessor::runJudge()
     auto same = [] (const VecSnapshot& a, const VecSnapshot& b)
     {
         if (a.entries.size() != b.entries.size() || a.swell != b.swell) return false;
+        for (int k = 0; k < 9; ++k) if (std::abs (a.padDb[(size_t) k] - b.padDb[(size_t) k]) > 1.0e-3f) return false;
         for (int k = 0; k < 2; ++k)
             if (a.grMode[k] != b.grMode[k] || a.grPat[k] != b.grPat[k] || a.grOct[k] != b.grOct[k] || a.grArp[k] != b.grArp[k]) return false;
         for (size_t i = 0; i < a.entries.size(); ++i)
@@ -2428,7 +2470,11 @@ void NektarProcessor::runJudge()
     };
     for (int pair = 0; pair < 2; ++pair)
         if (const auto v = vectorNow (pair); ! same (v, j.vectorNow (pair)) || j.vecOn[(size_t) pair].load() != vecOn[(size_t) pair].load())
+        {
             j.applyVector (pair, v);
+            j.setVectorOn (pair, vecOn[(size_t) pair].load()); // on or off exactly as here (the blend of the pair can stay
+                                                               // in the corners while the pad itself is off)
+        }
         else
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) if (! anyNew) j.cleanDirty[(size_t) slot] = false; // already baked as it is
     bool mainReady = cleanPool.getNumJobs() == 0;
@@ -2459,7 +2505,18 @@ void NektarProcessor::runJudge()
         now[slot] = listen (slot, j.apvts.getParameter (slot < 2 ? "vec1x" : "vec2x")->getValue(), j.apvts.getParameter (slot < 2 ? "vec1y" : "vec2y")->getValue());
         if (! changing[slot] && now[slot].db > -70.0f) { bLo = juce::jmin (bLo, now[slot].bright); bHi = juce::jmax (bHi, now[slot].bright); }
     }
-    juce::ignoreUnused (x0, y0);
+    // and each pair as a whole, heard as it is now (without Swell's breathing): the level a new version should keep. The
+    // first Make starts from the plain sounds, so a character comes out as loud as the sounds were; later Makes keep that
+    Heard pairNow[2];
+    for (int pair = 0; pair < 2 && ! exitNow(); ++pair)
+    {
+        if (job.parts[pair] == 0) continue;
+        auto cur = j.vectorNow (pair);
+        const bool sw = cur.swell;
+        if (sw) { cur.swell = false; j.applyVector (pair, cur); }
+        pairNow[pair] = listen (-1, x0[pair], y0[pair], pair, 1.2f, 0.25f); // (long: over a second the sound has time to move through what it plays)
+        if (sw) { cur.swell = true; j.applyVector (pair, cur); }
+    }
     // 3. every draft: each changing sound in its four corners
     for (int pair = 0; pair < 2 && ! exitNow(); ++pair)
     {
@@ -2485,7 +2542,7 @@ void NektarProcessor::runJudge()
                 for (int c = 0; c < 4; ++c)
                 {
                     const auto h = listen (slot, (c & 1) ? 1.0f : 0.0f, (c & 2) ? 1.0f : 0.0f);
-                    const float dl = std::abs (h.db - now[slot].db);
+                    const float dl = std::abs (h.loud - now[slot].loud);
                     sc -= juce::jmax (0.0f, dl - 3.0f);                                  // keeps its loudness (within 3 dB)
                     if (h.db < now[slot].db - 20.0f || h.db < -70.0f) sc -= 10.0f;       // a corner that falls silent
                     sc -= 2.0f * (h.bright < lo ? lo - h.bright : (h.bright > hi ? h.bright - hi : 0.0f)); // fits the others' brightness
@@ -2512,6 +2569,13 @@ void NektarProcessor::runJudge()
                     if (g[m].db < dLo - 6.0f) sc -= 0.5f * (dLo - 6.0f - g[m].db);
                 };
                 blendOf (1, { 0, 2 }); blendOf (3, { 0, 6 }); blendOf (5, { 2, 8 }); blendOf (7, { 6, 8 }); blendOf (4, { 0, 2, 6, 8 });
+                {   // the corners of the pair as heard together should differ too (each sound alone may differ, yet the two
+                    // together can come out alike)
+                    float lo = 1.0e9f, hi = -1.0e9f;
+                    for (int c : { 0, 2, 6, 8 }) { lo = juce::jmin (lo, g[c].bright); hi = juce::jmax (hi, g[c].bright); }
+                    sc += 1.0f * juce::jmin (1.5f, hi - lo);
+                    if (hi - lo < 0.4f) sc -= 4.0f * (0.4f - (hi - lo)) / 0.4f;
+                }
                 for (int c = 0; c < 4 && ! exitNow(); ++c)
                 {   // a corner unlike the pad just next to it is heard only at the very corner: one small move and it is gone
                     // (a dull corner among bright ones turns bright at once). An eighth of the way in, it should still be itself
@@ -2520,21 +2584,43 @@ void NektarProcessor::runJudge()
                     const auto& at = g[(c & 1) * 2 + (c & 2) * 3];
                     sc -= 2.0f * juce::jmax (0.0f, std::abs (in.bright - at.bright) - 0.4f);
                 }
+                // the loudness map: every point of the pad as loud as the pair was before this Make (so a character does not
+                // come out quieter than the plain sounds), or, with nothing to go by, as loud as the pad's average
                 float sum = 0.0f; int n = 0;
-                for (auto& h : g) if (h.db > -70.0f) { sum += h.db; ++n; }
-                const float target = n > 0 ? sum / (float) n : 0.0f;
+                for (auto& h : g) if (h.loud > -70.0f) { sum += h.loud; ++n; }
+                const float target = pairNow[pair].loud > -70.0f ? pairNow[pair].loud : (n > 0 ? sum / (float) n : 0.0f);
+                float sumDb = 0.0f; for (auto& h : g) if (h.loud > -70.0f) sumDb += h.db;
+                const float targetDb = pairNow[pair].loud > -70.0f ? pairNow[pair].db : (n > 0 ? sumDb / (float) n : 0.0f);
                 auto& pd = job.drafts[pair][(size_t) d].padDb;
                 for (int k = 0; k < 9; ++k)
                 {
-                    pd[(size_t) k] = g[k].db > -70.0f ? juce::jlimit (-12.0f, 9.0f, target - g[k].db) : 0.0f;
-                    if (g[k].db > -70.0f && target - g[k].db > 9.0f) sc -= 0.5f * (target - g[k].db - 9.0f); // a hole the map cannot fill
+                    // half by the level of the sounding parts, half by the plain average (each alone misjudges some sounds:
+                    // the first lifts sounds with gaps too little, the second lifts steady ones too much)
+                    const float want = 0.5f * (target - g[k].loud) + 0.5f * (targetDb - g[k].db);
+                    pd[(size_t) k] = g[k].loud > -70.0f ? juce::jlimit (-12.0f, kPadBoost, want) : 0.0f;
+                    if (g[k].loud > -70.0f && want > kPadBoost) sc -= 0.5f * (want - kPadBoost); // a hole the map cannot fill
                 }
             }
             if (sc > bestScore) { bestScore = sc; job.best[pair] = d; }
         }
         if (! job.drafts[pair].empty() && ! exitNow())
-        {   // the copy keeps the chosen version (it becomes how things are), with the loudness map measured while judging
-            const auto& chosen = job.drafts[pair][(size_t) job.best[pair]];
+        {   // the copy keeps the chosen version (it becomes how things are). Its loudness map is measured once more, longer:
+            // the quick measurements while judging catch sounds that build up slowly (grains thickening, shimmer) before they
+            // are fully there, and such a sound would be lifted too much
+            auto chosen = job.drafts[pair][(size_t) job.best[pair]];
+            {
+                auto meas = chosen; meas.swell = false; meas.padDb.fill (0.0f);
+                j.applyVector (pair, meas);
+                settle();
+                Heard g[9];
+                for (int k = 0; k < 9 && ! exitNow(); ++k) g[k] = listen (-1, (float) (k % 3) * 0.5f, (float) (k / 3) * 0.5f, pair, 1.2f, 0.25f);
+                float sumL = 0.0f, sumD = 0.0f; int n = 0;
+                for (auto& h : g) if (h.loud > -70.0f) { sumL += h.loud; sumD += h.db; ++n; }
+                const float tL = pairNow[pair].loud > -70.0f ? pairNow[pair].loud : (n > 0 ? sumL / (float) n : 0.0f);
+                const float tD = pairNow[pair].loud > -70.0f ? pairNow[pair].db : (n > 0 ? sumD / (float) n : 0.0f);
+                for (int k = 0; k < 9; ++k)
+                    chosen.padDb[(size_t) k] = g[k].loud > -70.0f ? juce::jlimit (-12.0f, kPadBoost, 0.5f * (tL - g[k].loud) + 0.5f * (tD - g[k].db)) : 0.0f;
+            }
             j.applyVector (pair, chosen);
             for (int slot = pair * 2; slot < pair * 2 + 2; ++slot) { j.cleanDirty[(size_t) slot] = false; j.scheduleClean (slot); }
             const juce::ScopedLock sl (judgeLock);

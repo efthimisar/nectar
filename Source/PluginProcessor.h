@@ -50,6 +50,7 @@ public:
     void setStateInformation (const void*, int) override;
 
     static constexpr int kSlots = 4;
+    static constexpr float kPadBoost = 24.0f; // the most the pad's loudness map may lift a point (dB)
     // Loads a sound into a slot (0..3, message thread). Returns an error text, or an empty string on success.
     juce::String loadSample (const juce::File& file, int slot);
 
@@ -211,7 +212,7 @@ private:
                          std::array<float, 9> padDb {}; }; // padDb: level correction (dB) on a 3x3 grid of the pad, so it sounds equally loud everywhere
     std::array<std::vector<VecSnapshot>, 2> vecHistory; // message thread only
     // ---- Make listens (see PluginProcessor.cpp, "Make listens")
-    struct Heard { float db = -100.0f, bright = 0.0f, flat = 0.0f, mod = 0.0f; }; // mod: how much the level moves (10 ms steps), std / mean // loudness (dB) and brightness (spectral centroid, octaves above 20 Hz)
+    struct Heard { float db = -100.0f, bright = 0.0f, flat = 0.0f, mod = 0.0f, loud = -100.0f; }; // loud: level of the sounding parts (gaps left out, as the ear does) // mod: how much the level moves (10 ms steps), std / mean // loudness (dB) and brightness (spectral centroid, octaves above 20 Hz)
     struct JudgeJob { std::vector<VecSnapshot> drafts[2]; int parts[2] = { 0, 0 }; int target = -1; std::vector<VecSnapshot> chosen; int best[2] = { 0, 0 }; };
     std::unique_ptr<NektarProcessor> judge;              // the hidden copy (made on the message thread, used by the judge thread)
     std::unique_ptr<juce::Thread> judgeThread;
@@ -225,7 +226,7 @@ private:
     juce::String makeMessage;
     void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount);
     void runJudge();                                     // judge thread
-    Heard listen (int slot, float x, float y, int pairOnly = -1, float measSec = 0.5f); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
+    Heard listen (int slot, float x, float y, int pairOnly = -1, float measSec = 0.5f, float warmSec = 0.15f); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
     void finishMake();                                   // message thread
     VecSnapshot vectorNow (int pair);
     void applyVector (int pair, const VecSnapshot& snap);
@@ -250,6 +251,8 @@ private:
     std::array<juce::ValueTree, 2> snapshots;
     std::atomic<float>* masterP = nullptr;
     float lastMaster = 1.0f;
+    float limGain = 1.0f;                       // the peak limiter's gain now (audio thread)
+    std::atomic<float> limGainShown { 1.0f };   // the lowest since the screen last looked
     SlotMixer mixer;
     std::array<std::atomic<float>*, kSlots> spAzP {}, spDistP {};
     std::atomic<float>* spSpkP = nullptr;

@@ -35,6 +35,7 @@ public:
         {
             ladder[c].reset(); svf2[c] = Svf2 { sr, 0.0f, 0.0f };
             for (auto& f : fm[c]) f.reset();
+            lastT[c] = -1.0f;
             std::fill (comb[c].begin(), comb[c].end(), 0.0f);
         }
     }
@@ -74,9 +75,12 @@ public:
             {
                 // low-pass -> band-pass -> high-pass morph (TPT state-variable filter, Zavalishin)
                 const float q = 0.707f + reso * 11.0f;
-                const float t = frac * 2.0f; // 0..2
+                const float t1 = frac * 2.0f; // 0..2
+                const float t0 = lastT[c] < 0.0f ? t1 : lastT[c];
+                lastT[c] = t1;
                 for (int i = 0; i < n; ++i)
-                {
+                {   // (the morph glides through the block: a jump of it once per block is a step in the waveform)
+                    const float t = t0 + (t1 - t0) * (float) (i + 1) / (float) n;
                     float l, bq, h;
                     svf2[c].tick (d[i], fcl, q, l, bq, h);
                     w[i] = t < 1.0f ? l * (1.0f - t) + bq * t : bq * (2.0f - t) + h * (t - 1.0f);
@@ -152,6 +156,7 @@ private:
     bool wasActive = false;
     juce::dsp::LadderFilter<float> ladder[2];
     Svf2 svf2[2];
+    float lastT[2] = { -1.0f, -1.0f };
     std::array<juce::dsp::StateVariableTPTFilter<float>, 3> fm[2];
     std::vector<float> comb[2];
     int combPos[2] { 0, 0 };
