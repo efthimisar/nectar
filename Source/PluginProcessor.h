@@ -224,7 +224,19 @@ private:
     juce::CriticalSection judgeLock;
     JudgeJob judgeJob;
     juce::String makeMessage;
-    void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount);
+    void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount, int forceChar = -1);
+    // Characters: each pair can have up to four lit; each lit one takes corners of the pad (1: all four, 2: left / right,
+    // 3: three corners and the first again, 4: one each). composeDrafts builds the drafts of every lit character and joins
+    // them corner by corner.
+    void composeDrafts (int pair, int parts, std::vector<VecSnapshot>& out, int count);
+    void updateCharKnobs();                           // message thread: the live offsets of the characters' three knobs
+    std::array<std::vector<std::array<float, 4>>, 2> vecOff; // per entry and corner (guarded by vecLock)
+public:
+    static constexpr int kChars = 13, kCharKnobs = 3, kMaxLit = 4;
+    std::vector<int> litChars (int pair) const;       // the lit characters of a pair, lowest number first (at most four)
+    int cornerChar (int pair, int corner) const;      // which character a corner of the pad belongs to
+    static const char* charKnobName (int ch, int k);  // the three knobs of each character (shown in the panel)
+private:
     void runJudge();                                     // judge thread
     Heard listen (int slot, float x, float y, int pairOnly = -1, float measSec = 0.5f, float warmSec = 0.15f); // judge thread, on the copy: one sound alone (or with slot -1 one pair alone), the stick at x, y
     void finishMake();                                   // message thread

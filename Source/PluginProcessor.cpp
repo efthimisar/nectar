@@ -322,6 +322,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         {
             l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character" + juce::String (pr), 1 }, "Character " + juce::String (pr), chars, pr == 1 ? 0 : 1));
             l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "swell" + juce::String (pr), 1 }, "Swell " + juce::String (pr), false));
+            // the character panel: which characters are lit (each takes corners of the pad) and their three knobs
+            for (int ch = 0; ch < 13; ++ch)
+            {
+                const juce::String sfx = juce::String (pr) + "_" + juce::String (ch);
+                l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "chon" + sfx, 1 }, "Lit " + chars[ch] + " " + juce::String (pr), ch == (pr == 1 ? 0 : 1)));
+                for (int k = 0; k < 3; ++k)
+                    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chk" + sfx + "_" + juce::String (k), 1 }, chars[ch] + " " + juce::String (pr) + " " + charKnobName (ch, k),
+                                                                        juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
+            }
         }
         // how the two pairs behave towards each other
         l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "relation", 1 }, "Relation of the pairs",
@@ -454,6 +463,14 @@ void NektarProcessor::parameterChanged (const juce::String& id, float)
 
 void NektarProcessor::timerCallback()
 {
+    updateCharKnobs();
+    for (int pair = 0; pair < 2; ++pair)
+    {   // the old single choice follows the first lit character (the colours, Melt and Contrast still read it)
+        const auto lit = litChars (pair);
+        if (! lit.empty())
+            if (auto* pa = apvts.getParameter (pair == 0 ? "character1" : "character2"))
+                if (juce::roundToInt (pa->convertFrom0to1 (pa->getValue())) != lit.front()) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) lit.front()));
+    }
     if (judgeDone.exchange (false)) finishMake();
     applyHarmony();
     updateArpSteps();
@@ -1433,10 +1450,119 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         h.push_back (vectorNow (pair));
         if (h.size() > 24) h.erase (h.begin());
     }
-    newVectorCore (pair, seed, parts, nullptr, 8);
+    if (litChars (pair).size() > 1)
+    {
+        std::vector<VecSnapshot> d;
+        composeDrafts (pair, parts, d, 8);
+        if (! d.empty()) applyVector (pair, d.front());
+        return;
+    }
+    newVectorCore (pair, seed, parts, nullptr, 8, litChars (pair).empty() ? -1 : litChars (pair).front());
 }
 
-void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount)
+// ---- Characters on the corners
+std::vector<int> NektarProcessor::litChars (int pair) const
+{
+    std::vector<int> v;
+    for (int ch = 0; ch < kChars && (int) v.size() < kMaxLit; ++ch)
+        if (auto* p = apvts.getRawParameterValue ("chon" + juce::String (pair + 1) + "_" + juce::String (ch)); p != nullptr && p->load() > 0.5f)
+            v.push_back (ch);
+    return v;
+}
+
+int NektarProcessor::cornerChar (int pair, int corner) const
+{   // corners: 0 = bottom left, 1 = bottom right, 2 = top left, 3 = top right (x = corner & 1, y = corner & 2)
+    const auto v = litChars (pair);
+    if (v.empty()) return juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (pair == 0 ? "character1" : "character2")->load()));
+    switch (v.size())
+    {
+        case 1:  return v[0];
+        case 2:  return v[(size_t) (corner & 1)];                 // left half / right half
+        case 3:  return v[(size_t) (corner == 3 ? 0 : corner)];   // three corners; the fourth is the first again
+        default: return v[(size_t) corner];
+    }
+}
+
+void NektarProcessor::composeDrafts (int pair, int parts, std::vector<VecSnapshot>& out, int count)
+{
+    const auto lit = litChars (pair);
+    out.clear();
+    if (lit.size() <= 1) { newVectorCore (pair, 0, parts, &out, count, lit.empty() ? -1 : lit.front()); return; }
+    std::vector<std::vector<VecSnapshot>> per (lit.size());
+    for (size_t i = 0; i < lit.size(); ++i) newVectorCore (pair, 0, parts, &per[i], count, lit[i]);
+    size_t n = per[0].size();
+    for (auto& p : per) n = juce::jmin (n, p.size());
+    for (size_t d = 0; d < n; ++d)
+    {   // the pair-wide choices (grain mode, pattern, Swell) come from the character of the first corner
+        auto snap = per[(size_t) (std::find (lit.begin(), lit.end(), cornerChar (pair, 0)) - lit.begin())][d];
+        for (auto& e : snap.entries)
+            for (int c = 0; c < 4; ++c)
+            {
+                const auto ci = (size_t) (std::find (lit.begin(), lit.end(), cornerChar (pair, c)) - lit.begin());
+                for (const auto& o : per[ci][d].entries) if (o.idx == e.idx) { e.c[c] = o.c[c]; break; }
+            }
+        out.push_back (snap);
+    }
+}
+
+const char* NektarProcessor::charKnobName (int ch, int k)
+{
+    static const char* const names[13][3] = {
+        { "Density", "Size", "Blur" },        // Cloud
+        { "Cut", "Density", "Size" },         // Rhythm
+        { "Metal", "Ring", "Focus" },         // Metal
+        { "Air", "Brightness", "Width" },     // Air
+        { "Reverse", "Size", "Blur" },        // Reverse
+        { "Size", "Body", "Brightness" },     // Drone
+        { "Density", "Warmth", "Air" },       // Swell
+        { "Cut", "Chaos", "Size" },           // Glitch
+        { "Density", "Scatter", "Grit" },     // Dust
+        { "Metal", "Ring", "Focus" },         // Bells
+        { "Air", "Width", "Warmth" },         // Shimmer
+        { "Blur", "Flow", "Body" },           // Melt
+        { "Cut", "Size", "Brightness" } };    // Arp
+    return names[juce::jlimit (0, 12, ch)][juce::jlimit (0, 2, k)];
+}
+
+void NektarProcessor::updateCharKnobs()
+{   // what each knob moves, and how far (our own choices): the knob in the middle changes nothing
+    struct T { const char* id; float range; };
+    static const T targets[13][3] = {
+        { { "grdens", 0.3f }, { "grsize", 0.3f }, { "blur", 0.3f } },
+        { { "grgate", 0.3f }, { "grdens", 0.3f }, { "grsize", 0.3f } },
+        { { "fshift", 0.25f }, { "sfilres", 0.3f }, { "bodyfocus", 0.3f } },
+        { { "air", 0.3f }, { "sfilcut", 0.3f }, { "grspread", 0.3f } },
+        { { "grrev", 0.4f }, { "grsize", 0.3f }, { "blur", 0.3f } },
+        { { "grsize", 0.3f }, { "bodysize", 0.3f }, { "sfilcut", 0.3f } },
+        { { "grdens", 0.3f }, { "bodytone", 0.3f }, { "air", 0.3f } },
+        { { "grgate", 0.3f }, { "grjit", 0.3f }, { "grsize", 0.3f } },
+        { { "grdens", 0.3f }, { "grspray", 0.3f }, { "srcrough", 0.2f } },
+        { { "fshift", 0.25f }, { "sfilres", 0.3f }, { "bodyfocus", 0.3f } },
+        { { "air", 0.3f }, { "grspread", 0.3f }, { "bodytone", 0.3f } },
+        { { "blur", 0.3f }, { "grscan", 0.3f }, { "bodysize", 0.3f } },
+        { { "grgate", 0.3f }, { "grsize", 0.3f }, { "sfilcut", 0.3f } } };
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        int cc[4]; for (int c = 0; c < 4; ++c) cc[c] = cornerChar (pair, c);
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        const auto& es = vecEntries[(size_t) pair];
+        auto& off = vecOff[(size_t) pair];
+        off.assign (es.size(), { 0.0f, 0.0f, 0.0f, 0.0f });
+        for (size_t i = 0; i < es.size(); ++i)
+        {
+            juce::String id = modIds[(size_t) es[i].idx];
+            const juce::juce_wchar last = id.getLastCharacter();
+            if (last >= '2' && last <= '4') id = id.dropLastCharacters (1);
+            for (int c = 0; c < 4; ++c)
+                for (int k = 0; k < 3; ++k)
+                    if (id == targets[cc[c]][k].id)
+                        if (auto* p = apvts.getRawParameterValue ("chk" + juce::String (pair + 1) + "_" + juce::String (cc[c]) + "_" + juce::String (k)))
+                            off[i][(size_t) c] += (p->load() - 0.5f) * 2.0f * targets[cc[c]][k].range;
+        }
+    }
+}
+
+void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount, int forceChar)
 {
     juce::Random master (seed != 0 ? seed : vecRnd.nextInt());
     const juce::String chId = pair == 0 ? "character1" : "character2";
@@ -1446,7 +1572,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
         const int c1 = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue ("character1")->load()));
         if (auto* pa = apvts.getParameter (chId)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) opposite[c1]));
     }
-    const int character = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (chId)->load()));
+    const int character = forceChar >= 0 ? juce::jlimit (0, 12, forceChar) : juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (chId)->load()));
     // what Make may change, per sound: rhythm (0), colour (1), texture (2), each by its own amount
     auto groupOf = [] (const juce::String& id)
     {
@@ -1890,9 +2016,14 @@ void NektarProcessor::updateMods (int numSamples)
         vecXShown[(size_t) pair].store (xs); vecYShown[(size_t) pair].store (ys);
         const juce::SpinLock::ScopedTryLockType lk (vecLock);
         if (! lk.isLocked()) continue;
-        for (const auto& e : vecEntries[(size_t) pair])
+        const auto& offs = vecOff[(size_t) pair];
+        const bool withOff = offs.size() == vecEntries[(size_t) pair].size();
+        for (size_t ei = 0; ei < vecEntries[(size_t) pair].size(); ++ei)
         {
-            const float a = e.c[0] + (e.c[1] - e.c[0]) * xs, b = e.c[2] + (e.c[3] - e.c[2]) * xs;
+            const auto& e = vecEntries[(size_t) pair][ei];
+            float cv[4];
+            for (int c = 0; c < 4; ++c) cv[c] = withOff ? juce::jlimit (0.0f, 1.0f, e.c[c] + offs[ei][(size_t) c]) : e.c[c];
+            const float a = cv[0] + (cv[1] - cv[0]) * xs, b = cv[2] + (cv[3] - cv[2]) * xs;
             vecVal[(size_t) e.idx].store (a + (b - a) * ys);
             vecAct[(size_t) e.idx].store (true);
         }
@@ -2000,7 +2131,7 @@ juce::String NektarProcessor::makeAll (int target)
         for (int pair = 0; pair < 2; ++pair)
         {
             job.parts[pair] = parts[pair];
-            if (parts[pair] != 0) newVectorCore (pair, 0, parts[pair], &job.drafts[pair], target >= 0 ? 4 : 3);
+            if (parts[pair] != 0) composeDrafts (pair, parts[pair], job.drafts[pair], target >= 0 ? 4 : 3);
         }
         {
             const juce::ScopedLock sl (judgeLock);
