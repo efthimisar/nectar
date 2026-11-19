@@ -1189,11 +1189,9 @@ void NektarEditor::renderDesign (Graphics& g)
 
     g.restoreState();
 
-    // ---- four plates, each raised on its ledge: the two pairs, the centre, the whole sound (the face itself is drawn live, drawFace)
+    // ---- four plates (flat, no shadow under them): the two pairs, the centre, the whole sound (the face itself is drawn live, drawFace)
     for (auto plate : { kPanelL, kPanelC, kPanelR, kPanelB })
     {
-        g.setColour (juce::Colours::black.withAlpha (0.35f));
-        g.fillRoundedRectangle (plate.translated (0.0f, 5.0f), 22.0f);
         g.setGradientFill (ColourGradient (Colour (0xff6b6454).withAlpha (0.55f), 0, plate.getY(),
                                            Colour (0xff4d4739).withAlpha (0.55f), 0, plate.getBottom(), false));
         g.fillRoundedRectangle (plate, 22.0f);
