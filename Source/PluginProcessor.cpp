@@ -259,9 +259,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "grpat" + sfx, 1 }, "Pattern" + nm, 0, 65535, 0xb6b5));
         }
         // how much Make changes this sound: its rhythm, its colour, its texture (0 = untouched, 1 = drawn anew)
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkrhy" + sfx, 1 }, "Make rhythm" + nm, 0.0f, 1.0f, 0.5f));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Make colour" + nm, 0.0f, 1.0f, 0.5f));
-        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mktex" + sfx, 1 }, "Make texture" + nm, 0.0f, 1.0f, 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkrhy" + sfx, 1 }, "Distill rhythm" + nm, 0.0f, 1.0f, 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Distill colour" + nm, 0.0f, 1.0f, 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mktex" + sfx, 1 }, "Distill texture" + nm, 0.0f, 1.0f, 0.5f));
     }
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "autolevel", 1 }, "Auto level", true));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "bright", 1 }, "Bright",
@@ -322,16 +322,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
         {
             l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "character" + juce::String (pr), 1 }, "Character " + juce::String (pr), chars, pr == 1 ? 0 : 1));
             l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "swell" + juce::String (pr), 1 }, "Swell " + juce::String (pr), false));
-            // the character panel: which characters are lit (each takes corners of the pad) and their three knobs
+        }
+        // flavours: for each sound, the share of each character in its recipe (0 = not in it) and its three knobs
+        for (int snd = 1; snd <= 4; ++snd)
             for (int ch = 0; ch < 13; ++ch)
             {
-                const juce::String sfx = juce::String (pr) + "_" + juce::String (ch);
-                l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "chon" + sfx, 1 }, "Lit " + chars[ch] + " " + juce::String (pr), ch == (pr == 1 ? 0 : 1)));
+                const juce::String sfx = juce::String (snd) + "_" + juce::String (ch);
+                l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "fl" + sfx, 1 }, "Sound " + juce::String (snd) + " " + chars[ch],
+                                                                    juce::NormalisableRange<float> (0.0f, 1.0f), ch == (snd <= 2 ? 0 : 1) ? 1.0f : 0.0f));
                 for (int k = 0; k < 3; ++k)
-                    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "chk" + sfx + "_" + juce::String (k), 1 }, chars[ch] + " " + juce::String (pr) + " " + charKnobName (ch, k),
+                    l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "flk" + sfx + "_" + juce::String (k), 1 }, "Sound " + juce::String (snd) + " " + chars[ch] + " " + charKnobName (ch, k),
                                                                         juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
             }
-        }
         // how the two pairs behave towards each other
         l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "relation", 1 }, "Relation of the pairs",
                                                               juce::StringArray { "None", "Contrast", "Shadow", "Call and response", "Depth" }, 0));
@@ -465,11 +467,10 @@ void NektarProcessor::timerCallback()
 {
     updateCharKnobs();
     for (int pair = 0; pair < 2; ++pair)
-    {   // the old single choice follows the first lit character (the colours, Melt and Contrast still read it)
-        const auto lit = litChars (pair);
-        if (! lit.empty())
-            if (auto* pa = apvts.getParameter (pair == 0 ? "character1" : "character2"))
-                if (juce::roundToInt (pa->convertFrom0to1 (pa->getValue())) != lit.front()) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) lit.front()));
+    {   // the old single choice follows the main flavour of the pair's first sound (the colours and Melt still read it)
+        const int mf = mainFlavour (pair * 2);
+        if (auto* pa = apvts.getParameter (pair == 0 ? "character1" : "character2"))
+            if (juce::roundToInt (pa->convertFrom0to1 (pa->getValue())) != mf) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) mf));
     }
     if (judgeDone.exchange (false)) finishMake();
     applyHarmony();
@@ -1092,7 +1093,7 @@ juce::String NektarProcessor::stopRecording()
             if (auto* p = apvts.getParameter (juce::String (id) + sfx))
                 p->setValueNotifyingHost (p->getDefaultValue());
     }
-    return "Sound " + juce::String (target + 1) + " now holds its changes. Press Make for new corners.";
+    return "Sound " + juce::String (target + 1) + " now holds its changes. Press Distill for new corners.";
 }
 
 juce::File NektarProcessor::getLibraryFolder()
@@ -1450,57 +1451,82 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
         h.push_back (vectorNow (pair));
         if (h.size() > 24) h.erase (h.begin());
     }
-    if (litChars (pair).size() > 1)
-    {
-        std::vector<VecSnapshot> d;
-        composeDrafts (pair, parts, d, 8);
-        if (! d.empty()) applyVector (pair, d.front());
-        return;
-    }
-    newVectorCore (pair, seed, parts, nullptr, 8, litChars (pair).empty() ? -1 : litChars (pair).front());
+    juce::ignoreUnused (seed);
+    std::vector<VecSnapshot> d;
+    composeDrafts (pair, parts, d, 8);
+    if (! d.empty()) applyVector (pair, d.front());
 }
 
-// ---- Characters on the corners
-std::vector<int> NektarProcessor::litChars (int pair) const
+// ---- Flavours: each sound's mix of characters
+std::vector<std::pair<int, float>> NektarProcessor::flavours (int slot) const
 {
-    std::vector<int> v;
-    for (int ch = 0; ch < kChars && (int) v.size() < kMaxLit; ++ch)
-        if (auto* p = apvts.getRawParameterValue ("chon" + juce::String (pair + 1) + "_" + juce::String (ch)); p != nullptr && p->load() > 0.5f)
-            v.push_back (ch);
+    std::vector<std::pair<int, float>> v;
+    float sum = 0.0f;
+    for (int ch = 0; ch < kChars; ++ch)
+        if (auto* p = apvts.getRawParameterValue ("fl" + juce::String (slot + 1) + "_" + juce::String (ch)); p != nullptr && p->load() > 0.005f)
+        { v.push_back ({ ch, p->load() }); sum += p->load(); }
+    if (v.empty()) return { { juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (slot < 2 ? "character1" : "character2")->load())), 1.0f } };
+    for (auto& f : v) f.second /= sum;
     return v;
 }
 
-int NektarProcessor::cornerChar (int pair, int corner) const
-{   // corners: 0 = bottom left, 1 = bottom right, 2 = top left, 3 = top right (x = corner & 1, y = corner & 2)
-    const auto v = litChars (pair);
-    if (v.empty()) return juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (pair == 0 ? "character1" : "character2")->load()));
-    switch (v.size())
-    {
-        case 1:  return v[0];
-        case 2:  return v[(size_t) (corner & 1)];                 // left half / right half
-        case 3:  return v[(size_t) (corner == 3 ? 0 : corner)];   // three corners; the fourth is the first again
-        default: return v[(size_t) corner];
-    }
+int NektarProcessor::mainFlavour (int slot) const
+{
+    const auto v = flavours (slot);
+    int best = v.front().first; float w = -1.0f;
+    for (const auto& f : v) if (f.second > w) { w = f.second; best = f.first; }
+    return best;
 }
 
 void NektarProcessor::composeDrafts (int pair, int parts, std::vector<VecSnapshot>& out, int count)
-{
-    const auto lit = litChars (pair);
+{   // each flavour in use gives a full draft (the recipe of that character); each sound then takes its knobs as the
+    // weighted mix of its own flavours' drafts. Places in the sound (grain position) and the filter type are not mixed:
+    // a mix of two places is a third place, and a mix of two filter types is a switch; they come from the main flavour
     out.clear();
-    if (lit.size() <= 1) { newVectorCore (pair, 0, parts, &out, count, lit.empty() ? -1 : lit.front()); return; }
-    std::vector<std::vector<VecSnapshot>> per (lit.size());
-    for (size_t i = 0; i < lit.size(); ++i) newVectorCore (pair, 0, parts, &per[i], count, lit[i]);
+    const int s0 = pair * 2, s1 = pair * 2 + 1;
+    const auto f0 = flavours (s0), f1 = flavours (s1);
+    std::vector<int> used;
+    for (const auto& f : f0) if (std::find (used.begin(), used.end(), f.first) == used.end()) used.push_back (f.first);
+    for (const auto& f : f1) if (std::find (used.begin(), used.end(), f.first) == used.end()) used.push_back (f.first);
+    std::vector<std::vector<VecSnapshot>> per (used.size());
+    for (size_t i = 0; i < used.size(); ++i) newVectorCore (pair, 0, parts, &per[i], count, used[i]);
     size_t n = per[0].size();
     for (auto& p : per) n = juce::jmin (n, p.size());
+    auto at = [&used] (int ch) { return (size_t) (std::find (used.begin(), used.end(), ch) - used.begin()); };
+    const int m0 = mainFlavour (s0), m1 = mainFlavour (s1);
     for (size_t d = 0; d < n; ++d)
-    {   // the pair-wide choices (grain mode, pattern, Swell) come from the character of the first corner
-        auto snap = per[(size_t) (std::find (lit.begin(), lit.end(), cornerChar (pair, 0)) - lit.begin())][d];
+    {
+        auto snap = per[at (m0)][d];
         for (auto& e : snap.entries)
+        {
+            juce::String id = modIds[(size_t) e.idx];
+            if (id.startsWith ("xmorph") || id.startsWith ("imorph")) continue; // the pair's own: from the main flavour
+            const juce::juce_wchar last = id.getLastCharacter();
+            const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
+            const auto& fl = slot == s0 ? f0 : f1;
+            const auto& mainDraft = per[at (slot == s0 ? m0 : m1)][d];
+            const VecEntry* mainE = nullptr;
+            for (const auto& o : mainDraft.entries) if (o.idx == e.idx) { mainE = &o; break; }
+            if (id.startsWith ("grpos") || id.startsWith ("sfiltype"))
+            {
+                if (mainE != nullptr) for (int c = 0; c < 4; ++c) e.c[c] = mainE->c[c];
+                continue;
+            }
             for (int c = 0; c < 4; ++c)
             {
-                const auto ci = (size_t) (std::find (lit.begin(), lit.end(), cornerChar (pair, c)) - lit.begin());
-                for (const auto& o : per[ci][d].entries) if (o.idx == e.idx) { e.c[c] = o.c[c]; break; }
+                float v = 0.0f, w = 0.0f;
+                for (const auto& f : fl)
+                    for (const auto& o : per[at (f.first)][d].entries)
+                        if (o.idx == e.idx) { v += f.second * o.c[c]; w += f.second; break; }
+                if (w > 0.0f) e.c[c] = v / w;
             }
+        }
+        for (int k = 0; k < 2; ++k)
+        {   // each sound's grain mode, pattern, octave and arp: from its main flavour
+            const auto& md = per[at (k == 0 ? m0 : m1)][d];
+            snap.grMode[k] = md.grMode[k]; snap.grPat[k] = md.grPat[k]; snap.grOct[k] = md.grOct[k]; snap.grArp[k] = md.grArp[k];
+        }
+        snap.swell = per[at (m0)][d].swell || per[at (m1)][d].swell;
         out.push_back (snap);
     }
 }
@@ -1543,7 +1569,7 @@ void NektarProcessor::updateCharKnobs()
         { { "grgate", 0.3f }, { "grsize", 0.3f }, { "sfilcut", 0.3f } } };
     for (int pair = 0; pair < 2; ++pair)
     {
-        int cc[4]; for (int c = 0; c < 4; ++c) cc[c] = cornerChar (pair, c);
+        const std::vector<std::pair<int, float>> fl[2] = { flavours (pair * 2), flavours (pair * 2 + 1) };
         const juce::SpinLock::ScopedLockType lk (vecLock);
         const auto& es = vecEntries[(size_t) pair];
         auto& off = vecOff[(size_t) pair];
@@ -1552,12 +1578,16 @@ void NektarProcessor::updateCharKnobs()
         {
             juce::String id = modIds[(size_t) es[i].idx];
             const juce::juce_wchar last = id.getLastCharacter();
+            const int slot = (last >= '2' && last <= '4') ? (int) (last - '1') : 0;
             if (last >= '2' && last <= '4') id = id.dropLastCharacters (1);
-            for (int c = 0; c < 4; ++c)
+            if (slot / 2 != pair) continue;
+            float o = 0.0f;
+            for (const auto& f : fl[slot % 2])
                 for (int k = 0; k < 3; ++k)
-                    if (id == targets[cc[c]][k].id)
-                        if (auto* p = apvts.getRawParameterValue ("chk" + juce::String (pair + 1) + "_" + juce::String (cc[c]) + "_" + juce::String (k)))
-                            off[i][(size_t) c] += (p->load() - 0.5f) * 2.0f * targets[cc[c]][k].range;
+                    if (id == targets[f.first][k].id)
+                        if (auto* p = apvts.getRawParameterValue ("flk" + juce::String (slot + 1) + "_" + juce::String (f.first) + "_" + juce::String (k)))
+                            o += f.second * (p->load() - 0.5f) * 2.0f * targets[f.first][k].range;
+            for (auto& c : off[i]) c = o;
         }
     }
 }
@@ -1566,14 +1596,14 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
 {
     juce::Random master (seed != 0 ? seed : vecRnd.nextInt());
     const juce::String chId = pair == 0 ? "character1" : "character2";
-    if (pair == 1 && juce::roundToInt (apvts.getRawParameterValue ("relation")->load()) == 1)
+    if (false) // (Contrast is gone: each sound chooses its own flavours)
     {   // Contrast: joystick 2 takes the character opposite to joystick 1's (our own pairs)
         static const int opposite[13] = { 7, 5, 3, 2, 10, 1, 8, 0, 6, 11, 5, 9, 6 };
         const int c1 = juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue ("character1")->load()));
         if (auto* pa = apvts.getParameter (chId)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) opposite[c1]));
     }
     const int character = forceChar >= 0 ? juce::jlimit (0, 12, forceChar) : juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (chId)->load()));
-    // what Make may change, per sound: rhythm (0), colour (1), texture (2), each by its own amount
+    // what Distill may change, per sound: rhythm (0), colour (1), texture (2), each by its own amount
     auto groupOf = [] (const juce::String& id)
     {
         for (auto* r : { "grgate", "grsize", "grdens", "grrev", "grpos" }) if (id.startsWith (r)) return 0;
@@ -1707,7 +1737,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
     {
         const int slot = pair * 2 + k;
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
-        {   // the level stays as it is: Make does not make a sound quieter or louder than its neighbours
+        {   // the level stays as it is: Distill does not make a sound quieter or louder than its neighbours
             const auto it = modIdxById.find (("level" + sfx).toStdString());
             if (it != modIdxById.end())
             {
@@ -1861,7 +1891,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                 if (! ((parts >> k) & 1)) { snap.grMode[k] = cur.grMode[k]; snap.grPat[k] = cur.grPat[k]; }
         }
     }
-    {   // Make on one sound keeps the pair's own settings (Cross, Intermorph), but not the two that make a jump on the stick:
+    {   // Distill on one sound keeps the pair's own settings (Cross, Intermorph), but not the two that make a jump on the stick:
         // Intermorph off in some corners and on in others, or with it on, a corner that has one sound alone. Only these are
         // mended, as little as needed (the same rules as for a new pair)
         VecEntry* im = nullptr; VecEntry* cr = nullptr;
@@ -1883,7 +1913,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
     return snap;
     };
 
-    // Make tries several drafts and keeps the one that promises the most audible change of colour between the corners,
+    // Distill tries several drafts and keeps the one that promises the most audible change of colour between the corners,
     // without a corner where the sound gets very quiet or very dark. This is a quick estimate from the settings (no sound is
     // rendered); weights and limits are our own choices, not from a source.
     auto score = [this, pair] (const VecSnapshot& sn)
@@ -1921,7 +1951,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
         return v;
     };
     if (draftsOut != nullptr)
-    {   // Make listens: hand over the drafts, the better half by the quick estimate, to be heard and measured
+    {   // Distill listens: hand over the drafts, the better half by the quick estimate, to be heard and measured
         std::vector<std::pair<float, VecSnapshot>> all;
         for (int d = 0; d < draftCount * 2; ++d)
         {
@@ -1944,7 +1974,7 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
         const float sc = score (sn);
         if (sc > bestScore) { bestScore = sc; best = std::move (sn); }
     }
-    best.padDb.fill (0.0f); // (a Make that listens measures the pad and fills this in)
+    best.padDb.fill (0.0f); // (a Distill that listens measures the pad and fills this in)
     applyVector (pair, best);
 }
 
@@ -2098,7 +2128,7 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
     }
 }
 
-// ---- the main screen: Make / Back / random sounds / random space
+// ---- the main screen: Distill / Back / random sounds / random space
 juce::String NektarProcessor::makeAll (int target)
 {
     int parts[2] = { 0, 0 };
@@ -2117,7 +2147,7 @@ juce::String NektarProcessor::makeAll (int target)
     if (target >= 0 && slotLock[(size_t) target].load()) return "Sound " + juce::String (target + 1) + " is locked. Unlock it to change it.";
     if (parts[0] == 0 && parts[1] == 0) return "Everything is locked. Unlock something to change it.";
     if (listenOnMake && ! judging.load())
-    {   // Make listens: drafts now, heard and measured in the background, the best one is put in place when done (finishMake)
+    {   // Distill listens: drafts now, heard and measured in the background, the best one is put in place when done (finishMake)
         if (judge == nullptr)
         {
             judge = std::make_unique<NektarProcessor>();
@@ -2141,7 +2171,7 @@ juce::String NektarProcessor::makeAll (int target)
         judgeStep = 0;
         judgeSteps = (int) (job.drafts[0].size() + job.drafts[1].size());
         judging = true;
-        struct T : juce::Thread { NektarProcessor& o; explicit T (NektarProcessor& p) : juce::Thread ("Make listens"), o (p) {} void run() override { o.runJudge(); } };
+        struct T : juce::Thread { NektarProcessor& o; explicit T (NektarProcessor& p) : juce::Thread ("Distill listens"), o (p) {} void run() override { o.runJudge(); } };
         if (judgeThread != nullptr) judgeThread->stopThread (4000);
         judgeThread = std::make_unique<T> (*this);
         judgeThread->startThread();
@@ -2161,7 +2191,7 @@ juce::String NektarProcessor::makeAll (int target)
         auto pc = [this, &sfx] (const char* id) { return juce::String (juce::roundToInt (100.0f * apvts.getRawParameterValue (id + sfx)->load())); };
         return "Sound " + juce::String (target + 1) + " changed: rhythm " + pc ("mkrhy") + ", colour " + pc ("mkcol") + ", texture " + pc ("mktex") + ".";
     }
-    return "Made. Hold a key and move the joysticks. Lock what you like, then Make again.";
+    return "Distilled. Hold a key and move the joysticks. Lock what you like, then Distill again.";
 }
 
 bool NektarProcessor::backAll()
@@ -2234,7 +2264,7 @@ juce::String NektarProcessor::randomSounds()
         }
     }
     if (changed == 0) return "All four circles are locked.";
-    return "New sounds. Play a key to hear them, then press Make.";
+    return "New sounds. Play a key to hear them, then press Distill.";
 }
 
 void NektarProcessor::newSpace()
@@ -2385,7 +2415,7 @@ double NektarProcessor::spaceAdvance (int slot, int numSamples, float motion)
     return ph;
 }
 
-// Arp: the 16 steps' notes, from the seed that Make chose and the key of the sound: the major pentatonic above a major keynote,
+// Arp: the 16 steps' notes, from the seed that Distill chose and the key of the sound: the major pentatonic above a major keynote,
 // the minor pentatonic above a minor one (so the notes stay in the key that Harmony moved the sound to), up to an octave and a
 // half; a sound with no key takes the major pentatonic. Our own rules.
 void NektarProcessor::updateArpSteps()
@@ -2422,8 +2452,8 @@ float NektarProcessor::resMixNow() const noexcept
     return juce::jlimit (0.0f, 1.0f, own + (chord ? chordRing : 0.0f));
 }
 
-// ---- Make listens
-// The drafts of Make are played in a hidden copy of Nektar (same sounds, same settings), one sound alone, the stick in each
+// ---- Distill listens
+// The drafts of Distill are played in a hidden copy of Nektar (same sounds, same settings), one sound alone, the stick in each
 // corner, and two things are measured: loudness (RMS in dB) and brightness (spectral centroid, in octaves). The draft kept is
 // the one whose corners stay near the sound's own loudness and inside the brightness of the other sounds, with no corner
 // that falls silent, and with some difference between its corners. Using the spectral centroid as the main correlate of
@@ -2565,7 +2595,7 @@ void NektarProcessor::runJudge()
         for (int i = 0; i < 2; ++i) { b.clear(); juce::MidiBuffer m; j.processBlock (b, m); }
     };
     // 1. the copy gets the same settings and sounds as now
-    // (only what changed since the last Make: the sounds are copied and prepared once, the second Make is quick)
+    // (only what changed since the last Distill: the sounds are copied and prepared once, the second Distill is quick)
     bool anyNew = false;
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
@@ -2637,7 +2667,7 @@ void NektarProcessor::runJudge()
         if (! changing[slot] && now[slot].db > -70.0f) { bLo = juce::jmin (bLo, now[slot].bright); bHi = juce::jmax (bHi, now[slot].bright); }
     }
     // and each pair as a whole, heard as it is now (without Swell's breathing): the level a new version should keep. The
-    // first Make starts from the plain sounds, so a character comes out as loud as the sounds were; later Makes keep that
+    // first Distill starts from the plain sounds, so a character comes out as loud as the sounds were; later Makes keep that
     Heard pairNow[2];
     for (int pair = 0; pair < 2 && ! exitNow(); ++pair)
     {
@@ -2715,7 +2745,7 @@ void NektarProcessor::runJudge()
                     const auto& at = g[(c & 1) * 2 + (c & 2) * 3];
                     sc -= 2.0f * juce::jmax (0.0f, std::abs (in.bright - at.bright) - 0.4f);
                 }
-                // the loudness map: every point of the pad as loud as the pair was before this Make (so a character does not
+                // the loudness map: every point of the pad as loud as the pair was before this Distill (so a character does not
                 // come out quieter than the plain sounds), or, with nothing to go by, as loud as the pad's average
                 float sum = 0.0f; int n = 0;
                 for (auto& h : g) if (h.loud > -70.0f) { sum += h.loud; ++n; }
@@ -2793,7 +2823,7 @@ void NektarProcessor::finishMake()
         msg = "Sound " + juce::String (job.target + 1) + " changed (heard " + juce::String (heard) + " versions): rhythm " + pc ("mkrhy") + ", colour " + pc ("mkcol") + ", texture " + pc ("mktex") + ".";
     }
     else
-        msg = "Made (heard " + juce::String (heard) + " versions). Hold a key and move the joysticks. Lock what you like, then Make again.";
+        msg = "Distilled (heard " + juce::String (heard) + " versions). Hold a key and move the joysticks. Lock what you like, then Distill again.";
     const juce::ScopedLock sl (judgeLock);
     makeMessage = msg;
 }

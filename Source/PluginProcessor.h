@@ -225,16 +225,15 @@ private:
     JudgeJob judgeJob;
     juce::String makeMessage;
     void newVectorCore (int pair, int seed, int parts, std::vector<VecSnapshot>* draftsOut, int draftCount, int forceChar = -1);
-    // Characters: each pair can have up to four lit; each lit one takes corners of the pad (1: all four, 2: left / right,
-    // 3: three corners and the first again, 4: one each). composeDrafts builds the drafts of every lit character and joins
-    // them corner by corner.
+    // Flavours: each sound has its own mix of the 13 characters, as many as wanted, each with an amount (its share of
+    // the recipe). composeDrafts builds the drafts of every flavour in use and mixes each sound's knobs by its shares.
     void composeDrafts (int pair, int parts, std::vector<VecSnapshot>& out, int count);
     void updateCharKnobs();                           // message thread: the live offsets of the characters' three knobs
     std::array<std::vector<std::array<float, 4>>, 2> vecOff; // per entry and corner (guarded by vecLock)
 public:
-    static constexpr int kChars = 13, kCharKnobs = 3, kMaxLit = 4;
-    std::vector<int> litChars (int pair) const;       // the lit characters of a pair, lowest number first (at most four)
-    int cornerChar (int pair, int corner) const;      // which character a corner of the pad belongs to
+    static constexpr int kChars = 13, kCharKnobs = 3;
+    std::vector<std::pair<int, float>> flavours (int slot) const; // the flavours of a sound in use, with their shares (summing to 1)
+    int mainFlavour (int slot) const;                 // the flavour with the biggest share
     static const char* charKnobName (int ch, int k);  // the three knobs of each character (shown in the panel)
 private:
     void runJudge();                                     // judge thread

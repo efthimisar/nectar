@@ -185,7 +185,9 @@ private:
     float lastBeat = 0.0f;
     int arcDrag = -1;                   // which of Motion / Weight / Light is being dragged
     int charPanel = -1;                 // the characters' panel open for joystick 0 or 1 (-1: closed)
-    int chkDrag = -1;                   // a knob of the panel being dragged: character * 3 + knob
+    int chkDrag = -1;                   // a knob of the panel being dragged: character * 3 + knob (1000 + character: its share)
+    int panelSnd = -1;                  // the sound the panel shows, when chosen in the panel itself
+    int panelSound() const;
     float chkFrom = 0.0f, chkY = 0.0f;
     void drawCharPanel (juce::Graphics& g);
     bool charPanelClick (juce::Point<float> p);
