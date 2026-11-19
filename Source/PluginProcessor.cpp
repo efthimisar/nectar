@@ -1587,20 +1587,13 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
             // the stick slides the position between the corners: if the corners sit in two loud places with a quiet or different
             // stretch between them, the slide passes through it (a hole, a jump). So the corners share one unbroken loud stretch
             // (Glitch keeps its broken pieces from anywhere: jumping is its point)
-            std::vector<float> run;
+            std::vector<std::vector<float>> runs;
             if (! loud.empty() && character != 7)
-            {
-                std::vector<std::vector<float>> runs;
                 for (size_t i = 0; i < loud.size(); ++i)
                 {
                     if (i == 0 || loud[i] - loud[i - 1] > 1.5f / 32.0f) runs.emplace_back();
                     runs.back().push_back (loud[i]);
                 }
-                int total = 0; for (auto& r : runs) total += (int) r.size();
-                int pick = rnd.nextInt (juce::jmax (1, total));
-                for (auto& r : runs) { if (pick < (int) r.size()) { run = r; break; } pick -= (int) r.size(); }
-            }
-            const auto& places = run.empty() ? loud : run;
             const auto it = modIdxById.find (("grpos" + sfx).toStdString());
             if (it != modIdxById.end())
             {   // positions are picked outright (no spreading around a centre: a place between two loud places may be silent)
@@ -1608,10 +1601,38 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
                 float now4[4];
                 nowOf (e.idx, now4);
                 const float a = amount[k][0];
+                bool keep[4];
+                for (int c = 0; c < 4; ++c) keep[c] = rnd.nextFloat() >= a * reach[c]; // with the rhythm amount, a corner may move
+                // the stick slides the position between the corners: if the corners sit in two loud places with a quiet or
+                // different stretch between them, the slide passes through it (a hole, a jump). So all four share one
+                // unbroken loud stretch: the one most of the kept corners are in, or one picked by its length; a kept corner
+                // outside it moves to the nearest place inside (Glitch keeps its broken pieces from anywhere: jumping is its point)
+                std::vector<float> run;
+                if (! runs.empty())
+                {
+                    auto inRun = [] (const std::vector<float>& r, float v) { return v >= r.front() - 1.0f / 64.0f && v <= r.back() + 1.0f / 64.0f; };
+                    int best = -1, bestN = 0;
+                    for (int r = 0; r < (int) runs.size(); ++r)
+                    {
+                        int n = 0; for (int c = 0; c < 4; ++c) if (keep[c] && inRun (runs[(size_t) r], now4[c])) ++n;
+                        if (n > bestN) { bestN = n; best = r; }
+                    }
+                    if (best < 0)
+                    {
+                        int total = 0; for (auto& r : runs) total += (int) r.size();
+                        int pick = rnd.nextInt (juce::jmax (1, total));
+                        for (int r = 0; r < (int) runs.size(); ++r) { if (pick < (int) runs[(size_t) r].size()) { best = r; break; } pick -= (int) runs[(size_t) r].size(); }
+                    }
+                    run = runs[(size_t) juce::jmax (0, best)];
+                    for (int c = 0; c < 4; ++c)
+                        if (keep[c] && ! inRun (run, now4[c]))
+                            now4[c] = juce::jlimit (run.front(), run.back(), now4[c]);
+                }
+                const auto& places = run.empty() ? loud : run;
                 const float first = places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())];
                 for (int c = 0; c < 4; ++c)
-                {   // with the rhythm amount, a corner may take the grains from another place
-                    if (rnd.nextFloat() >= a * reach[c]) { e.c[c] = now4[c]; continue; }
+                {
+                    if (keep[c]) { e.c[c] = now4[c]; continue; }
                     e.c[c] = (character == 7 || rnd.nextFloat() < a) ? (places.empty() ? rnd.nextFloat() : places[(size_t) rnd.nextInt ((int) places.size())]) : first;
                 }
                 out.push_back (e);
@@ -1680,6 +1701,25 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
             for (int k = 0; k < 2; ++k)
                 if (! ((parts >> k) & 1)) { snap.grMode[k] = cur.grMode[k]; snap.grPat[k] = cur.grPat[k]; }
         }
+    }
+    {   // Make on one sound keeps the pair's own settings (Cross, Intermorph), but not the two that make a jump on the stick:
+        // Intermorph off in some corners and on in others, or with it on, a corner that has one sound alone. Only these are
+        // mended, as little as needed (the same rules as for a new pair)
+        VecEntry* im = nullptr; VecEntry* cr = nullptr;
+        for (auto& e : snap.entries)
+        {
+            const auto& id = modIds[(size_t) e.idx];
+            if (id.startsWith ("imorph")) im = &e; else if (id.startsWith ("xmorph")) cr = &e;
+        }
+        bool split = false;
+        if (im != nullptr)
+        {
+            int on = 0; for (float c : im->c) if (c > 0.001f) ++on;
+            split = on >= 2;                                   // most corners decide: on stays on, a single "on" corner goes off
+            for (auto& c : im->c) c = split ? juce::jmax (SlotMixer::kOpen, c) : 0.0f;
+        }
+        if (cr != nullptr && split)
+            for (auto& c : cr->c) c = juce::jlimit (0.2f, 0.8f, c);
     }
     return snap;
     };
@@ -2234,6 +2274,16 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
     j.setSolo (slot >= 0 ? slot : -1);
     for (auto& gp : j.grainPlayers) gp.restart(); // the same random grains for every measurement: drafts are compared on equal terms
     j.freeBeats = 0.0;                            // and the rhythm starts on the same beat
+    {   // nothing left over from the measurement before (echoes of the space, ringing strings, filter states), and the stick
+        // already where it is put (no glide): every measurement starts from silence, the same way
+        const double rate = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
+        j.mixer.prepare (rate, 512);
+        for (auto& sf : j.slotFilter) sf.prepare (rate, 512);
+        for (auto& sh : j.shifters) sh.prepare (rate);
+        j.tilt.prepare (rate); j.macroTone.prepare (rate); j.resonator.prepare (rate);
+        j.vecXs[(size_t) pair] = x; j.vecYs[(size_t) pair] = y;
+        j.vecXShown[(size_t) pair] = x; j.vecYShown[(size_t) pair] = y;
+    }
     const double sr = j.hostRate.load() > 0.0 ? j.hostRate.load() : 48000.0;
     const int bs = 512, warm = (int) (0.15 * sr / bs), meas = (int) (measSec * sr / bs), tail = (int) (juce::jmin (0.2f, 0.4f * measSec) * sr / bs);
     juce::AudioBuffer<float> b (2, bs);
@@ -2316,10 +2366,31 @@ void NektarProcessor::runJudge()
     auto exitNow = [this] { return judgeThread != nullptr && judgeThread->threadShouldExit(); };
     auto settle = [&j, &exitNow]
     {   // the copy bakes its colours; wait until it is done and has taken the results
-        for (int i = 0; i < 6; ++i) { j.timerCallback(); juce::Thread::sleep (5); }
-        for (int guard = 0; guard < 3000 && (j.cleanPool.getNumJobs() > 0) && ! exitNow(); ++guard) { j.timerCallback(); juce::Thread::sleep (10); }
+        // done only when nothing is left: no baking, no finished bake waiting to be taken, no sound waiting for the audio,
+        // no knob change waiting to be baked (under a heavy load these can lag behind, and the copy would be heard as before)
         juce::AudioBuffer<float> b (2, 512);
-        for (int i = 0; i < 4; ++i) { j.timerCallback(); b.clear(); juce::MidiBuffer m; j.processBlock (b, m); }
+        auto busy = [&j]
+        {
+            if (j.cleanPool.getNumJobs() > 0) return true;
+            for (int s = 0; s < kSlots; ++s) if (j.cleanDirty[(size_t) s].load()) return true;
+            {
+                const juce::SpinLock::ScopedLockType lk (j.sampleLock);
+                for (bool p : j.samplePending) if (p) return true;
+            }
+            const juce::ScopedLock sl (j.resultLock);
+            for (auto& r : j.results) if (r != nullptr) return true;
+            return false;
+        };
+        for (int guard = 0; guard < 6000 && ! exitNow(); ++guard)
+        {
+            for (int s = 0; s < kSlots; ++s)
+                if (j.cleanDirty[(size_t) s].load()) { j.cleanDirty[(size_t) s] = false; j.scheduleClean (s); }
+            j.timerCallback();
+            b.clear(); juce::MidiBuffer m; j.processBlock (b, m);
+            if (! busy()) break;
+            juce::Thread::sleep (3);
+        }
+        for (int i = 0; i < 2; ++i) { b.clear(); juce::MidiBuffer m; j.processBlock (b, m); }
     };
     // 1. the copy gets the same settings and sounds as now
     // (only what changed since the last Make: the sounds are copied and prepared once, the second Make is quick)
