@@ -3,8 +3,8 @@
 #include <cmath>
 
 // Conversation, vertical: one sound takes on the colour of the other (its timbre, not its notes or its rhythm).
-// Ten bands, 120 Hz .. 10 kHz: the average level of each band is measured in both sounds (about 120 ms), and the sound that
-// receives is lifted or lowered band by band towards the other's balance (never more than 9 dB, and the whole level is kept:
+// Ten bands, 120 Hz .. 10 kHz: the average level of each band is measured in both sounds (about 350 ms), and the sound that
+// receives is lifted or lowered band by band towards the other's balance (a band is lifted by at most 4 dB and lowered by at most 9 dB, and the whole level is kept:
 // only the balance moves). `amount` 0..1 says how far. Our own design; the numbers were chosen by ear.
 class TimbreBorrow
 {
@@ -41,7 +41,7 @@ public:
     {
         if (amount <= 0.0005f && isIdle()) return;
         const int chT = juce::jmin (2, tgt.getNumChannels()), chS = juce::jmin (2, src.getNumChannels());
-        const double avg = 1.0 - std::exp (-1.0 / (0.12 * sr));
+        const double avg = 1.0 - std::exp (-1.0 / (0.35 * sr)); // slow: a sound with sharp attacks (an arp) must not move the filters at every hit
         for (int s0 = 0; s0 < n; s0 += kSub)
         {
             const int len = juce::jmin (kSub, n - s0);
@@ -70,14 +70,14 @@ public:
             double goalDb[kBands], pBefore = 1.0e-12, pAfter = 1.0e-12;
             for (int b = 0; b < kBands; ++b)
             {
-                goalDb[b] = juce::jlimit (-9.0, 9.0, (double) amount * (want[b] - mean));
+                goalDb[b] = juce::jlimit (-9.0, 4.0, (double) amount * (want[b] - mean)); // lifts stay small: a sharp attack in a lifted band must not jump out
                 pBefore += et[b]; pAfter += et[b] * std::pow (10.0, goalDb[b] / 10.0);
             }
             const double keep = 10.0 * std::log10 (pAfter / pBefore); // the whole level stays: only the balance moves
             for (int b = 0; b < kBands; ++b)
             {
-                const float goal = (float) (goalDb[b] - keep);
-                gDb[b] += (goal - gDb[b]) * 0.08f;
+                const float goal = (float) juce::jlimit (-9.0, 4.0, goalDb[b] - keep); // (after the level is kept, too: a lift never passes 4 dB)
+                gDb[b] += (goal - gDb[b]) * 0.025f;
                 if (std::abs (gDb[b] - gSet[b]) > 0.05f) { gSet[b] = gDb[b]; peak (pk[b], centre[b], gDb[b]); }
             }
             for (int c = 0; c < chT; ++c)

@@ -1375,16 +1375,6 @@ inline juce::Colour familyColour (int ch)
 }
 const char* const kArcNames[3] = { "Motion: slower - faster", "Weight: thinner - heavier", "Light: duller - brighter" };
 const char* const kArcIds[3] = { "mspeed", "mweight", "mlight" };
-const char* const kMkIds[3] = { "mkrhy", "mkcol", "mktex" };
-const char* const kMkNames[3] = { "Rhythm", "Colour", "Texture" };
-void mkIcon (juce::Graphics& g, int i, juce::Point<float> c, juce::Colour col)
-{   // 0 rhythm (three dots, unevenly spaced), 1 colour (a small wave), 2 texture (scattered grains)
-    g.setColour (col);
-    if (i == 0) { for (float x : { -5.0f, -1.5f, 4.5f }) g.fillEllipse (c.x + x - 1.4f, c.y - 1.4f, 2.8f, 2.8f); return; }
-    if (i == 1) { juce::Path w; w.startNewSubPath (c.x - 5.5f, c.y); w.quadraticTo (c.x - 2.75f, c.y - 4.0f, c.x, c.y); w.quadraticTo (c.x + 2.75f, c.y + 4.0f, c.x + 5.5f, c.y); g.strokePath (w, juce::PathStrokeType (1.3f)); return; }
-    const float d[5][2] { { -4.0f, -2.0f }, { -1.0f, 2.5f }, { 2.0f, -3.0f }, { 4.5f, 1.5f }, { 0.5f, -0.5f } };
-    for (auto& q : d) g.fillEllipse (c.x + q[0] - 0.9f, c.y + q[1] - 0.9f, 1.8f, 1.8f);
-}
 }
 
 void NektarEditor::drawFace (Graphics& g)

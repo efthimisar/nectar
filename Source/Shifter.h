@@ -11,7 +11,7 @@
 class Shifter
 {
 public:
-    void prepare (double sr) { rate = sr; for (auto& c : ch) c = {}; phS = phR = 0.0; wet = 0.0f; }
+    void prepare (double sr) { rate = sr; for (auto& c : ch) c = {}; phS = phR = 0.0; wet = 0.0f; rMix = 0.0f; }
 
     // shiftHz: 0 = off (negative = down). ringHz: 0 = off. ringMix 0..1.
     void process (juce::AudioBuffer<float>& b, int n, float shiftHz, float ringHz, float ringMix)
@@ -19,11 +19,13 @@ public:
         // the shifted sound fades in and out (over ~10 ms, and gradually for shifts below 3 Hz) instead of switching:
         // switching from the plain sound to the phase-split one is a step in the waveform, heard as a click
         const float wetTarget = juce::jlimit (0.0f, 1.0f, std::abs (shiftHz) / 3.0f);
-        const bool rOn = ringHz > 0.5f && ringMix > 0.001f;
+        // the ring's amount slides too (switching it on at a few per cent is a small step in the waveform, heard as a tick)
+        const float ringTarget = ringHz > 0.5f ? ringMix : 0.0f;
+        const bool rOn = ringTarget > 0.001f || rMix > 1.0e-4f;
         if (wetTarget <= 0.0f && wet <= 1.0e-4f)
         {
             wet = 0.0f; fresh = false;          // off: nothing to do; the filters start clean the next time
-            if (! rOn) return;
+            if (! rOn) { rMix = 0.0f; return; }
         }
         if (wetTarget > 0.0f && ! fresh) { for (auto& c : ch) c = {}; fresh = true; }
         const bool sOn = fresh;
@@ -35,6 +37,7 @@ public:
         {
             const float cs = (float) std::cos (phS), sn = (float) std::sin (phS), rg = (float) std::sin (phR);
             wet += (wetTarget - wet) * wk;
+            rMix += (ringTarget - rMix) * wk;
             for (int c = 0; c < chs; ++c)
             {
                 float x = b.getSample (c, i);
@@ -48,7 +51,7 @@ public:
                     for (int k = 0; k < 4; ++k) q = st.b[(size_t) k].tick (q, kB[k] * kB[k]);
                     x = x * (1.0f - wet) + (I * cs + q * sn) * wet;
                 }
-                if (rOn) x = x * (1.0f - ringMix) + x * rg * ringMix * 1.4142f;
+                if (rOn) x = x * (1.0f - rMix) + x * rg * rMix * 1.4142f;
                 b.setSample (c, i, x);
             }
             phS += dS; if (phS > juce::MathConstants<double>::twoPi) phS -= juce::MathConstants<double>::twoPi; if (phS < 0.0) phS += juce::MathConstants<double>::twoPi;
@@ -63,6 +66,7 @@ private:
     static constexpr float kB[4] = { 0.4021921162426f, 0.8561710882420f, 0.9722909545651f, 0.9952884791278f };
     std::array<Ch, 2> ch;
     double rate = 48000.0, phS = 0.0, phR = 0.0;
+    float rMix = 0.0f;  // how much ring is heard (smoothed)
     float wet = 0.0f;   // how much of the shifted sound is heard (smoothed)
     bool fresh = false; // the phase-split filters are running
 };

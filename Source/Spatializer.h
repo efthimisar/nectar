@@ -30,7 +30,7 @@ public:
         lpState = 0.0f; lpSide = 0.0f;
         prevDelay = { 0.0f, 0.0f };
         prevAz = -1000.0f;
-        prevEarG = { 1.0f, 1.0f }; prevSideK = -1.0f;
+        prevEarG = { 1.0f, 1.0f }; prevSideK = -1.0f; prevCoef = false;
     }
 
     struct Params
@@ -72,33 +72,39 @@ public:
         // behind: a high shelf of the same shape as the head shadow (above about 1 kHz) takes the highs down,
         // since on headphones that is the range where the head model leaves a sound behind brighter than one in front
         // (on speakers the same shelf, so behind sounds alike in both)
+        Ear backTo;
         {
             const float beta = (float) sr / (c / a);
             const float ab = 1.0f - 0.75f * backAmt;
             const float b0 = 1.0f + beta * ab, b1 = 1.0f - beta * ab, a0 = 1.0f + beta, a1 = 1.0f - beta;
-            backSh.b0 = b0 / a0; backSh.b1 = b1 / a0; backSh.a1 = a1 / a0;
+            backTo.b0 = b0 / a0; backTo.b1 = b1 / a0; backTo.a1 = a1 / a0;
         }
+        // the filters' coefficients slide from the last block's to this one's (a step in a coefficient is a click when the sound moves fast)
+        const Ear backFrom = prevCoef ? prevBack : backTo;
+        const float g0From = prevCoef ? prevG0 : g0, lpFrom = prevCoef ? prevLpA : lpA, invN = 1.0f / (float) juce::jmax (1, n);
         if (p.speakers)
         {
             const float pan = std::sin (th); // -1 left .. 1 right
-            const float t = (pan + 1.0f) * 0.25f * pi;
-            const float gl = std::sqrt (2.0f) * std::cos (t), gr = std::sqrt (2.0f) * std::sin (t);
+            const float tp = (pan + 1.0f) * 0.25f * pi;
+            const float gl = std::sqrt (2.0f) * std::cos (tp), gr = std::sqrt (2.0f) * std::sin (tp);
             // on speakers a far sound is also narrower (its own width shrinks to a third at the far edge; our own choice)
             const float sk0 = prevSideK < 0.0f ? sideK : prevSideK, invS = 1.0f / (float) juce::jmax (1, n);
             prevSideK = sideK;
             const float narrow = 1.0f - 0.67f * juce::jlimit (0.0f, 1.0f, p.dist) * juce::jlimit (0.0f, 1.0f, p.far);
             for (int i = 0; i < n; ++i)
             {
-                lpState += lpA * (in[i] - lpState);
-                const float yb = backSh.b0 * lpState + backSh.z;
-                backSh.z = backSh.b1 * lpState - backSh.a1 * yb;
-                const float y = yb * g0; // (the same level trim as on headphones, so switching does not change the loudness)
+                const float t = (float) (i + 1) * invN;
+                const float lpI = lpFrom + (lpA - lpFrom) * t;
+                lpState += lpI * (in[i] - lpState);
+                const float yb = (backFrom.b0 + (backTo.b0 - backFrom.b0) * t) * lpState + backSh.z;
+                backSh.z = (backFrom.b1 + (backTo.b1 - backFrom.b1) * t) * lpState - (backFrom.a1 + (backTo.a1 - backFrom.a1) * t) * yb;
+                const float y = yb * (g0From + (g0 - g0From) * t); // (the same level trim as on headphones, so switching does not change the loudness)
                 float sd = 0.0f;
-                if (side != nullptr) { lpSide += lpA * (side[i] - lpSide); sd = lpSide * g0 * narrow * (sk0 + (sideK - sk0) * (float) (i + 1) * invS); }
+                if (side != nullptr) { lpSide += lpA * (side[i] - lpSide); sd = lpSide * (g0From + (g0 - g0From) * t) * narrow * (sk0 + (sideK - sk0) * (float) (i + 1) * invS); }
                 outL[i] = y * gl + sd;
                 outR[i] = y * gr - sd;
             }
-            prevAz = p.azDeg;
+            prevAz = p.azDeg; prevBack = backTo; prevLpA = lpA; prevG0 = g0; prevCoef = true;
             return;
         }
 
@@ -108,6 +114,7 @@ public:
 
         // head shadow coefficients per ear
         const float w0 = c / a, beta = 2.0f * (float) sr / (2.0f * w0);
+        Ear earTo[2];
         for (int e = 0; e < 2; ++e)
         {
             const float earDeg = e == 0 ? -100.0f : 100.0f;
@@ -117,10 +124,11 @@ public:
             constexpr float amin = 0.1f;
             const float alpha = 1.0f + amin * 0.5f + (1.0f - amin * 0.5f) * std::cos (phi / juce::degreesToRadians (150.0f) * pi);
             const float b0 = 1.0f + beta * alpha, b1 = 1.0f - beta * alpha, a0 = 1.0f + beta, a1 = 1.0f - beta;
-            ear[(size_t) e].b0 = b0 / a0;
-            ear[(size_t) e].b1 = b1 / a0;
-            ear[(size_t) e].a1 = a1 / a0;
+            earTo[e].b0 = b0 / a0;
+            earTo[e].b1 = b1 / a0;
+            earTo[e].a1 = a1 / a0;
         }
+        const Ear earFrom[2] = { prevCoef ? prevEar[0] : earTo[0], prevCoef ? prevEar[1] : earTo[1] };
 
         // the ear away from the sound is also a little quieter across the whole range (the head model above only shades
         // the highs; our own addition, about 4 dB less at the far side, 2 dB more at the near one), so a sound to one side is heard there clearly
@@ -132,10 +140,12 @@ public:
         const std::array<float, 2> d0 = prevAz < -999.0f ? dTarget : prevDelay;
         for (int i = 0; i < n; ++i)
         {
-            lpState += lpA * (in[i] - lpState);
-            const float yb = backSh.b0 * lpState + backSh.z;
-            backSh.z = backSh.b1 * lpState - backSh.a1 * yb;
-            line[(size_t) wpos] = yb * g0;
+            const float t = (float) (i + 1) * inv;
+            const float lpI = lpFrom + (lpA - lpFrom) * t;
+            lpState += lpI * (in[i] - lpState);
+            const float yb = (backFrom.b0 + (backTo.b0 - backFrom.b0) * t) * lpState + backSh.z;
+            backSh.z = (backFrom.b1 + (backTo.b1 - backFrom.b1) * t) * lpState - (backFrom.a1 + (backTo.a1 - backFrom.a1) * t) * yb;
+            line[(size_t) wpos] = yb * (g0From + (g0 - g0From) * t);
             for (int e = 0; e < 2; ++e)
             {
                 const float d = d0[(size_t) e] + (dTarget[(size_t) e] - d0[(size_t) e]) * (float) (i + 1) * inv;
@@ -145,8 +155,9 @@ public:
                 const float f = rp - (float) i0;
                 const float x = line[(size_t) i0] * (1.0f - f) + line[(size_t) i1] * f;
                 auto& s = ear[(size_t) e];
-                const float y = s.b0 * x + s.z; // transposed direct form II, one pole / one zero
-                s.z = s.b1 * x - s.a1 * y;
+                const float eb0 = earFrom[e].b0 + (earTo[e].b0 - earFrom[e].b0) * t, eb1 = earFrom[e].b1 + (earTo[e].b1 - earFrom[e].b1) * t, ea1 = earFrom[e].a1 + (earTo[e].a1 - earFrom[e].a1) * t;
+                const float y = eb0 * x + s.z; // transposed direct form II, one pole / one zero
+                s.z = eb1 * x - ea1 * y;
                 const float gE = eg0[(size_t) e] + (earG[(size_t) e] - eg0[(size_t) e]) * (float) (i + 1) * inv;
                 (e == 0 ? outL : outR)[i] = y * gE;
             }
@@ -154,14 +165,14 @@ public:
             {
                 lpSide += lpA * (side[i] - lpSide);
                 const float sk = sk0 + (sideK - sk0) * (float) (i + 1) * inv;
-                outL[i] += lpSide * g0 * sk;
-                outR[i] -= lpSide * g0 * sk;
+                outL[i] += lpSide * (g0From + (g0 - g0From) * t) * sk;
+                outR[i] -= lpSide * (g0From + (g0 - g0From) * t) * sk;
             }
             wpos = (wpos + 1) % kLine;
         }
         prevDelay = dTarget;
         prevEarG = earG; prevSideK = sideK;
-        prevAz = p.azDeg;
+        prevAz = p.azDeg; prevBack = backTo; prevLpA = lpA; prevG0 = g0; prevEar[0] = earTo[0]; prevEar[1] = earTo[1]; prevCoef = true;
     }
 
 private:
@@ -178,4 +189,7 @@ private:
     float prevAz = -1000.0f;
     std::array<float, 2> prevEarG { 1.0f, 1.0f };
     float prevSideK = -1.0f;
+    Ear prevEar[2], prevBack;
+    float prevLpA = 0.0f, prevG0 = 1.0f;
+    bool prevCoef = false;
 };
