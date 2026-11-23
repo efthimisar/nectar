@@ -7,6 +7,7 @@
 #include "Granular.h"
 #include "Shifter.h"
 #include "TiltFilter.h"
+#include "BenchTone.h"
 #include "SlotMixer.h"
 #include "CharacterFilter.h"
 #include <unordered_map>
@@ -193,6 +194,8 @@ private:
     std::array<CharacterFilter, kSlots> slotFilter;
     std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {};
     std::array<Shifter, kSlots> shifters;
+    std::array<BenchTone, kSlots> benchTone;                         // the bench: Light, Body, Air (live)
+    std::array<std::array<std::atomic<float>*, 3>, kSlots> benchP {}; // blight, bbody, bair
     std::array<std::atomic<float>*, 2> pairMorphP {};
     std::atomic<float>* keyP = nullptr;
     std::array<std::array<std::atomic<float>*, kGr>, kSlots> grP {};
@@ -272,6 +275,7 @@ private:
     std::atomic<float>* spSpkP = nullptr;
     std::array<std::atomic<float>*, kSlots> spMoveP {}, spSpeedP {};
     std::array<double, kSlots> spPhase {};
+    std::array<double, kSlots> spPer {}, spOff {};  // the beats of one round now, and the phase gap left by a change of it (it fades out, so no jump)
     std::array<std::atomic<float>, kSlots> spAzShown {}, spDistShown {};
     std::atomic<float>* mSpeedP = nullptr; std::atomic<float>* mWeightP = nullptr; std::atomic<float>* mLightP = nullptr;
     MacroTone macroTone;

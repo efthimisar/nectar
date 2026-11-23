@@ -258,6 +258,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             f ("grgate", "Gate", 0.1f, 2.0f, 0.7f);
             l.add (std::make_unique<juce::AudioParameterInt> (ParameterID { "grpat" + sfx, 1 }, "Pattern" + nm, 0, 65535, 0xb6b5));
         }
+        {   // the bench: Light, Body, Air (live; 0.5 = untouched)
+            static const char* const bids[3] = { "blight", "bbody", "bair" };
+            static const char* const bnames[3] = { "Bench light", "Bench body", "Bench air" };
+            for (int i = 0; i < 3; ++i)
+                l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { bids[i] + sfx, 1 }, bnames[i] + nm,
+                                                                     NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f));
+        }
         // how much Make changes this sound: its rhythm, its colour, its texture (0 = untouched, 1 = drawn anew)
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkrhy" + sfx, 1 }, "Distill rhythm" + nm, 0.0f, 1.0f, 0.5f));
         l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "mkcol" + sfx, 1 }, "Distill colour" + nm, 0.0f, 1.0f, 0.5f));
@@ -377,6 +384,10 @@ NektarProcessor::NektarProcessor()
             static const char* const fids[4] = { "sfiltype", "sfilcut", "sfilres", "sfilmix" };
             for (int i = 0; i < 4; ++i)
                 sfilP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (fids[i] + sfx);
+            {
+                static const char* const bids[3] = { "blight", "bbody", "bair" };
+                for (int i = 0; i < 3; ++i) benchP[(size_t) slot][(size_t) i] = apvts.getRawParameterValue (bids[i] + sfx);
+            }
             airP[(size_t) slot] = apvts.getRawParameterValue ("air" + sfx);
             fshiftP[(size_t) slot] = apvts.getRawParameterValue ("fshift" + sfx);
             ringP[(size_t) slot] = apvts.getRawParameterValue ("ring" + sfx);
@@ -591,6 +602,8 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         sf.prepare (sampleRate, samplesPerBlock);
     for (auto& sh : shifters)
         sh.prepare (sampleRate);
+    for (auto& bt : benchTone)
+        bt.prepare (sampleRate);
     tilt.prepare (sampleRate);
     macroTone.prepare (sampleRate);
     resonator.prepare (sampleRate);
@@ -810,6 +823,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         {
             const auto& f = sfilP[(size_t) slot];
             slotFilter[(size_t) slot].process (view, view.getNumSamples(), modded (f[0]), modded (f[1]), modded (f[2]), modded (f[3]));
+            benchTone[(size_t) slot].process (view, view.getNumSamples(), benchP[(size_t) slot][0]->load(), benchP[(size_t) slot][1]->load(), benchP[(size_t) slot][2]->load());
             const float fs = modded (fshiftP[(size_t) slot]), rg = modded (ringP[(size_t) slot]);
             shifters[(size_t) slot].process (view, view.getNumSamples(), (fs < 0.0f ? -1.0f : 1.0f) * 1000.0f * std::abs (fs * fs * fs),
                                              rg > 0.005f ? 20.0f * std::pow (100.0f, rg) : 0.0f, juce::jmin (1.0f, rg * 8.0f));
@@ -1129,7 +1143,7 @@ juce::String NektarProcessor::stopRecording()
         const juce::String sfx = target == 0 ? juce::String() : juce::String (target + 1);
         for (auto* id : { "pitch", "grmode", "grstart", "grend", "grpos", "grscan", "grspray", "grsize", "grdens", "grjit", "grrev",
                           "grspread", "grgate", "grpat", "groct", "blur", "bodytone", "bodyfocus", "bodysize",
-                          "srcrough", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring",
+                          "srcrough", "sfiltype", "sfilcut", "sfilres", "sfilmix", "air", "fshift", "ring", "blight", "bbody", "bair",
                            })
             if (auto* p = apvts.getParameter (juce::String (id) + sfx))
                 p->setValueNotifyingHost (p->getDefaultValue());
@@ -2447,8 +2461,21 @@ double NektarProcessor::spaceAdvance (int slot, int numSamples, float motion)
     if (hostNow.has && apvts.getRawParameterValue ("tempolock")->load() > 0.5f)
     {
         const double per = juce::jlimit (1.0, 256.0, std::pow (2.0, std::round (std::log2 (perSec * hostNow.bpm / 60.0))));
-        if (hostNow.hasPpq) ph = hostNow.ppq / per - std::floor (hostNow.ppq / per);
+        auto& lastPer = spPer[(size_t) slot];
+        auto& off = spOff[(size_t) slot];
+        if (hostNow.hasPpq)
+        {
+            const double target = hostNow.ppq / per - std::floor (hostNow.ppq / per);
+            if (lastPer > 0.0 && std::abs (per - lastPer) > 1.0e-6)
+            {   // the speed knob crossed to another whole number of beats: keep where the sound is, and slide into step with the host
+                off = old - target; off -= std::round (off);
+            }
+            const double dt = (double) numSamples / sr;
+            off *= std::exp (-dt / 1.5);
+            ph = target + off; ph -= std::floor (ph);
+        }
         else ph += (double) numSamples / sr * hostNow.bpm / 60.0 / per;
+        lastPer = per;
     }
     else
         ph += (double) numSamples / sr / perSec;
@@ -2517,6 +2544,7 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
         j.mixer.prepare (rate, 512);
         for (auto& sf : j.slotFilter) sf.prepare (rate, 512);
         for (auto& sh : j.shifters) sh.prepare (rate);
+        for (auto& bt : j.benchTone) bt.prepare (rate);
         j.tilt.prepare (rate); j.macroTone.prepare (rate); j.resonator.prepare (rate);
         j.vecXs[(size_t) pair] = x; j.vecYs[(size_t) pair] = y;
         j.vecXShown[(size_t) pair] = x; j.vecYShown[(size_t) pair] = y;

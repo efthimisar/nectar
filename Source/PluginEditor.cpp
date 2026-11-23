@@ -44,9 +44,18 @@ inline juce::Point<float> charAt (int pair, int i)
 }
 inline juce::Rectangle<float> charBtn (int pair) { return { (pair == 0 ? 180.0f : 860.0f) - 139.0f, 198.0f, 32.0f, 32.0f }; }
 inline juce::Rectangle<float> kCharPanelR() { return { 10.0f, 468.0f, 1020.0f, 190.0f }; } // the place of the bottom panel
-inline juce::Rectangle<float> charStrip (int i) { return { 58.0f + (float) i * 74.4f, 474.0f, 69.0f, 178.0f }; }
-inline juce::Point<float> charKnobAt (int i, int k) { const auto r = charStrip (i); return { r.getCentreX(), r.getY() + 62.0f + (float) k * 40.0f }; }
-inline juce::Point<float> charSwitchAt (int i) { const auto r = charStrip (i); return { r.getRight() - 14.0f, r.getY() + 14.0f }; }
+// the bench: four stages (Material, Timbre, Rhythm, Motion) of three controls each
+inline juce::Rectangle<float> benchStage (int i) { return { 58.0f + (float) i * 241.0f, 474.0f, 235.0f, 178.0f }; }
+inline juce::Point<float> benchKnobAt (int idx) { const auto r = benchStage (idx / 3); return { r.getX() + 40.0f + (float) (idx % 3) * 78.0f, r.getY() + 126.0f }; }
+inline juce::Rectangle<float> benchWave() { const auto r = benchStage (0); return { r.getX() + 8.0f, r.getY() + 28.0f, r.getWidth() - 16.0f, 58.0f }; }
+inline juce::Rectangle<float> benchStepAt (int j) { const auto r = benchStage (2); return { r.getX() + 8.0f + (float) j * 14.4f, r.getY() + 40.0f, 12.0f, 26.0f }; }
+struct BenchCtl { const char* name; const char* id; int kind; bool grains; }; // kind: 0 knob, 1 switch, 2 five steps, 3 chip (free / steps)
+static const BenchCtl kBench[12] = {
+    { "Speed", "grscan", 0, true }, { "Grains", "grsize", 0, true }, { "Reverse", "grrev", 1, true },
+    { "Light", "blight", 0, false }, { "Body", "bbody", 0, false }, { "Air", "bair", 0, false },
+    { "Cut", "grgate", 0, true }, { "Density", "grdens", 0, true }, { "Pattern", "grmode", 3, true },
+    { "Move", "spmove", 2, false }, { "How fast", "spspeed", 0, false }, { "Scatter", "grspray", 0, true } };
+static const char* const kBenchStage[4] = { "Material", "Timbre", "Rhythm", "Motion" };
 inline juce::Point<float> shapeAt (int pair) { return { pair == 0 ? 34.0f : 714.0f, 92.0f }; }
 inline juce::Rectangle<float> speedDots (int pair) { const auto c = shapeAt (pair); return { c.x + 20.0f, c.y - 6.0f, 40.0f, 12.0f }; }
 inline juce::Rectangle<float> cardRect (int slot) { return { (slot < 2 ? 20.0f : 700.0f) + (float) (slot % 2) * 166.0f, 322.0f, 154.0f, 128.0f }; }
@@ -1875,49 +1884,151 @@ int NektarEditor::panelSound() const
     return juce::jlimit (0, 3, panelSnd >= 0 && panelSnd / 2 == charPanel ? panelSnd : charPanel * 2);
 }
 
+static int benchMode (int idx)
+{   // the mode in which a control is heard: 1 free grains (Speed, Grains, Density), 2 steps (Cut), 0 either
+    return idx == 0 || idx == 1 || idx == 7 ? 1 : idx == 6 ? 2 : 0;
+}
+
+float NektarEditor::benchGet (int idx, int snd) const
+{
+    const auto& c = kBench[idx];
+    const juce::String id = slotId (c.id, snd);
+    const float raw = proc.apvts.getRawParameterValue (id)->load();
+    if (idx == 0) return juce::jlimit (0.0f, 1.0f, raw);              // speed: 0 frozen .. 1 as the sound goes
+    if (c.kind == 1) return raw > 0.3f ? 1.0f : 0.0f;
+    if (c.kind == 2) return raw / 5.0f;
+    if (c.kind == 3) return raw > 1.5f ? 1.0f : 0.0f;
+    if (auto* pa = proc.apvts.getParameter (id)) return pa->convertTo0to1 (raw);
+    return 0.0f;
+}
+
+void NektarEditor::benchSet (int idx, int snd, float v)
+{
+    const auto& c = kBench[idx];
+    auto setRaw = [this] (const juce::String& id, float raw) { if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (raw)); };
+    v = juce::jlimit (0.0f, 1.0f, v);
+    if (c.grains && idx != 8)
+    {   // the grains are what these controls shape: they come on, in the mode where the control is heard
+        const int mode = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", snd))->load());
+        const int want = benchMode (idx);
+        if (want > 0 && mode != want) setRaw (slotId ("grmode", snd), (float) want);
+        else if (mode == 0) setRaw (slotId ("grmode", snd), 1.0f);
+    }
+    const juce::String id = slotId (c.id, snd);
+    if (idx == 0) setRaw (id, v);
+    else if (c.kind == 1) setRaw (id, v > 0.5f ? 1.0f : 0.0f);
+    else if (c.kind == 2) setRaw (id, (float) juce::roundToInt (v * 5.0f));
+    else if (c.kind == 3) setRaw (id, v > 0.5f ? 2.0f : 1.0f);
+    else if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (v);
+}
+
 void NektarEditor::drawCharPanel (juce::Graphics& g)
-{   // the sound's number on the left (click: the other sound of the pair); 13 strips, one per character: symbol, name,
-    // share in the recipe (drag the name up or down; the switch puts it in or takes it out), three knobs
+{   // the bench of one sound: its number on the left (click: the other sound of the pair), then four stages of three controls
     const int snd = panelSound();
     const auto R = kCharPanelR();
+    const auto col = kWada[snd % 5];
     g.setColour (Colour (0xff2a2927)); g.fillRoundedRectangle (R, 10.0f);
     g.setColour (kLight.withAlpha (0.25f)); g.drawRoundedRectangle (R, 10.0f, 1.0f);
     {
         const auto tab = juce::Rectangle<float> (R.getX() + 6.0f, R.getY() + 6.0f, 36.0f, R.getHeight() - 12.0f);
         g.setColour (Colour (0xff333230)); g.fillRoundedRectangle (tab, 6.0f);
-        g.setColour (kWada[snd % 5]); g.setFont (22.0f);
+        g.setColour (col); g.setFont (22.0f);
         g.drawText (juce::String (snd + 1), tab.withHeight (40.0f), juce::Justification::centred);
         g.setColour (kLight.withAlpha (0.45f)); g.setFont (11.0f);
         g.drawText (juce::String ((snd % 2 == 0 ? snd + 2 : snd)), tab.withY (tab.getBottom() - 30.0f).withHeight (24.0f), juce::Justification::centred);
     }
-    for (int i = 0; i < 13; ++i)
+    const auto smp = proc.getSample (snd);
+    for (int i = 0; i < 4; ++i)
     {
-        const int ch = kCharOrder[i];
-        const juce::String sfx = juce::String (snd + 1) + "_" + juce::String (ch);
-        const float amt = proc.apvts.getRawParameterValue ("fl" + sfx)->load();
-        const bool lit = amt > 0.005f;
-        const auto fc = familyColour (ch);
-        const auto st = charStrip (i);
-        g.setColour (lit ? fc.withAlpha (0.08f + 0.22f * amt) : Colour (0xff333230)); g.fillRoundedRectangle (st, 6.0f);
-        g.setColour (lit ? fc : kLight.withAlpha (0.18f)); g.drawRoundedRectangle (st, 6.0f, lit ? 1.6f : 1.0f);
-        charSymbol (g, ch, { st.getX() + 14.0f, st.getY() + 14.0f }, 6.5f, lit ? fc : kLight.withAlpha (0.6f));
-        g.setColour (kLight.withAlpha (lit ? 0.95f : 0.55f)); g.setFont (12.0f);
-        g.drawText (kCharNames[ch], st.withY (st.getY() + 24.0f).withHeight (13.0f), juce::Justification::centred);
-        g.setColour (lit ? fc : kLight.withAlpha (0.35f)); g.setFont (11.0f);
-        g.drawText (lit ? juce::String (juce::roundToInt (amt * 100.0f)) + "%" : juce::String ("-"), st.withY (st.getY() + 37.0f).withHeight (12.0f), juce::Justification::centred);
-        for (int k = 0; k < 3; ++k)
+        const auto st = benchStage (i);
+        g.setColour (Colour (0xff333230)); g.fillRoundedRectangle (st, 6.0f);
+        g.setColour (kLight.withAlpha (0.18f)); g.drawRoundedRectangle (st, 6.0f, 1.0f);
+        g.setColour (kLight.withAlpha (0.8f)); g.setFont (12.0f);
+        g.drawText (kBenchStage[i], st.withHeight (22.0f), juce::Justification::centred);
+    }
+    {   // Material: the sound's wave, the part in use and the point inside it
+        const auto wv = benchWave();
+        g.setColour (Colour (0xff1c1b19)); g.fillRoundedRectangle (wv, 4.0f);
+        if (smp != nullptr)
         {
-            const auto c = charKnobAt (i, k);
-            const float v = proc.apvts.getRawParameterValue ("flk" + sfx + "_" + juce::String (k))->load();
-            g.setColour (kLight.withAlpha (0.2f)); g.drawEllipse (c.x - 11.0f, c.y - 11.0f, 22.0f, 22.0f, 2.5f);
-            juce::Path a; a.addCentredArc (c.x, c.y, 11.0f, 11.0f, 0.0f, -2.4f, -2.4f + 4.8f * v, true);
-            g.setColour (lit ? fc : kLight.withAlpha (0.45f)); g.strokePath (a, juce::PathStrokeType (2.5f));
-            g.setFont (10.0f); g.setColour (kLight.withAlpha (0.55f));
-            g.drawText (proc.charKnobName (ch, k), juce::Rectangle<float> (st.getX(), c.y + 12.0f, st.getWidth(), 12.0f), juce::Justification::centred);
+            const float pa = proc.apvts.getRawParameterValue (slotId ("grstart", snd))->load(), pb = proc.apvts.getRawParameterValue (slotId ("grend", snd))->load();
+            const float a0 = juce::jmin (pa, pb), b0 = juce::jmax (pa, pb);
+            g.setColour (col.withAlpha (0.14f)); g.fillRect (wv.getX() + a0 * wv.getWidth(), wv.getY(), (b0 - a0) * wv.getWidth(), wv.getHeight());
+            const auto peaks = peaksOf (smp.get(), 100);
+            const float cw = wv.getWidth() / (float) juce::jmax (1, (int) peaks.size());
+            for (int i = 0; i < peaks.size(); ++i)
+            {
+                const float f = ((float) i + 0.5f) / (float) peaks.size(), h = juce::jmax (0.6f, peaks[i] * wv.getHeight() * 0.48f);
+                g.setColour ((f >= a0 && f <= b0) ? col.withAlpha (0.9f) : kMuted.withAlpha (0.3f));
+                g.fillRect (wv.getX() + (float) i * cw, wv.getCentreY() - h, juce::jmax (1.0f, cw * 0.6f), 2 * h);
+            }
+            const float pos = proc.apvts.getRawParameterValue (slotId ("grpos", snd))->load();
+            g.setColour (kLight); g.fillRect (wv.getX() + (a0 + pos * (b0 - a0)) * wv.getWidth() - 1.0f, wv.getY() - 3.0f, 2.0f, wv.getHeight() + 6.0f);
+            const float ph = proc.playheadOf (snd);
+            if (ph >= 0.0f) { g.setColour (juce::Colours::white.withAlpha (0.7f)); g.fillRect (wv.getX() + (a0 + ph * (b0 - a0)) * wv.getWidth() - 0.6f, wv.getY(), 1.2f, wv.getHeight()); }
         }
-        const auto sw = charSwitchAt (i);
-        g.setColour (lit ? fc : kLight.withAlpha (0.35f));
-        if (lit) g.fillEllipse (sw.x - 7.0f, sw.y - 7.0f, 14.0f, 14.0f); else g.drawEllipse (sw.x - 7.0f, sw.y - 7.0f, 14.0f, 14.0f, 1.4f);
+    }
+    {   // Timbre: the curve of what the three knobs do to the spectrum, as it is now
+        const auto cv = benchStage (1).withTrimmedTop (28.0f).withHeight (58.0f).reduced (8.0f, 0.0f);
+        g.setColour (Colour (0xff1c1b19)); g.fillRoundedRectangle (cv, 4.0f);
+        const float li = proc.apvts.getRawParameterValue (slotId ("blight", snd))->load(), bo = proc.apvts.getRawParameterValue (slotId ("bbody", snd))->load(),
+                    ai = proc.apvts.getRawParameterValue (slotId ("bair", snd))->load();
+        g.setColour (kLight.withAlpha (0.15f)); g.drawHorizontalLine ((int) cv.getCentreY(), cv.getX(), cv.getRight());
+        juce::Path pth;
+        for (int x = 0; x <= 60; ++x)
+        {
+            const float f = 30.0f * std::pow (18000.0f / 30.0f, (float) x / 60.0f);
+            const auto sig = [] (float a, float b) { return 1.0f / (1.0f + std::pow (a / b, 2.0f)); }; // 0 under b, 1 over b
+            const float hi = sig (f, 1000.0f), lo = 1.0f - hi;
+            const float db = (li - 0.5f) * 18.0f * (hi - lo) + (bo - 0.5f) * 22.0f * (1.0f - sig (f, 220.0f)) + (ai - 0.5f) * 22.0f * sig (f, 8000.0f);
+            const float px = cv.getX() + cv.getWidth() * (float) x / 60.0f, py = cv.getCentreY() - juce::jlimit (-1.0f, 1.0f, db / 22.0f) * cv.getHeight() * 0.45f;
+            if (x == 0) pth.startNewSubPath (px, py); else pth.lineTo (px, py);
+        }
+        g.setColour (col); g.strokePath (pth, juce::PathStrokeType (2.0f));
+    }
+    {   // Rhythm: the 16 steps
+        const int pat = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grpat", snd))->load());
+        const bool steps = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", snd))->load()) == 2;
+        for (int j = 0; j < 16; ++j)
+        {
+            const auto r = benchStepAt (j);
+            const bool on = ((pat >> j) & 1) != 0;
+            g.setColour (on ? col.withAlpha (steps ? 0.95f : 0.35f) : kLight.withAlpha (0.12f));
+            g.fillRoundedRectangle (r, 2.5f);
+        }
+        g.setColour (kLight.withAlpha (0.45f)); g.setFont (10.0f);
+        g.drawText (steps ? "16 steps, in time" : "the steps play when Pattern is on", benchStage (2).withY (benchStage (2).getY() + 70.0f).withHeight (14.0f), juce::Justification::centred);
+    }
+    {   // Motion: the movement in the room
+        const int mv = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("spmove", snd))->load());
+        const auto c = benchStage (3).getCentre().withY (benchStage (3).getY() + 56.0f);
+        g.setColour (mv > 0 ? col : Colour (0xff3a3936)); g.fillEllipse (c.x - 22.0f, c.y - 22.0f, 44.0f, 44.0f);
+        moveSymbol (g, mv, c, 14.0f, mv > 0 ? kDark : kLight);
+    }
+    for (int idx = 0; idx < 12; ++idx)
+    {
+        const auto& c = kBench[idx];
+        const auto at = benchKnobAt (idx);
+        const float v = benchGet (idx, snd);
+        const int modeNow = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", snd))->load());
+        const bool silent = c.grains && idx != 8 && benchMode (idx) > 0 && modeNow != benchMode (idx); // not heard in this mode: touch it and the mode changes
+        const float al = silent ? 0.4f : 1.0f;
+        if (c.kind == 3 || c.kind == 1)
+        {
+            const bool on = v > 0.5f;
+            const auto r = juce::Rectangle<float> (at.x - 24.0f, at.y - 11.0f, 48.0f, 22.0f);
+            g.setColour (on ? col : kLight.withAlpha (0.25f)); on ? g.fillRoundedRectangle (r, 11.0f) : g.drawRoundedRectangle (r, 11.0f, 1.4f);
+            g.setColour (on ? kDark : kLight.withAlpha (0.6f)); g.setFont (10.0f);
+            g.drawText (c.kind == 3 ? (on ? "Steps" : "Free") : (on ? "On" : "Off"), r, juce::Justification::centred);
+        }
+        else
+        {
+            g.setColour (kLight.withAlpha (0.2f * al)); g.drawEllipse (at.x - 13.0f, at.y - 13.0f, 26.0f, 26.0f, 2.5f);
+            juce::Path a; a.addCentredArc (at.x, at.y, 13.0f, 13.0f, 0.0f, -2.4f, -2.4f + 4.8f * v, true);
+            g.setColour (col.withAlpha (al)); g.strokePath (a, juce::PathStrokeType (2.8f));
+        }
+        g.setFont (10.5f); g.setColour (kLight.withAlpha (0.65f * al));
+        g.drawText (c.name, juce::Rectangle<float> (at.x - 38.0f, at.y + 15.0f, 76.0f, 13.0f), juce::Justification::centred);
     }
 }
 
@@ -1926,14 +2037,8 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
     for (int pr = 0; pr < 2; ++pr)
         if (charBtn (pr).contains (p))
         {
-            charPanel = charPanel == pr ? -1 : pr;
-            panelSnd = -1;
-            // what sits under the panel steps aside while it is open
-            const float sc = (float) getWidth() / kDW;
-            for (auto* c : getChildren())
-                if (c != pairPads[0].get() && c != pairPads[1].get() && c->getBounds().toFloat().intersects (kCharPanelR() * sc))
-                    c->setVisible (charPanel < 0);
-            repaint(); return true;
+            setBenchOpen (charPanel == pr ? -1 : pr);
+            return true;
         }
     if (charPanel < 0 || ! kCharPanelR().contains (p)) return false;
     const int snd = panelSound();
@@ -1941,39 +2046,57 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
     {   // the other sound of the pair
         panelSnd = snd % 2 == 0 ? snd + 1 : snd - 1;
         recAll = true; // (the panel follows its own choice, not the chosen card)
-        say ("Flavours of sound " + juce::String (panelSnd + 1) + ".");
+        say ("Bench of sound " + juce::String (panelSnd + 1) + ".");
         repaint(); return true;
     }
-    for (int i = 0; i < 13; ++i)
-    {
-        const int ch = kCharOrder[i];
-        const juce::String sfx = juce::String (snd + 1) + "_" + juce::String (ch);
-        auto* pa = proc.apvts.getParameter ("fl" + sfx);
-        if (p.getDistanceFrom (charSwitchAt (i)) <= 11.0f)
+    if (proc.getSample (snd) != nullptr && benchWave().contains (p))
+    {   // press at one end of the part and drag to the other; a click alone puts the point there
+        const auto wv = benchWave();
+        partFrom = juce::jlimit (0.0f, 1.0f, (p.x - wv.getX()) / wv.getWidth());
+        partDrag = snd; partOnBench = true; partMoved = false;
+        return true;
+    }
+    for (int j = 0; j < 16; ++j)
+        if (benchStepAt (j).expanded (1.0f).contains (p))
         {
-            const bool on = pa->getValue() > 0.005f;
-            if (on && proc.flavours (snd).size() <= 1) { say ("Each sound keeps at least one flavour."); return true; }
-            pa->setValueNotifyingHost (on ? 0.0f : 0.5f);
-            say (juce::String (kCharNames[ch]) + (on ? " out of sound " : " in sound ") + juce::String (snd + 1) + (on ? "." : ". Press Distill."));
+            const juce::String id = slotId ("grpat", snd);
+            const int pat = juce::roundToInt (proc.apvts.getRawParameterValue (id)->load()) ^ (1 << j);
+            if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 ((float) pat));
+            if (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", snd))->load()) != 2) benchSet (8, snd, 1.0f);
             repaint(); return true;
         }
-        const auto st = charStrip (i);
-        if (juce::Rectangle<float> (st.getX(), st.getY() + 22.0f, st.getWidth(), 28.0f).contains (p))
-        {   // the share: drag up or down
-            chkDrag = 1000 + ch; chkY = p.y; chkFrom = pa->getValue();
-            say (juce::String (kCharNames[ch]) + " in sound " + juce::String (snd + 1) + ": drag up or down for its share.");
+    for (int idx = 0; idx < 12; ++idx)
+    {
+        const auto& c = kBench[idx];
+        const auto at = benchKnobAt (idx);
+        if (c.kind == 1 || c.kind == 3)
+        {
+            if (juce::Rectangle<float> (at.x - 26.0f, at.y - 13.0f, 52.0f, 26.0f).contains (p))
+            {
+                benchSet (idx, snd, benchGet (idx, snd) > 0.5f ? 0.0f : 1.0f);
+                say (juce::String (c.name) + " of sound " + juce::String (snd + 1) + (benchGet (idx, snd) > 0.5f ? ": on." : ": off."));
+                repaint(); return true;
+            }
+        }
+        else if (p.getDistanceFrom (at) <= 16.0f)
+        {
+            chkDrag = 2000 + idx; chkY = p.y; chkFrom = benchGet (idx, snd);
+            say (juce::String (c.name) + " of sound " + juce::String (snd + 1) + ": drag up or down.");
             return true;
         }
-        for (int k = 0; k < 3; ++k)
-            if (p.getDistanceFrom (charKnobAt (i, k)) <= 14.0f)
-            {
-                chkDrag = ch * 3 + k; chkY = p.y;
-                chkFrom = proc.apvts.getRawParameterValue ("flk" + sfx + "_" + juce::String (k))->load();
-                say (juce::String (kCharNames[ch]) + ": " + proc.charKnobName (ch, k));
-                return true;
-            }
     }
     return true; // a click on the panel does not reach what is under it
+}
+
+void NektarEditor::setBenchOpen (int pair)
+{   // opens the bench for the pair (-1: closes it); what sits under it steps aside
+    charPanel = pair;
+    panelSnd = -1;
+    const float sc = (float) getWidth() / kDW;
+    for (auto* c : getChildren())
+        if (c != pairPads[0].get() && c != pairPads[1].get() && c->getBounds().toFloat().intersects (kCharPanelR() * sc))
+            c->setVisible (charPanel < 0);
+    repaint();
 }
 
 void NektarEditor::drawSpaceOval (Graphics& g, juce::Rectangle<float> r)
@@ -2141,10 +2264,10 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
         {   // choose the part of the sound: press at one end, drag to the other
             const auto wv = cardWave (slot);
             partFrom = juce::jlimit (0.0f, 1.0f, (p.x - wv.getX()) / wv.getWidth());
-            partDrag = slot;
+            partDrag = slot; partOnBench = false; partMoved = false;
             selectedSlot = slot;
             recAll = false;
-            repaint();
+            setBenchOpen (slot / 2);
             return;
         }
     for (int slot = 0; slot < 4; ++slot)
@@ -2199,25 +2322,12 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
 void NektarEditor::mouseDrag (const juce::MouseEvent& e)
 {
     const auto p = e.position / ((float) getWidth() / kDW);
-    if (chkDrag >= 0 && charPanel >= 0)
-    {   // a knob of a flavour, or a flavour's share: up = more
-        const int snd = panelSound();
+    if (chkDrag >= 2000 && charPanel >= 0)
+    {   // a knob of the bench: up = more
+        const int snd = panelSound(), idx = chkDrag - 2000;
         const float v = juce::jlimit (0.0f, 1.0f, chkFrom + (chkY - p.y) / 160.0f);
-        if (chkDrag >= 1000)
-        {
-            const int ch = chkDrag - 1000;
-            const bool last = proc.flavours (snd).size() <= 1 && proc.mainFlavour (snd) == ch;
-            if (auto* pa = proc.apvts.getParameter ("fl" + juce::String (snd + 1) + "_" + juce::String (ch)))
-                pa->setValueNotifyingHost (last ? juce::jmax (0.01f, v) : v);
-            say (juce::String (kCharNames[ch]) + " in sound " + juce::String (snd + 1) + ": " + juce::String (juce::roundToInt (v * 100.0f)) + "%");
-        }
-        else
-        {
-            const int ch = chkDrag / 3, k = chkDrag % 3;
-            if (auto* pa = proc.apvts.getParameter ("flk" + juce::String (snd + 1) + "_" + juce::String (ch) + "_" + juce::String (k)))
-                pa->setValueNotifyingHost (pa->convertTo0to1 (v));
-            say (juce::String (kCharNames[ch]) + ": " + proc.charKnobName (ch, k) + " " + juce::String (juce::roundToInt ((v - 0.5f) * 200.0f)));
-        }
+        benchSet (idx, snd, v);
+        say (juce::String (kBench[idx].name) + " of sound " + juce::String (snd + 1) + ": " + juce::String (juce::roundToInt (benchGet (idx, snd) * 100.0f)));
         repaint();
         return;
     }
@@ -2239,9 +2349,10 @@ void NektarEditor::mouseDrag (const juce::MouseEvent& e)
         return;
     }
     if (partDrag < 0) return;
-    const auto wv = cardWave (partDrag);
+    const auto wv = partOnBench ? benchWave() : cardWave (partDrag);
     const float to = juce::jlimit (0.0f, 1.0f, (p.x - wv.getX()) / wv.getWidth());
-    if (std::abs (to - partFrom) < 0.01f) return;
+    if (std::abs (to - partFrom) < 0.01f && ! partMoved) return;
+    partMoved = true;
     if (auto* pa = proc.apvts.getParameter (slotId ("grstart", partDrag))) pa->setValueNotifyingHost (pa->convertTo0to1 (juce::jmin (partFrom, to)));
     if (auto* pa = proc.apvts.getParameter (slotId ("grend", partDrag))) pa->setValueNotifyingHost (pa->convertTo0to1 (juce::jmax (partFrom, to)));
     repaint();
@@ -2250,8 +2361,18 @@ void NektarEditor::mouseDrag (const juce::MouseEvent& e)
 void NektarEditor::mouseUp (const juce::MouseEvent&)
 {
     if (arcDrag >= 0 && arcDrag < 3) if (auto* pa = proc.apvts.getParameter (kArcIds[arcDrag])) pa->endChangeGesture();
+    if (partDrag >= 0 && partOnBench && ! partMoved)
+    {   // a click on the bench's wave: the point to read from, inside the part in use
+        const float a = proc.apvts.getRawParameterValue (slotId ("grstart", partDrag))->load(), b = proc.apvts.getRawParameterValue (slotId ("grend", partDrag))->load();
+        const float lo = juce::jmin (a, b), hi = juce::jmax (a, b);
+        if (auto* pa = proc.apvts.getParameter (slotId ("grpos", partDrag)))
+            pa->setValueNotifyingHost (pa->convertTo0to1 (juce::jlimit (0.0f, 1.0f, (partFrom - lo) / juce::jmax (0.02f, hi - lo))));
+        if (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", partDrag))->load()) == 0) benchSet (0, partDrag, proc.apvts.getRawParameterValue (slotId ("grscan", partDrag))->load());
+        repaint();
+    }
     arcDrag = -1;
     partDrag = -1;
+    partOnBench = false;
     chkDrag = -1;
 }
 
@@ -2261,7 +2382,7 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     juce::String name;
     for (int pr = 0; pr < 2 && name.isEmpty(); ++pr)
     {
-        if (charBtn (pr).contains (p)) name = "Flavours: the characters in each sound, their shares and their knobs";
+        if (charBtn (pr).contains (p)) name = "Bench: shape the chosen sound - material, timbre, rhythm, motion";
         if (name.isEmpty() && p.getDistanceFrom (shapeAt (pr)) <= 15.0f) name = "Movement of the joystick (click: next shape, wheel: speed)";
     }
     {

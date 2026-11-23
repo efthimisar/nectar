@@ -189,6 +189,10 @@ private:
     int panelSnd = -1;                  // the sound the panel shows, when chosen in the panel itself
     int panelSound() const;
     float chkFrom = 0.0f, chkY = 0.0f;
+    bool partOnBench = false, partMoved = false;
+    float benchGet (int idx, int snd) const;
+    void benchSet (int idx, int snd, float v);
+    void setBenchOpen (int pair);
     void drawCharPanel (juce::Graphics& g);
     bool charPanelClick (juce::Point<float> p);
     float arcFrom = 0.5f, arcY = 0.0f;
