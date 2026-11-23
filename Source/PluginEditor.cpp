@@ -45,16 +45,18 @@ inline juce::Point<float> charAt (int pair, int i)
 inline juce::Rectangle<float> charBtn (int pair) { return { (pair == 0 ? 180.0f : 860.0f) - 139.0f, 198.0f, 32.0f, 32.0f }; }
 inline juce::Rectangle<float> kCharPanelR() { return { 10.0f, 468.0f, 1020.0f, 190.0f }; } // the place of the bottom panel
 // the bench: four stages (Material, Timbre, Rhythm, Motion) of three controls each
-inline juce::Rectangle<float> benchStage (int i) { return { 58.0f + (float) i * 241.0f, 474.0f, 235.0f, 178.0f }; }
-inline juce::Point<float> benchKnobAt (int idx) { const auto r = benchStage (idx / 3); return { r.getX() + 40.0f + (float) (idx % 3) * 78.0f, r.getY() + 126.0f }; }
-inline juce::Rectangle<float> benchWave() { const auto r = benchStage (0); return { r.getX() + 8.0f, r.getY() + 28.0f, r.getWidth() - 16.0f, 58.0f }; }
-inline juce::Rectangle<float> benchStepAt (int j) { const auto r = benchStage (2); return { r.getX() + 8.0f + (float) j * 14.4f, r.getY() + 40.0f, 12.0f, 26.0f }; }
+inline juce::Rectangle<float> benchStage (int i) { return { 58.0f + (float) i * 241.0f, 502.0f, 235.0f, 150.0f }; }
+inline juce::Point<float> benchKnobAt (int idx) { const auto r = benchStage (idx / 3); return { r.getX() + 40.0f + (float) (idx % 3) * 78.0f, r.getY() + 112.0f }; }
+inline juce::Rectangle<float> benchWave() { const auto r = benchStage (0); return { r.getX() + 8.0f, r.getY() + 25.0f, r.getWidth() - 16.0f, 52.0f }; }
+inline juce::Rectangle<float> benchStepAt (int j) { const auto r = benchStage (2); return { r.getX() + 8.0f + (float) j * 14.4f, r.getY() + 32.0f, 12.0f, 24.0f }; }
 struct BenchCtl { const char* name; const char* id; int kind; bool grains; }; // kind: 0 knob, 1 switch, 2 five steps, 3 chip (free / steps)
 static const BenchCtl kBench[12] = {
     { "Speed", "grscan", 0, true }, { "Grains", "grsize", 0, true }, { "Reverse", "grrev", 1, true },
     { "Light", "blight", 0, false }, { "Body", "bbody", 0, false }, { "Air", "bair", 0, false },
     { "Cut", "grgate", 0, true }, { "Density", "grdens", 0, true }, { "Pattern", "grmode", 3, true },
     { "Move", "spmove", 2, false }, { "How fast", "spspeed", 0, false }, { "Scatter", "grspray", 0, true } };
+inline juce::Point<float> benchChipAt (int i) { return { 150.0f + (float) i * 38.0f, 487.0f }; }
+static const int kBenchFlavours[7] = { 0, 3, 10, 8, 7, 2, 12 }; // Cloud, Air, Shimmer, Dust, Glitch, Metal, Arp
 static const char* const kBenchStage[4] = { "Material", "Timbre", "Rhythm", "Motion" };
 inline juce::Point<float> shapeAt (int pair) { return { pair == 0 ? 34.0f : 714.0f, 92.0f }; }
 inline juce::Rectangle<float> speedDots (int pair) { const auto c = shapeAt (pair); return { c.x + 20.0f, c.y - 6.0f, 40.0f, 12.0f }; }
@@ -1449,6 +1451,12 @@ void NektarEditor::drawFace (Graphics& g)
                             juce::Rectangle<float> (x, kPadCy - 7.0f, 26.0f, 14.0f).expanded (14.0f, 0.0f), juce::Justification::centred);
             }
         }
+        {   // Conversation, up and down: whose colour the other takes
+            g.setFont (10.0f);
+            g.setColour (kLight.withAlpha (0.5f));
+            g.drawText (juce::String (pr * 2 + 1) + " takes the colour of " + juce::String (pr * 2 + 2), juce::Rectangle<float> (kPadCx[pr] - 70.0f, kPadCy - 84.0f, 140.0f, 14.0f), juce::Justification::centred);
+            g.drawText (juce::String (pr * 2 + 2) + " takes the colour of " + juce::String (pr * 2 + 1), juce::Rectangle<float> (kPadCx[pr] - 70.0f, kPadCy + 74.0f, 140.0f, 14.0f), juce::Justification::centred);
+        }
         // the main flavour of each sound of the pair, at its lower corner (sound 1 / 3 left, 2 / 4 right)
         for (int c = 0; c < 2; ++c)
         {
@@ -1811,15 +1819,12 @@ void NektarEditor::drawFace (Graphics& g)
     {   // the chosen sound: its colour and its number in the middle (all four: "1-4")
         const auto col = recAll ? kLight : kWada[selectedSlot % 5];
         const juce::Colour cols[3] = { col.interpolatedWith (kLight, 0.45f), col, col.withMultipliedBrightness (0.7f) };
-        float v[3];
-        for (int i = 0; i < 3; ++i) v[i] = proc.apvts.getRawParameterValue (slotId (kMkIds[i], selectedSlot))->load();
-        rings (kMkArcs, v, cols, 3);
+        juce::ignoreUnused (cols); // (the rings for how much Distill changes are gone: it draws anew)
         g.setColour (col);
         g.fillEllipse (kMkArcs.x - 11.0f, kMkArcs.y - 11.0f, 22.0f, 22.0f);
         g.setColour (kDark);
         g.setFont (font (bold, recAll ? 10 : 13));
-        if (shownRing >= 3) mkIcon (g, shownRing - 3, kMkArcs, kDark);
-        else g.drawText (recAll ? "1-4" : juce::String (selectedSlot + 1), juce::Rectangle<float> (kMkArcs.x - 11.0f, kMkArcs.y - 11.0f, 22.0f, 22.0f), juce::Justification::centred);
+        g.drawText (recAll ? "1-4" : juce::String (selectedSlot + 1), juce::Rectangle<float> (kMkArcs.x - 11.0f, kMkArcs.y - 11.0f, 22.0f, 22.0f), juce::Justification::centred);
     }
 
     // ================= Keep, Distill, Back
@@ -1938,6 +1943,23 @@ void NektarEditor::drawCharPanel (juce::Graphics& g)
         g.drawText (juce::String ((snd % 2 == 0 ? snd + 2 : snd)), tab.withY (tab.getBottom() - 30.0f).withHeight (24.0f), juce::Justification::centred);
     }
     const auto smp = proc.getSample (snd);
+    {   // the flavours: places to start from (the knobs below move there, and are there to be turned)
+        g.setColour (kLight.withAlpha (0.55f)); g.setFont (11.0f);
+        g.drawText ("Start from", juce::Rectangle<float> (58.0f, 477.0f, 80.0f, 20.0f), juce::Justification::centredLeft);
+        const int mainF = proc.mainFlavour (snd);
+        for (int i = 0; i < 7; ++i)
+        {
+            const int ch = kBenchFlavours[i];
+            const auto at = benchChipAt (i);
+            const auto fc = familyColour (ch);
+            g.setColour (fc.withAlpha (ch == mainF ? 1.0f : 0.55f)); g.fillEllipse (at.x - 11.0f, at.y - 11.0f, 22.0f, 22.0f);
+            if (ch == mainF) { g.setColour (kLight); g.drawEllipse (at.x - 13.5f, at.y - 13.5f, 27.0f, 27.0f, 1.4f); }
+            charSymbol (g, ch, at, 6.5f, kDark);
+        }
+        const int mf = mainF;
+        g.setColour (kLight.withAlpha (0.45f)); g.setFont (11.0f);
+        g.drawText (kCharNames[mf], juce::Rectangle<float> (420.0f, 477.0f, 120.0f, 20.0f), juce::Justification::centredLeft);
+    }
     for (int i = 0; i < 4; ++i)
     {
         const auto st = benchStage (i);
@@ -1969,7 +1991,7 @@ void NektarEditor::drawCharPanel (juce::Graphics& g)
         }
     }
     {   // Timbre: the curve of what the three knobs do to the spectrum, as it is now
-        const auto cv = benchStage (1).withTrimmedTop (28.0f).withHeight (58.0f).reduced (8.0f, 0.0f);
+        const auto cv = benchStage (1).withTrimmedTop (25.0f).withHeight (52.0f).reduced (8.0f, 0.0f);
         g.setColour (Colour (0xff1c1b19)); g.fillRoundedRectangle (cv, 4.0f);
         const float li = proc.apvts.getRawParameterValue (slotId ("blight", snd))->load(), bo = proc.apvts.getRawParameterValue (slotId ("bbody", snd))->load(),
                     ai = proc.apvts.getRawParameterValue (slotId ("bair", snd))->load();
@@ -1997,11 +2019,11 @@ void NektarEditor::drawCharPanel (juce::Graphics& g)
             g.fillRoundedRectangle (r, 2.5f);
         }
         g.setColour (kLight.withAlpha (0.45f)); g.setFont (10.0f);
-        g.drawText (steps ? "16 steps, in time" : "the steps play when Pattern is on", benchStage (2).withY (benchStage (2).getY() + 70.0f).withHeight (14.0f), juce::Justification::centred);
+        g.drawText (steps ? "16 steps, in time" : "the steps play when Pattern is on", benchStage (2).withY (benchStage (2).getY() + 60.0f).withHeight (14.0f), juce::Justification::centred);
     }
     {   // Motion: the movement in the room
         const int mv = juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("spmove", snd))->load());
-        const auto c = benchStage (3).getCentre().withY (benchStage (3).getY() + 56.0f);
+        const auto c = benchStage (3).getCentre().withY (benchStage (3).getY() + 50.0f);
         g.setColour (mv > 0 ? col : Colour (0xff3a3936)); g.fillEllipse (c.x - 22.0f, c.y - 22.0f, 44.0f, 44.0f);
         moveSymbol (g, mv, c, 14.0f, mv > 0 ? kDark : kLight);
     }
@@ -2049,6 +2071,13 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
         say ("Bench of sound " + juce::String (panelSnd + 1) + ".");
         repaint(); return true;
     }
+    for (int i = 0; i < 7; ++i)
+        if (p.getDistanceFrom (benchChipAt (i)) <= 13.0f)
+        {
+            proc.startFromFlavour (snd, kBenchFlavours[i]);
+            say ("Sound " + juce::String (snd + 1) + " starts from " + kCharNames[kBenchFlavours[i]] + ". Turn the knobs from there.");
+            repaint(); return true;
+        }
     if (proc.getSample (snd) != nullptr && benchWave().contains (p))
     {   // press at one end of the part and drag to the other; a click alone puts the point there
         const auto wv = benchWave();
@@ -2225,19 +2254,6 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
             repaint();
             return;
         }
-    {   // the chosen sound's rings: press on one and drag up or down
-        const float d = p.getDistanceFrom (kMkArcs);
-        for (int i = 0; i < 3; ++i)
-            if (std::abs (d - kArcR[i]) <= 3.0f)
-            {
-                arcDrag = 3 + i;
-                arcFrom = proc.apvts.getRawParameterValue (slotId (kMkIds[i], selectedSlot))->load();
-                arcY = p.y;
-                say (juce::String (kMkNames[i]) + (recAll ? " of all four sounds" : " of sound " + juce::String (selectedSlot + 1)) + ": how much Distill changes it");
-                repaint();
-                return;
-            }
-    }
     {   // the three arcs: press on one and drag up or down
         const float d = p.getDistanceFrom (kArcs);
         for (int i = 0; i < 3; ++i)
@@ -2331,16 +2347,6 @@ void NektarEditor::mouseDrag (const juce::MouseEvent& e)
         repaint();
         return;
     }
-    if (arcDrag >= 3)
-    {   // how much Distill changes the chosen sound (or all four)
-        const float v = juce::jlimit (0.0f, 1.0f, arcFrom + (arcY - p.y) / 160.0f);
-        for (int slot = 0; slot < 4; ++slot)
-            if (recAll || slot == selectedSlot)
-                if (auto* pa = proc.apvts.getParameter (slotId (kMkIds[arcDrag - 3], slot))) pa->setValueNotifyingHost (pa->convertTo0to1 (v));
-        say (juce::String (kMkNames[arcDrag - 3]) + " " + juce::String (juce::roundToInt (v * 100.0f)));
-        repaint();
-        return;
-    }
     if (arcDrag >= 0)
     {
         if (auto* pa = proc.apvts.getParameter (kArcIds[arcDrag]))
@@ -2388,11 +2394,6 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     {
         const float d = p.getDistanceFrom (kArcs);
         for (int i = 0; i < 3 && name.isEmpty(); ++i) if (std::abs (d - kArcR[i]) <= 3.0f) name = kArcNames[i];
-        const float d2 = p.getDistanceFrom (kMkArcs);
-        for (int i = 0; i < 3 && name.isEmpty(); ++i)
-            if (std::abs (d2 - kArcR[i]) <= 3.0f)
-                name = juce::String (kMkNames[i]) + (recAll ? " (all four)" : " of sound " + juce::String (selectedSlot + 1)) + ": "
-                       + juce::String (juce::roundToInt (100.0f * proc.apvts.getRawParameterValue (slotId (kMkIds[i], selectedSlot))->load())) + " - how much Distill changes it";
     }
     const char* harmNames[3] = { "As is", "One key", "Chord" };
     for (int i = 0; i < 3 && name.isEmpty(); ++i) if (harmChip (i).contains (p)) name = harmNames[i];
@@ -2407,7 +2408,6 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
         for (int i = 0; i < 3; ++i)
         {
             if (std::abs (p.getDistanceFrom (kArcs) - kArcR[i]) <= 3.0f) hr = i;
-            if (std::abs (p.getDistanceFrom (kMkArcs) - kArcR[i]) <= 3.0f) hr = 3 + i;
         }
         if (hr != hoverRing) { hoverRing = hr; repaint(); }
     }

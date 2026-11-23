@@ -336,7 +336,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
             {
                 const juce::String sfx = juce::String (snd) + "_" + juce::String (ch);
                 l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "fl" + sfx, 1 }, "Sound " + juce::String (snd) + " " + chars[ch],
-                                                                    juce::NormalisableRange<float> (0.0f, 1.0f), ch == (snd <= 2 ? 0 : 1) ? 1.0f : 0.0f));
+                                                                    juce::NormalisableRange<float> (0.0f, 1.0f), ch == (snd <= 2 ? 0 : 12) ? 1.0f : 0.0f));
                 for (int k = 0; k < 3; ++k)
                     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "flk" + sfx + "_" + juce::String (k), 1 }, "Sound " + juce::String (snd) + " " + chars[ch] + " " + charKnobName (ch, k),
                                                                         juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
@@ -604,6 +604,7 @@ void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         sh.prepare (sampleRate);
     for (auto& bt : benchTone)
         bt.prepare (sampleRate);
+    for (auto& pr : borrow) for (auto& b : pr) b.prepare (sampleRate);
     tilt.prepare (sampleRate);
     macroTone.prepare (sampleRate);
     resonator.prepare (sampleRate);
@@ -734,7 +735,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 const float fx = x - (float) ix, fy = y - (float) iy;
                 auto at = [this, pr] (int gx, int gy) { return padDbNow[(size_t) pr][(size_t) (gy * 3 + gx)].load(); };
                 const float db = (1 - fy) * ((1 - fx) * at (ix, iy) + fx * at (ix + 1, iy)) + fy * ((1 - fx) * at (ix, iy + 1) + fx * at (ix + 1, iy + 1));
-                if (vecOn[(size_t) pr].load() && std::abs (db) > 0.01f) gsum *= juce::Decibels::decibelsToGain (db);
+                if (std::abs (db) > 0.01f) gsum *= juce::Decibels::decibelsToGain (db); // (after Distill: one level for the pair, to keep it as loud as it was)
             }
             if (onlyPair.load() >= 0 && onlyPair.load() != pr) gsum = 0.0f;
             pairGainNow[(size_t) pr] = gsum;
@@ -917,6 +918,24 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             }
             convDens[(size_t) foll] = d * 1.5f * (sumGate / (float) juce::jmax (1, n)); // denser where the leader plays (next block)
             convDens[(size_t) lead] = 0.0f;
+        }
+    }
+    {   // Conversation, up and down: one sound takes on the colour of the other. Up: sound 1 (3) takes the colour of 2 (4);
+        // down: 2 (4) takes the colour of 1 (3). In the middle each keeps its own. (Our own design.)
+        const int n = buffer.getNumSamples();
+        for (int pr = 0; pr < 2; ++pr)
+        {
+            const float sy = vecYShown[(size_t) pr].load();
+            const float amt = juce::jlimit (0.0f, 1.0f, std::abs (sy - 0.5f) * 2.4f - 0.1f);
+            const bool both = loadedNow[(size_t) pr * 2] && loadedNow[(size_t) pr * 2 + 1];
+            for (int dir = 0; dir < 2; ++dir)
+            {
+                const int tgt = pr * 2 + (dir == 0 ? 0 : 1), src = pr * 2 + (dir == 0 ? 1 : 0);
+                const bool active = both && ((dir == 0 && sy > 0.5f) || (dir == 1 && sy < 0.5f));
+                if (! both) { borrow[(size_t) pr][(size_t) dir].reset(); continue; }
+                auto S = mixer.viewOf (src, n), T = mixer.viewOf (tgt, n);
+                borrow[(size_t) pr][(size_t) dir].process (S, T, n, active ? amt : 0.0f);
+            }
         }
     }
     mixer.setSolo (soloSlot.load());
@@ -1494,6 +1513,146 @@ void NektarProcessor::pinVector (const juce::String& paramId, float value01)
     }
 }
 
+namespace
+{
+// ---- the recipes of the flavours (values are 0..1 of each knob's range; our own, tuned by ear). Seven are in use:
+// Cloud (Drone is inside it), Air, Shimmer, Dust, Glitch, Metal (Bells inside it), Arp. The older ids map onto them.
+struct R { const char* id; float lo, hi, chance, off; }; // chance: how often the knob is in use at all; off: its value otherwise
+static const R cloud[] = { { "grspray", 0.2f, 0.6f, 1, 0 }, { "grsize", 0.45f, 0.95f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grjit", 0.0f, 0.2f, 0.3f, 0 },
+    { "grrev", 0, 0, 0, 0 }, { "grspread", 0.6f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
+    { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
+    { "blur", 0.1f, 0.5f, 0.5f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R rhythm[] = { { "grgate", 0.2f, 0.95f, 1, 0 }, { "grspray", 0.0f, 0.15f, 1, 0 }, { "grrev", 0.3f, 1.0f, 0.4f, 0 }, { "grspread", 0.2f, 0.8f, 1, 0 },
+    { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.3f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.7f, 1, 0 }, { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.1f, 0.5f, 0.25f, 0 },
+    { "bodytone", 0.3f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.8f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.5f, 0.4f, 0 },
+    { "air", 0.4f, 0.8f, 1, 0 }, { "grsize", 0.4f, 0.6f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
+static const R metal[] = { { "grsize", 0.08f, 0.35f, 1, 0 }, { "grdens", 0.5f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.5f, 0 },
+    { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.4f, 0.9f, 1, 0 }, { "sfilres", 0.4f, 0.8f, 1, 0 },
+    { "fshift", 0.2f, 0.8f, 0.7f, 0.5f }, { "ring", 0.15f, 0.7f, 0.6f, 0 }, { "bodytone", 0.45f, 0.85f, 1, 0 }, { "bodyfocus", 0.6f, 0.9f, 1, 0 }, { "bodysize", 0.1f, 0.9f, 1, 0 },
+    { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.6f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R airy[] = { { "grsize", 0.55f, 0.9f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 }, { "grjit", 0.0f, 0.3f, 0.5f, 0 },
+    { "grrev", 0.2f, 0.6f, 0.3f, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.5f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+    { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.3f, 0.8f, 1, 0 },
+    { "blur", 0.3f, 0.8f, 1, 0 }, { "srcrough", 0.1f, 0.4f, 0.5f, 0 }, { "air", 0.72f, 1.0f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R backw[] = { { "grrev", 0.6f, 1.0f, 1, 0 }, { "grsize", 0.5f, 0.9f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 },
+    { "grjit", 0.1f, 0.4f, 1, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
+    { "fshift", 0.35f, 0.65f, 0.2f, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
+    { "blur", 0.1f, 0.4f, 0.4f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+// the new characters (values are 0..1 of each knob's range; our own recipes, to be judged by ear)
+static const R drone[] = { { "grsize", 0.8f, 1.0f, 1, 0 }, { "grdens", 0.7f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grjit", 0, 0, 0, 0 },
+    { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.7f, 1, 0 }, { "sfiltype", 0.0f, 0.2f, 1, 0 }, { "sfilcut", 0.15f, 0.45f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+    { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.1f, 0.4f, 1, 0 }, { "bodyfocus", 0.4f, 0.7f, 1, 0 }, { "bodysize", 0.6f, 0.9f, 1, 0 },
+    { "blur", 0.5f, 0.9f, 1, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.45f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R glitch[] = { { "grsize", 0.05f, 0.25f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.4f, 1.0f, 1, 0 }, { "grjit", 0.5f, 1.0f, 1, 0 },
+    { "grrev", 0.3f, 1.0f, 0.5f, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.4f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.6f, 1, 0 },
+    { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.2f, 0.6f, 0.3f, 0 }, { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.7f, 1, 0 },
+    { "blur", 0, 0, 0, 0 }, { "srcrough", 0.3f, 0.8f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.1f, 0.6f, 1, 0 } };
+static const R dust[] = { { "grsize", 0.02f, 0.12f, 1, 0 }, { "grdens", 0.05f, 0.25f, 1, 0 }, { "grspray", 0.6f, 1.0f, 1, 0 }, { "grjit", 0.6f, 1.0f, 1, 0 },
+    { "grrev", 0.2f, 0.6f, 0.4f, 0 }, { "grspread", 0.8f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+    { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
+    { "blur", 0, 0, 0, 0 }, { "srcrough", 0.2f, 0.6f, 0.6f, 0 }, { "air", 0.6f, 0.9f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R bells[] = { { "grsize", 0.3f, 0.6f, 1, 0 }, { "grdens", 0.4f, 0.8f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.1f, 0.3f, 0 },
+    { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.5f, 0.9f, 1, 0 }, { "sfilres", 0.6f, 0.9f, 1, 0 },
+    { "fshift", 0.2f, 0.8f, 1, 0.5f }, { "ring", 0.25f, 0.7f, 1, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.8f, 1.0f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
+    { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.4f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R shimmer[] = { { "grsize", 0.5f, 0.85f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.2f, 0.5f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.4f, 0 },
+    { "grrev", 0, 0, 0, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
+    { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.3f, 0.6f, 1, 0 }, { "bodysize", 0.4f, 0.8f, 1, 0 },
+    { "blur", 0.2f, 0.6f, 0.6f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.7f, 0.95f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
+static const R arp[] = { { "grgate", 0.4f, 0.9f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.8f, 1, 0 },
+    { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.45f, 0.95f, 1, 0 }, { "sfilres", 0.2f, 0.5f, 1, 0 }, { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 },
+    { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.5f, 0.85f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 },
+    { "air", 0.35f, 0.65f, 1, 0 }, { "grsize", 0.3f, 0.5f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
+
+struct FlavourRecipe { const R* rows; bool rhythmic; };
+FlavourRecipe flavourRecipe (int ch)
+{
+    static const R* const tables[13] = { cloud, rhythm, metal, airy, backw, drone, cloud, glitch, dust, bells, shimmer, cloud, arp };
+    ch = juce::jlimit (0, 12, ch);
+    return { tables[ch], ch == 1 || ch == 7 || ch == 12 };
+}
+int visibleFlavour (int ch)
+{   // Rhythm is a stage of the bench now (its steps: Arp), Reverse a switch, Drone is Cloud, Swell and Melt are Cloud, Bells are Metal
+    static const int to[13] = { 0, 12, 2, 3, 0, 0, 0, 7, 8, 2, 10, 0, 12 };
+    return to[juce::jlimit (0, 12, ch)];
+}
+}
+
+// One place for the whole pad: the draft's values go into the knobs themselves (the bench shows them, and they can be turned),
+// and the pair's stick keeps only the conversation. What was there is kept for Back.
+void NektarProcessor::bakeVector (int pair)
+{
+    std::vector<VecEntry> es;
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        es = vecEntries[(size_t) pair];
+    }
+    for (const auto& e : es)
+        if (auto* pa = apvts.getParameter (modIds[(size_t) e.idx]))
+            pa->setValueNotifyingHost (pa->convertTo0to1 (modRanges[(size_t) e.idx].convertFrom0to1 (e.c[0])));
+    {
+        const juce::SpinLock::ScopedLockType lk (vecLock);
+        for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
+        vecEntries[(size_t) pair].clear();
+    }
+    {   // the loudness map was for corners that are not there any more: what is left is one level for the pair (how much Distill
+        // made it quieter or louder than it was), the same in every cell
+        float sum = 0.0f; int n = 0;
+        for (auto& d : padDbNow[(size_t) pair]) if (std::abs (d.load()) > 0.01f) { sum += d.load(); ++n; }
+        const float mean = n > 0 ? juce::jlimit (-12.0f, kPadBoost, sum / (float) n) : 0.0f;
+        for (auto& d : padDbNow[(size_t) pair]) d.store (mean);
+    }
+    setVectorOn (pair, false);
+}
+
+std::vector<std::pair<juce::String, float>> NektarProcessor::knobsOfDraft (int pair, const VecSnapshot& snap) const
+{   // the values the knobs have now, of everything the draft is about to change
+    std::vector<std::pair<juce::String, float>> v;
+    for (const auto& e : snap.entries)
+        if (auto* pa = apvts.getParameter (modIds[(size_t) e.idx])) v.push_back ({ modIds[(size_t) e.idx], pa->getValue() });
+    v.push_back ({ "__trim", padDbNow[(size_t) pair][4].load() });
+    for (int k = 0; k < 2; ++k)
+    {
+        const juce::String sfx = (pair * 2 + k) == 0 ? juce::String() : juce::String (pair * 2 + k + 1);
+        for (const char* id : { "grmode", "grpat", "groct", "grarp" })
+            if (auto* pa = apvts.getParameter (id + sfx)) v.push_back ({ id + sfx, pa->getValue() });
+    }
+    return v;
+}
+
+void NektarProcessor::rememberKnobs (int pair, const VecSnapshot& snap)
+{
+    auto& h = knobHistory[(size_t) pair];
+    h.push_back (knobsOfDraft (pair, snap));
+    if (h.size() > 24) h.erase (h.begin());
+}
+
+void NektarProcessor::startFromFlavour (int slot, int ch)
+{   // a flavour as a place to start from: the bench's knobs go to the middle of what the flavour draws, and are there to be turned
+    ch = visibleFlavour (ch);
+    for (int c = 0; c < kChars; ++c)
+        if (auto* pa = apvts.getParameter ("fl" + juce::String (slot + 1) + "_" + juce::String (c))) pa->setValueNotifyingHost (c == ch ? 1.0f : 0.0f);
+    const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
+    const auto fr = flavourRecipe (ch);
+    for (int i = 0; i < 18; ++i)
+    {
+        const R r = fr.rows[i];
+        const juce::String rid (r.id);
+        if (rid == "sfiltype" || rid == "sfilres" || rid == "bodytone" || rid == "bodyfocus" || rid == "blur" || rid == "srcrough") continue;
+        float v = r.chance >= 0.5f ? 0.5f * (r.lo + r.hi) : r.off;
+        const bool light = rid == "sfilcut";
+        if (light) v = juce::jlimit (0.0f, 1.0f, 0.5f + (v - 0.75f));
+        const juce::String target = light ? "blight" : rid == "air" ? "bair" : rid == "bodysize" ? "bbody" : rid;
+        if (auto* pa = apvts.getParameter (target + sfx)) pa->setValueNotifyingHost (v);
+    }
+    if (auto* pa = apvts.getParameter ("grscan" + sfx)) pa->setValueNotifyingHost (0.52f);
+    auto setRaw = [this] (const juce::String& id, float raw) { if (auto* pa = apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (raw)); };
+    setRaw ("grmode" + sfx, fr.rhythmic ? 2.0f : 1.0f);
+    setRaw ("groct" + sfx, ch == 10 ? 1.0f : 0.0f);
+    setRaw ("grarp" + sfx, ch == 12 ? (float) (1 + vecRnd.nextInt (9999)) : 0.0f);
+    if (ch == 12) setRaw ("grpat" + sfx, 65535.0f);
+}
+
 // "New": four corner settings for one pair, drawn at random inside the limits of the chosen Character.
 // Pitch and the chosen part of each sound are left alone, so the result stays playable in tune; in every corner the
 // sound that Cross favours is clearly heard, and the grains are taken from places where the sound is present.
@@ -1509,7 +1668,7 @@ void NektarProcessor::newVector (int pair, int seed, int parts, bool history)
     juce::ignoreUnused (seed);
     std::vector<VecSnapshot> d;
     composeDrafts (pair, parts, d, 8);
-    if (! d.empty()) applyVector (pair, d.front());
+    if (! d.empty()) { rememberKnobs (pair, d.front()); applyVector (pair, d.front()); bakeVector (pair); }
 }
 
 // ---- Flavours: each sound's mix of characters
@@ -1519,8 +1678,14 @@ std::vector<std::pair<int, float>> NektarProcessor::flavours (int slot) const
     float sum = 0.0f;
     for (int ch = 0; ch < kChars; ++ch)
         if (auto* p = apvts.getRawParameterValue ("fl" + juce::String (slot + 1) + "_" + juce::String (ch)); p != nullptr && p->load() > 0.005f)
-        { v.push_back ({ ch, p->load() }); sum += p->load(); }
-    if (v.empty()) return { { juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (slot < 2 ? "character1" : "character2")->load())), 1.0f } };
+        {   // (the retired flavours of older sessions count for the ones they went into)
+            const int vc = visibleFlavour (ch);
+            bool found = false;
+            for (auto& f : v) if (f.first == vc) { f.second += p->load(); found = true; }
+            if (! found) v.push_back ({ vc, p->load() });
+            sum += p->load();
+        }
+    if (v.empty()) return { { visibleFlavour (juce::jlimit (0, 12, juce::roundToInt (apvts.getRawParameterValue (slot < 2 ? "character1" : "character2")->load()))), 1.0f } };
     for (auto& f : v) f.second /= sum;
     return v;
 }
@@ -1581,7 +1746,14 @@ void NektarProcessor::composeDrafts (int pair, int parts, std::vector<VecSnapsho
             const auto& md = per[at (k == 0 ? m0 : m1)][d];
             snap.grMode[k] = md.grMode[k]; snap.grPat[k] = md.grPat[k]; snap.grOct[k] = md.grOct[k]; snap.grArp[k] = md.grArp[k];
         }
-        snap.swell = per[at (m0)][d].swell || per[at (m1)][d].swell;
+        snap.swell = false; // (Swell is not a flavour any more)
+        for (auto& e : snap.entries)
+        {   // no variations in the corners any more: one place for the whole pad (the pair's blend: the middle of its corners)
+            const juce::String id = modIds[(size_t) e.idx];
+            float v = e.c[3];
+            if (id.startsWith ("xmorph") || id.startsWith ("imorph")) v = 0.25f * (e.c[0] + e.c[1] + e.c[2] + e.c[3]);
+            for (auto& c : e.c) c = v;
+        }
         out.push_back (snap);
     }
 }
@@ -1670,63 +1842,15 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
     {
         const int slot = pair * 2 + k;
         const juce::String sfx = slot == 0 ? juce::String() : juce::String (slot + 1);
-        amount[k][0] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mkrhy" + sfx)->load());
-        amount[k][1] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mkcol" + sfx)->load());
-        amount[k][2] = juce::jlimit (0.0f, 1.0f, apvts.getRawParameterValue ("mktex" + sfx)->load());
+        juce::ignoreUnused (sfx);
+        amount[k][0] = amount[k][1] = amount[k][2] = 1.0f; // Distill draws anew (the sliders for how much are gone)
     }
     // the first corner stays near the sound as it is, the others go further (our own choice, to be judged by ear)
     static const float reach[4] = { 0.3f, 0.7f, 0.85f, 1.0f };
 
-    struct R { const char* id; float lo, hi, chance, off; }; // chance: how often the knob is in use at all; off: its value otherwise
-    static const R cloud[] = { { "grspray", 0.2f, 0.6f, 1, 0 }, { "grsize", 0.45f, 0.8f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grjit", 0.0f, 0.2f, 0.3f, 0 },
-        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.6f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
-        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
-        { "blur", 0.1f, 0.5f, 0.5f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R rhythm[] = { { "grgate", 0.2f, 0.95f, 1, 0 }, { "grspray", 0.0f, 0.15f, 1, 0 }, { "grrev", 0.3f, 1.0f, 0.4f, 0 }, { "grspread", 0.2f, 0.8f, 1, 0 },
-        { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.3f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.7f, 1, 0 }, { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.1f, 0.5f, 0.25f, 0 },
-        { "bodytone", 0.3f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.8f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.5f, 0.4f, 0 },
-        { "air", 0.4f, 0.8f, 1, 0 }, { "grsize", 0.4f, 0.6f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
-    static const R metal[] = { { "grsize", 0.08f, 0.35f, 1, 0 }, { "grdens", 0.5f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.5f, 0 },
-        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.4f, 0.9f, 1, 0 }, { "sfilres", 0.4f, 0.8f, 1, 0 },
-        { "fshift", 0.2f, 0.8f, 0.7f, 0.5f }, { "ring", 0.15f, 0.7f, 0.6f, 0 }, { "bodytone", 0.45f, 0.85f, 1, 0 }, { "bodyfocus", 0.6f, 0.9f, 1, 0 }, { "bodysize", 0.1f, 0.9f, 1, 0 },
-        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.1f, 0.6f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R airy[] = { { "grsize", 0.55f, 0.9f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 }, { "grjit", 0.0f, 0.3f, 0.5f, 0 },
-        { "grrev", 0.2f, 0.6f, 0.3f, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.5f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
-        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.3f, 0.8f, 1, 0 },
-        { "blur", 0.3f, 0.8f, 1, 0 }, { "srcrough", 0.1f, 0.4f, 0.5f, 0 }, { "air", 0.72f, 1.0f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R backw[] = { { "grrev", 0.6f, 1.0f, 1, 0 }, { "grsize", 0.5f, 0.9f, 1, 0 }, { "grdens", 0.5f, 0.9f, 1, 0 }, { "grspray", 0.3f, 0.7f, 1, 0 },
-        { "grjit", 0.1f, 0.4f, 1, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.45f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.4f, 1, 0 },
-        { "fshift", 0.35f, 0.65f, 0.2f, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.3f, 0.7f, 1, 0 }, { "bodyfocus", 0.3f, 0.7f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 },
-        { "blur", 0.1f, 0.4f, 0.4f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.4f, 0.7f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    // the new characters (values are 0..1 of each knob's range; our own recipes, to be judged by ear)
-    static const R drone[] = { { "grsize", 0.8f, 1.0f, 1, 0 }, { "grdens", 0.7f, 1.0f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grjit", 0, 0, 0, 0 },
-        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.7f, 1, 0 }, { "sfiltype", 0.0f, 0.2f, 1, 0 }, { "sfilcut", 0.15f, 0.45f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
-        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.1f, 0.4f, 1, 0 }, { "bodyfocus", 0.4f, 0.7f, 1, 0 }, { "bodysize", 0.6f, 0.9f, 1, 0 },
-        { "blur", 0.5f, 0.9f, 1, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.45f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R glitch[] = { { "grsize", 0.05f, 0.25f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.4f, 1.0f, 1, 0 }, { "grjit", 0.5f, 1.0f, 1, 0 },
-        { "grrev", 0.3f, 1.0f, 0.5f, 0 }, { "grspread", 0.5f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 1.0f, 1, 0 }, { "sfilcut", 0.4f, 1.0f, 1, 0 }, { "sfilres", 0.2f, 0.6f, 1, 0 },
-        { "fshift", 0.3f, 0.7f, 0.3f, 0.5f }, { "ring", 0.2f, 0.6f, 0.3f, 0 }, { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.3f, 0.8f, 1, 0 }, { "bodysize", 0.2f, 0.7f, 1, 0 },
-        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.3f, 0.8f, 0.5f, 0 }, { "air", 0.3f, 0.6f, 1, 0 }, { "grgate", 0.1f, 0.6f, 1, 0 } };
-    static const R dust[] = { { "grsize", 0.02f, 0.12f, 1, 0 }, { "grdens", 0.05f, 0.25f, 1, 0 }, { "grspray", 0.6f, 1.0f, 1, 0 }, { "grjit", 0.6f, 1.0f, 1, 0 },
-        { "grrev", 0.2f, 0.6f, 0.4f, 0 }, { "grspread", 0.8f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
-        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.2f, 0.5f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
-        { "blur", 0, 0, 0, 0 }, { "srcrough", 0.2f, 0.6f, 0.6f, 0 }, { "air", 0.6f, 0.9f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R bells[] = { { "grsize", 0.3f, 0.6f, 1, 0 }, { "grdens", 0.4f, 0.8f, 1, 0 }, { "grspray", 0.0f, 0.2f, 1, 0 }, { "grjit", 0.0f, 0.1f, 0.3f, 0 },
-        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.4f, 1.0f, 1, 0 }, { "sfiltype", 0.45f, 0.8f, 1, 0 }, { "sfilcut", 0.5f, 0.9f, 1, 0 }, { "sfilres", 0.6f, 0.9f, 1, 0 },
-        { "fshift", 0.2f, 0.8f, 1, 0.5f }, { "ring", 0.25f, 0.7f, 1, 0 }, { "bodytone", 0.5f, 0.85f, 1, 0 }, { "bodyfocus", 0.8f, 1.0f, 1, 0 }, { "bodysize", 0.2f, 0.6f, 1, 0 },
-        { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.2f, 0.4f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R shimmer[] = { { "grsize", 0.5f, 0.85f, 1, 0 }, { "grdens", 0.6f, 1.0f, 1, 0 }, { "grspray", 0.2f, 0.5f, 1, 0 }, { "grjit", 0.0f, 0.15f, 0.4f, 0 },
-        { "grrev", 0, 0, 0, 0 }, { "grspread", 0.7f, 1.0f, 1, 0 }, { "sfiltype", 0.0f, 0.25f, 1, 0 }, { "sfilcut", 0.7f, 1.0f, 1, 0 }, { "sfilres", 0.1f, 0.3f, 1, 0 },
-        { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 }, { "bodytone", 0.6f, 0.9f, 1, 0 }, { "bodyfocus", 0.3f, 0.6f, 1, 0 }, { "bodysize", 0.4f, 0.8f, 1, 0 },
-        { "blur", 0.2f, 0.6f, 0.6f, 0 }, { "srcrough", 0, 0, 0, 0 }, { "air", 0.7f, 0.95f, 1, 0 }, { "grgate", 0.5f, 0.5f, 1, 0 } };
-    static const R arp[] = { { "grgate", 0.4f, 0.9f, 1, 0 }, { "grspray", 0.0f, 0.1f, 1, 0 }, { "grrev", 0, 0, 0, 0 }, { "grspread", 0.3f, 0.8f, 1, 0 },
-        { "sfiltype", 0.0f, 0.3f, 1, 0 }, { "sfilcut", 0.45f, 0.95f, 1, 0 }, { "sfilres", 0.2f, 0.5f, 1, 0 }, { "fshift", 0, 0, 0, 0.5f }, { "ring", 0, 0, 0, 0 },
-        { "bodytone", 0.4f, 0.8f, 1, 0 }, { "bodyfocus", 0.5f, 0.85f, 1, 0 }, { "bodysize", 0.3f, 0.7f, 1, 0 }, { "blur", 0, 0, 0, 0 }, { "srcrough", 0, 0, 0, 0 },
-        { "air", 0.35f, 0.65f, 1, 0 }, { "grsize", 0.3f, 0.5f, 1, 0 }, { "grdens", 0.5f, 0.6f, 1, 0 }, { "grjit", 0, 0, 0, 0 } };
-    // Swell and Melt take Cloud's recipe and add their own movement (the pair's level breathing; the Morph between the two)
-    const R* tables[13] = { cloud, rhythm, metal, airy, backw, drone, cloud, glitch, dust, bells, shimmer, cloud, arp };
-    const bool rhythmic = character == 1 || character == 7 || character == 12;
-    const R* table = tables[character];
+    const FlavourRecipe fr = flavourRecipe (character);
+    const R* table = fr.rows;
+    const bool rhythmic = fr.rhythmic;
     const int tableLen = 18;
 
     const VecSnapshot cur = vectorNow (pair);
@@ -1886,7 +2010,17 @@ void NektarProcessor::newVectorCore (int pair, int seed, int parts, std::vector<
         for (int i = 0; i < tableLen; ++i)
         {
             const R r = table[i];
-            add (r.id + sfx, [&rnd, r] { return rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off; }, k, groupOf (r.id));
+            const juce::String rid (r.id);
+            // the bench has Light, Body and Air (live) in place of the filter, the spectral body and the baked air; the filter
+            // type, resonance, body tone / focus, blur and grit are not drawn any more
+            if (rid == "sfiltype" || rid == "sfilres" || rid == "bodytone" || rid == "bodyfocus" || rid == "blur" || rid == "srcrough") continue;
+            const bool light = rid == "sfilcut";
+            const juce::String target = light ? "blight" : rid == "air" ? "bair" : rid == "bodysize" ? "bbody" : rid;
+            add (target + sfx, [&rnd, r, light]
+                 {
+                     const float v = rnd.nextFloat() < r.chance ? r.lo + (r.hi - r.lo) * rnd.nextFloat() : r.off;
+                     return light ? juce::jlimit (0.0f, 1.0f, 0.5f + (v - 0.75f)) : v;
+                 }, k, groupOf (r.id));
         }
         const bool hadCorners = ! cur.entries.empty();
         snap.grMode[k] = rhythmic ? 2 : 1;
@@ -2056,8 +2190,7 @@ void NektarProcessor::updateMods (int numSamples)
     const double blockSec = (double) numSamples / sr;
     // pair joysticks: blend the four corners (the stick is smoothed over about 30 ms, so fast moves do not click)
     for (int pair = 0; pair < 2; ++pair)
-    {
-        if (! vecOn[(size_t) pair].load()) continue;
+    {   // (the stick is followed even without corners: it carries the conversation)
         const float k = 1.0f - std::exp (-(float) blockSec / 0.03f);
         auto& xs = vecXs[(size_t) pair]; auto& ys = vecYs[(size_t) pair];
         float tx = modded (vecXP[(size_t) pair]), ty = modded (vecYP[(size_t) pair]);
@@ -2177,7 +2310,7 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
                 for (const auto& e : vecEntries[(size_t) pair]) vecAct[(size_t) e.idx].store (false);
                 vecEntries[(size_t) pair] = got[(size_t) pair];
             }
-            vecHistory[(size_t) pair].clear();
+            vecHistory[(size_t) pair].clear(); knobHistory[(size_t) pair].clear();
             for (int i = 0; i < 9; ++i) padDbNow[(size_t) pair][(size_t) i].store (pads[(size_t) pair][(size_t) i]);
             setVectorOn (pair, ! got[(size_t) pair].empty());
         }
@@ -2236,9 +2369,6 @@ juce::String NektarProcessor::makeAll (int target)
     if (judging.load()) return "Still listening...";
     for (int pair = 0; pair < 2; ++pair)
     {
-        auto& h = vecHistory[(size_t) pair];
-        h.push_back (vectorNow (pair));
-        if (h.size() > 24) h.erase (h.begin());
         if (parts[pair] != 0) newVector (pair, 0, parts[pair], false);
     }
     if (target >= 0)
@@ -2253,7 +2383,18 @@ juce::String NektarProcessor::makeAll (int target)
 bool NektarProcessor::backAll()
 {
     bool any = false;
-    for (int pair = 0; pair < 2; ++pair) any = backVector (pair) || any;
+    for (int pair = 0; pair < 2; ++pair)
+    {
+        auto& h = knobHistory[(size_t) pair];
+        if (h.empty()) continue;
+        for (const auto& kv : h.back())
+        {
+            if (kv.first == "__trim") { for (auto& d : padDbNow[(size_t) pair]) d.store (kv.second); continue; }
+            if (auto* pa = apvts.getParameter (kv.first)) pa->setValueNotifyingHost (kv.second);
+        }
+        h.pop_back();
+        any = true;
+    }
     return any;
 }
 
@@ -2545,6 +2686,7 @@ NektarProcessor::Heard NektarProcessor::listen (int slot, float x, float y, int 
         for (auto& sf : j.slotFilter) sf.prepare (rate, 512);
         for (auto& sh : j.shifters) sh.prepare (rate);
         for (auto& bt : j.benchTone) bt.prepare (rate);
+        for (auto& pr : j.borrow) for (auto& b : pr) b.prepare (rate);
         j.tilt.prepare (rate); j.macroTone.prepare (rate); j.resonator.prepare (rate);
         j.vecXs[(size_t) pair] = x; j.vecYs[(size_t) pair] = y;
         j.vecXShown[(size_t) pair] = x; j.vecYShown[(size_t) pair] = y;
@@ -2878,10 +3020,10 @@ void NektarProcessor::finishMake()
     for (int pair = 0; pair < 2; ++pair)
     {
         if (job.parts[pair] == 0 || job.drafts[pair].empty()) continue;
-        auto& h = vecHistory[(size_t) pair];
-        h.push_back (vectorNow (pair));
-        if (h.size() > 24) h.erase (h.begin());
-        applyVector (pair, job.drafts[pair][(size_t) juce::jlimit (0, (int) job.drafts[pair].size() - 1, job.best[pair])]);
+        const auto& pick = job.drafts[pair][(size_t) juce::jlimit (0, (int) job.drafts[pair].size() - 1, job.best[pair])];
+        rememberKnobs (pair, pick);
+        applyVector (pair, pick);
+        bakeVector (pair);
         heard += (int) job.drafts[pair].size();
     }
     judging = false;

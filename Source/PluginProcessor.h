@@ -8,6 +8,7 @@
 #include "Shifter.h"
 #include "TiltFilter.h"
 #include "BenchTone.h"
+#include "TimbreBorrow.h"
 #include "SlotMixer.h"
 #include "CharacterFilter.h"
 #include <unordered_map>
@@ -194,6 +195,7 @@ private:
     std::array<CharacterFilter, kSlots> slotFilter;
     std::array<std::atomic<float>*, kSlots> airP {}, fshiftP {}, ringP {};
     std::array<Shifter, kSlots> shifters;
+    std::array<std::array<TimbreBorrow, 2>, 2> borrow;                // Conversation, vertical: [pair][0: sound 1 takes the colour of 2, 1: the other way]
     std::array<BenchTone, kSlots> benchTone;                         // the bench: Light, Body, Air (live)
     std::array<std::array<std::atomic<float>*, 3>, kSlots> benchP {}; // blight, bbody, bair
     std::array<std::atomic<float>*, 2> pairMorphP {};
@@ -231,6 +233,13 @@ private:
     // Flavours: each sound has its own mix of the 13 characters, as many as wanted, each with an amount (its share of
     // the recipe). composeDrafts builds the drafts of every flavour in use and mixes each sound's knobs by its shares.
     void composeDrafts (int pair, int parts, std::vector<VecSnapshot>& out, int count);
+    void bakeVector (int pair);                       // a draft's values into the knobs themselves
+    std::vector<std::pair<juce::String, float>> knobsOfDraft (int pair, const VecSnapshot& snap) const;
+    void rememberKnobs (int pair, const VecSnapshot& snap);
+    std::array<std::vector<std::vector<std::pair<juce::String, float>>>, 2> knobHistory; // for Back
+public:
+    void startFromFlavour (int slot, int ch);         // a flavour as a place to start from: the bench's knobs move there
+private:
     void updateCharKnobs();                           // message thread: the live offsets of the characters' three knobs
     std::array<std::vector<std::array<float, 4>>, 2> vecOff; // per entry and corner (guarded by vecLock)
 public:
