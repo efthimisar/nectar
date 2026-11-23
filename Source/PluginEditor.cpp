@@ -46,15 +46,22 @@ inline juce::Rectangle<float> charBtn (int pair) { return { (pair == 0 ? 180.0f 
 inline juce::Rectangle<float> kCharPanelR() { return { 10.0f, 468.0f, 1020.0f, 190.0f }; } // the place of the bottom panel
 // the bench: four stages (Material, Timbre, Rhythm, Motion) of three controls each
 inline juce::Rectangle<float> benchStage (int i) { return { 58.0f + (float) i * 241.0f, 502.0f, 235.0f, 150.0f }; }
-inline juce::Point<float> benchKnobAt (int idx) { const auto r = benchStage (idx / 3); return { r.getX() + 40.0f + (float) (idx % 3) * 78.0f, r.getY() + 112.0f }; }
+inline juce::Point<float> benchKnobAt (int idx)
+{   // Timbre has five (Light, Body, Air, Shift, Ring: 3, 4, 5, 12, 13), the other stages three
+    if (idx >= 12) { const auto r = benchStage (1); return { r.getX() + 26.0f + (float) (idx - 12 + 3) * 45.0f, r.getY() + 112.0f }; }
+    if (idx >= 3 && idx <= 5) { const auto r = benchStage (1); return { r.getX() + 26.0f + (float) (idx - 3) * 45.0f, r.getY() + 112.0f }; }
+    const auto r = benchStage (idx / 3); return { r.getX() + 40.0f + (float) (idx % 3) * 78.0f, r.getY() + 112.0f };
+}
+inline juce::Rectangle<float> benchSwellChip() { const auto r = benchStage (3); return { r.getX() + r.getWidth() - 56.0f, r.getY() + 38.0f, 48.0f, 22.0f }; }
 inline juce::Rectangle<float> benchWave() { const auto r = benchStage (0); return { r.getX() + 8.0f, r.getY() + 25.0f, r.getWidth() - 16.0f, 52.0f }; }
 inline juce::Rectangle<float> benchStepAt (int j) { const auto r = benchStage (2); return { r.getX() + 8.0f + (float) j * 14.4f, r.getY() + 32.0f, 12.0f, 24.0f }; }
 struct BenchCtl { const char* name; const char* id; int kind; bool grains; }; // kind: 0 knob, 1 switch, 2 five steps, 3 chip (free / steps)
-static const BenchCtl kBench[12] = {
+static const BenchCtl kBench[14] = {
     { "Speed", "grscan", 0, true }, { "Grains", "grsize", 0, true }, { "Reverse", "grrev", 1, true },
     { "Light", "blight", 0, false }, { "Body", "bbody", 0, false }, { "Air", "bair", 0, false },
     { "Cut", "grgate", 0, true }, { "Density", "grdens", 0, true }, { "Pattern", "grmode", 3, true },
-    { "Move", "spmove", 2, false }, { "How fast", "spspeed", 0, false }, { "Scatter", "grspray", 0, true } };
+    { "Move", "spmove", 2, false }, { "How fast", "spspeed", 0, false }, { "Scatter", "grspray", 0, true },
+    { "Shift", "fshift", 0, false }, { "Ring", "ring", 0, false } };
 inline juce::Point<float> benchChipAt (int i) { return { 150.0f + (float) i * 38.0f, 487.0f }; }
 static const int kBenchFlavours[7] = { 0, 3, 10, 8, 7, 2, 12 }; // Cloud, Air, Shimmer, Dust, Glitch, Metal, Arp
 static const char* const kBenchStage[4] = { "Material", "Timbre", "Rhythm", "Motion" };
@@ -1449,6 +1456,13 @@ void NektarEditor::drawFace (Graphics& g)
                 const float x = kPadCx[pr] + (c == 0 ? -96.0f : 70.0f);
                 g.drawText (c == 0 ? juce::String (pr * 2 + 1) + " leads" : juce::String (pr * 2 + 2) + " leads",
                             juce::Rectangle<float> (x, kPadCy - 7.0f, 26.0f, 14.0f).expanded (14.0f, 0.0f), juce::Justification::centred);
+                const float sx = proc.stickX (pr);
+                if (std::abs (sx - 0.5f) > 0.1f && (sx < 0.5f) == (c == 0) && proc.convDev (pr) < 0.06f)
+                {   // this sound leads, but it plays evenly: there is no beat for the other to follow
+                    g.setColour (kLight.withAlpha (0.55f)); g.setFont (9.5f);
+                    g.drawText ("no beat to follow", juce::Rectangle<float> (x - 16.0f, kPadCy + 7.0f, 70.0f, 12.0f), juce::Justification::centred);
+                    g.setFont (11.0f);
+                }
             }
         }
         {   // Conversation, up and down: whose colour the other takes
@@ -2027,7 +2041,14 @@ void NektarEditor::drawCharPanel (juce::Graphics& g)
         g.setColour (mv > 0 ? col : Colour (0xff3a3936)); g.fillEllipse (c.x - 22.0f, c.y - 22.0f, 44.0f, 44.0f);
         moveSymbol (g, mv, c, 14.0f, mv > 0 ? kDark : kLight);
     }
-    for (int idx = 0; idx < 12; ++idx)
+    {   // Swell: the level of the pair breathes (it belongs to the pair, not to one sound)
+        const bool on = proc.apvts.getRawParameterValue (snd < 2 ? "swell1" : "swell2")->load() > 0.5f;
+        const auto r = benchSwellChip();
+        g.setColour (on ? col : kLight.withAlpha (0.25f)); on ? g.fillRoundedRectangle (r, 11.0f) : g.drawRoundedRectangle (r, 11.0f, 1.4f);
+        g.setColour (on ? kDark : kLight.withAlpha (0.6f)); g.setFont (10.0f);
+        g.drawText ("Swell", r, juce::Justification::centred);
+    }
+    for (int idx = 0; idx < 14; ++idx)
     {
         const auto& c = kBench[idx];
         const auto at = benchKnobAt (idx);
@@ -2094,7 +2115,15 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
             if (juce::roundToInt (proc.apvts.getRawParameterValue (slotId ("grmode", snd))->load()) != 2) benchSet (8, snd, 1.0f);
             repaint(); return true;
         }
-    for (int idx = 0; idx < 12; ++idx)
+    if (benchSwellChip().contains (p))
+    {
+        auto* pa = proc.apvts.getParameter (snd < 2 ? "swell1" : "swell2");
+        const bool on = pa->getValue() > 0.5f;
+        pa->setValueNotifyingHost (on ? 0.0f : 1.0f);
+        say (juce::String ("Swell of sounds ") + (snd < 2 ? "1 and 2" : "3 and 4") + (on ? ": off." : ": on, the pair's level breathes."));
+        repaint(); return true;
+    }
+    for (int idx = 0; idx < 14; ++idx)
     {
         const auto& c = kBench[idx];
         const auto at = benchKnobAt (idx);

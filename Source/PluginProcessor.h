@@ -238,6 +238,8 @@ private:
     void rememberKnobs (int pair, const VecSnapshot& snap);
     std::array<std::vector<std::vector<std::pair<juce::String, float>>>, 2> knobHistory; // for Back
 public:
+    float stickX (int pair) const { return vecXShown[(size_t) pair].load(); }
+    float convDev (int pair) const { return convDevNow[(size_t) pair].load(); }
     void startFromFlavour (int slot, int ch);         // a flavour as a place to start from: the bench's knobs move there
 private:
     void updateCharKnobs();                           // message thread: the live offsets of the characters' three knobs
@@ -275,7 +277,8 @@ private:
     std::atomic<float>* masterP = nullptr;
     float lastMaster = 1.0f;
     float limGain = 1.0f;                       // the peak limiter's gain now (audio thread)
-    struct Conv { float env = 0.0f, peak = 0.0f, gainWas = 1.0f; };
+    struct Conv { float env = 0.0f, peak = 0.0f, gainWas = 1.0f, dev = 0.4f; };
+    std::array<std::atomic<float>, 2> convDevNow { 1.0f, 1.0f }; // how much the leader moves (the editor says when there is nothing to follow)
     std::array<Conv, 2> conv {};                 // the Conversation of each pair (audio thread)
     std::array<float, 4> convDens {};            // extra grain density of a following sound (audio thread)
     std::atomic<float> limGainShown { 1.0f };   // the lowest since the screen last looked

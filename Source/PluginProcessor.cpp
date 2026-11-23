@@ -897,6 +897,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             {
                 convDens[(size_t) pr * 2] = convDens[(size_t) pr * 2 + 1] = 0.0f;
                 cs.gainWas = 1.0f;
+                convDevNow[(size_t) pr].store (1.0f);
                 continue;
             }
             auto L = mixer.viewOf (lead, n), F = mixer.viewOf (foll, n);
@@ -908,7 +909,10 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 cs.peak += (cs.env - cs.peak) * (1.0f - peakFall); // the leader's average level over the last two seconds
                 // how far the leader is above or below its own average: its accents open the follower, its pauses close it
                 const float e = cs.peak > 1.0e-5f ? cs.env / cs.peak : 0.0f;
-                const float gate = juce::jlimit (0.0f, 1.0f, (e - 0.75f) * 2.0f);
+                // how much the leader moves at all: a leader that plays evenly (a pad) still has small swells, and those are
+                // what the follower follows, so the smaller they are the more they are magnified (but not noise: a floor)
+                cs.dev += (std::abs (e - 1.0f) - cs.dev) * (1.0f - peakFall);
+                const float gate = juce::jlimit (0.0f, 1.0f, 0.5f + (e - 1.0f) * 0.8f / juce::jmax (0.1f, cs.dev));
                 sumGate += gate;
                 // the follower is lifted a little as the gate deepens, so it does not simply get quieter
                 const float g = (1.0f - d) + d * gate * 1.4f;
@@ -916,6 +920,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 F.setSample (0, i, F.getSample (0, i) * cs.gainWas);
                 F.setSample (1, i, F.getSample (1, i) * cs.gainWas);
             }
+            convDevNow[(size_t) pr].store (cs.dev);
             convDens[(size_t) foll] = d * 1.5f * (sumGate / (float) juce::jmax (1, n)); // denser where the leader plays (next block)
             convDens[(size_t) lead] = 0.0f;
         }
