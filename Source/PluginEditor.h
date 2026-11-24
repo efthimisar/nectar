@@ -157,7 +157,7 @@ private:
     juce::Array<juce::Point<float>> knobPos; // centre of each knob in design units
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<PairPad> pairPads[2];
-    void pressKeep();
+    void pressKeep (int pair);
     std::unique_ptr<SpacePad> spacePad;
     std::unique_ptr<LibraryMap> libMap;
     int chipPage = 0;                   // which categories the chips above the map show (when there are more than six)

@@ -2350,8 +2350,8 @@ juce::String NektarProcessor::makeAll (int target)
         anySound = anySound || have;
         if (! have) continue;
         for (int k = 0; k < 2; ++k)
-            if (! slotLock[(size_t) (pair * 2 + k)].load() && (target < 0 || target == pair * 2 + k)) parts[pair] |= 1 << k;
-        if (! blendLock[(size_t) pair].load() && target < 0) parts[pair] |= 4;
+            if (! slotLock[(size_t) (pair * 2 + k)].load() && ((target < 0 && ((makeMask >> (pair * 2 + k)) & 1) != 0) || target == pair * 2 + k)) parts[pair] |= 1 << k;
+        if (! blendLock[(size_t) pair].load() && target < 0 && (makeMask & (3 << (pair * 2))) == (3 << (pair * 2))) parts[pair] |= 4;
     }
     if (! anySound) return "Put sounds into the circles first (Random sounds, or double-click a circle).";
     if (target >= 0 && getSample (target) == nullptr) return "Sound " + juce::String (target + 1) + " is empty.";

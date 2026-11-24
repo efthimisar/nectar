@@ -83,6 +83,7 @@ public:
     bool slotLocked (int slot) const { return slotLock[(size_t) slot].load(); }
     void setBlendLock (int pair, bool on) { blendLock[(size_t) pair].store (on); }
     bool blendLocked (int pair) const { return blendLock[(size_t) pair].load(); }
+    int makeMask = 15;                                // which sounds Distill may change when target < 0 (bit = sound)
     juce::String makeAll (int target = -1);          // returns a message
     bool backAll();                  // the corners before the last Make
     juce::String randomSounds();     // a sound from the library, picked at random, into every circle that is not locked

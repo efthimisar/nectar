@@ -12,9 +12,9 @@ const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff7
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
 constexpr float kDW = 1040.0f, kDH = 665.0f;   // design space of the editor (wide)
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f; // the library bowl is designed at this size...
-constexpr float kLibR = 112.0f;                   // ...and drawn smaller: library radius 112 (room below for the second voice)
+constexpr float kLibR = 138.0f;                   // ...and drawn smaller: library radius 138 (room below for the second voice)
 constexpr float kRingScale = kLibR / 255.0f;
-constexpr float kLibX = 520.0f, kLibY = 244.0f;
+constexpr float kLibX = 520.0f, kLibY = 216.0f;
 constexpr float kPadCx[2] = { 180.0f, 860.0f };
 constexpr float kPadCy = 214.0f;
 constexpr float kCharR = 84.0f; // the characters round each joystick
@@ -22,21 +22,21 @@ constexpr float kCharR = 84.0f; // the characters round each joystick
 const juce::Rectangle<float> kPanelL (10.0f, 68.0f, 340.0f, 392.0f), kPanelC (358.0f, 68.0f, 324.0f, 392.0f),
                              kPanelR (690.0f, 68.0f, 340.0f, 392.0f), kPanelB (10.0f, 468.0f, 1020.0f, 190.0f);
 // centre: the library categories, Random sounds and the relation of the pairs; the Space circle with its oval on the rim
-int gChipN = 7; // how many category chips there are now: the row is centred on the panel (x 520)
-inline juce::Rectangle<float> libChip (int i) { return { 520.0f - ((float) gChipN * 42.0f - 4.0f) * 0.5f + (float) i * 42.0f, 80.0f, 38.0f, 22.0f }; }
-const juce::Rectangle<float> kRandBtn (448.0f, 107.0f, 108.0f, 22.0f);
 // the shared voice (pair 2 as a second voice of pair 1): a small pad (across: the interval, up and down: near - far) and its Intensity bar
 const juce::Rectangle<float> kVoicePad (410.0f, 366.0f, 220.0f, 60.0f), kVoiceBar (410.0f, 434.0f, 220.0f, 12.0f); // both centred on the panel (x 520)
-inline juce::Rectangle<float> fxSlot (int i) { return { 214.0f + (float) i * 170.0f, 15.0f, 160.0f, 30.0f }; } // the two effects, top bar
-const juce::Point<float> kRelBtn (579.0f, 118.0f);   // beside Random sounds, the pair centred
-const juce::Rectangle<float> kSpaceOval (472.0f, 285.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
+inline juce::Rectangle<float> fxSlot (int i) { return { 355.0f + (float) i * 170.0f, 15.0f, 160.0f, 30.0f }; } // the two effects, top bar, centred on the window
+const juce::Point<float> kPresetAt (384.0f, 93.0f), kSaveAt (656.0f, 93.0f);   // the two corners of the library card: Presets (left), Save to library (right)
+//   // Presets: in the corner of the library card
+const juce::Rectangle<float> kSpaceOval (472.0f, 271.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
 // bottom: the river of the four sounds; the three arcs; Keep, Make, Back; Harmony and Key; the message
 const juce::Rectangle<float> kRiver (26.0f, 480.0f, 988.0f, 92.0f);
 const juce::Point<float> kArcs (54.0f, 615.0f);          // the whole sound: Motion, Weight, Light
-const juce::Point<float> kMkArcs (318.0f, 615.0f);       // the chosen sound: what Make may change (rhythm, colour, texture)
+const juce::Rectangle<float> kMkOval (340.0f, 599.0f, 70.0f, 32.0f);   // which sounds Distill, Rec and Resample use: 1, 1+2, 1-3, 1-4 (each press, the next)
+const juce::Point<float> kMkArcs (375.0f, 615.0f);       // the chosen sound: what Make may change (rhythm, colour, texture)
 constexpr float kArcR[3] = { 16.0f, 22.0f, 28.0f };  // Motion (inside), Weight, Light (outside)
 // one row, the same gap between all its parts: rings, Rec oval, rings, Keep, Make, Back, Harmony, Key
-const juce::Rectangle<float> kMakeBtn (450.0f, 593.0f, 180.0f, 44.0f), kKeepBtn (370.0f, 599.0f, 56.0f, 32.0f), kBackBtn (654.0f, 599.0f, 56.0f, 32.0f);
+const juce::Rectangle<float> kMakeBtn (430.0f, 593.0f, 180.0f, 44.0f), kBackBtn (832.0f, 14.0f, 56.0f, 32.0f);
+inline juce::Point<float> keepAt (int pair) { return { pair == 0 ? 330.0f : 1010.0f, 93.0f }; }   // Keep: top right of each pair's card
 inline juce::Rectangle<float> harmChip (int i) { return { 734.0f + (float) i * 56.0f, 599.0f, 50.0f, 32.0f }; }
 const juce::Rectangle<float> kKeyBtn (920.0f, 599.0f, 94.0f, 32.0f);
 const juce::Rectangle<float> kMsgLine (320.0f, 640.0f, 440.0f, 16.0f);
@@ -75,11 +75,11 @@ inline juce::Rectangle<float> cardRect (int slot) { return { (slot < 2 ? 20.0f :
 inline juce::Rectangle<float> cardWave (int slot) { const auto r = cardRect (slot); return { r.getX() + 8.0f, r.getY() + 24.0f, r.getWidth() - 16.0f, 44.0f }; }
 inline juce::Point<float> lockAt (int slot) { const auto r = cardRect (slot); return { r.getRight() - 15.0f, r.getBottom() - 15.0f }; }
 inline juce::Point<float> soloAt (int slot) { const auto r = cardRect (slot); return { r.getRight() - 38.0f, r.getBottom() - 15.0f }; }
-const juce::Rectangle<float> kRecOval (106.0f, 593.0f, 160.0f, 44.0f);  // Rec, where it goes, Resample
-const juce::Point<float> kRecAt (kRecOval.getX() + 23.0f, kRecOval.getCentreY()), kResampleAt (kRecOval.getRight() - 23.0f, kRecOval.getCentreY());
+const juce::Rectangle<float> kRecOval (100.0f, 15.0f, 160.0f, 30.0f);  // Rec, where it goes, Resample: in the top bar, between the mark and the effects
+const juce::Point<float> kRecAt (kRecOval.getX() + 17.0f, kRecOval.getCentreY()), kResampleAt (kRecOval.getRight() - 17.0f, kRecOval.getCentreY());
 inline juce::Point<float> blendAt (int pair) { return { cardRect (pair * 2).getRight() + 6.0f, cardRect (pair * 2).getY() + 46.0f }; }
 inline juce::Rectangle<float> keyLabel (int slot) { const auto r = cardRect (slot); return { r.getX() + 10.0f, r.getY() + 92.0f, r.getWidth() - 20.0f, 14.0f }; }
-constexpr float kSpaceX = 520.0f, kSpaceY = 244.0f, kSpaceR = 56.0f; // the placement pad (top view of the listener)
+constexpr float kSpaceX = 520.0f, kSpaceY = 216.0f, kSpaceR = 69.0f; // the placement pad (top view of the listener)
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -583,8 +583,7 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         addAndMakeVisible (*spaceOval);
     }
 
-    addKnob (845, 30, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
-    addKnob (740, 30, 13, "", false, 0.5f, "bright"); // Tilt (formerly Bright); replaces the unwired Out knob
+    addKnob (250, 615, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     for (int i = 0; i < 2; ++i)
     {
         pairPads[i] = std::make_unique<PairPad> (proc, i);
@@ -703,10 +702,8 @@ void NektarEditor::mouseDown (const juce::MouseEvent& e)
 // the bar at the top
 bool NektarEditor::topBarClick (juce::Point<float> p)
 {
-    if (juce::Rectangle<float> (130, 15, 64, 30).contains (p)) showPresetMenu();
-    else if (fxSlot (0).contains (p)) fxMenu (0);
+    if (fxSlot (0).contains (p)) fxMenu (0);
     else if (fxSlot (1).contains (p)) fxMenu (1);
-    else if (juce::Rectangle<float> (570, 11, 142, 38).contains (p)) say (proc.saveToLibrary (selectedSlot));
     else return false;
     return true;
 }
@@ -725,10 +722,9 @@ void NektarEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
         }
 }
 
-void NektarEditor::pressKeep()
+void NektarEditor::pressKeep (int pair)
 {
-    if (! proc.vectorOn (0) && ! proc.vectorOn (1)) return;
-    say (proc.savePreset ("Joystick " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S")));
+    say (proc.savePreset ("Keep " + juce::String (pair + 1) + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S")));
 }
 
 int NektarEditor::slotAt (juce::Point<float> p) const
@@ -745,7 +741,7 @@ void NektarEditor::mouseDoubleClick (const juce::MouseEvent& e)
     if (slot >= 0)
     {
         selectedSlot = slot;
-        recAll = false;
+        recAll = false; proc.makeMask = 1 << slot;
         repaint();
         chooseFile (slot);
     }
@@ -756,7 +752,7 @@ void NektarEditor::selectSlot (int slot)
     if (slot == selectedSlot)
         return;
     selectedSlot = slot;
-    recAll = false;
+    recAll = false; proc.makeMask = 1 << slot;
     repaint();
 }
 
@@ -1172,21 +1168,7 @@ void NektarEditor::renderDesign (Graphics& g)
     g.setColour (kAcc);
     g.setFont (font (bld, 26));
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xcf\x80/-")), juce::Rectangle<float> (22, 12, 70, 36), juce::Justification::centredLeft);
-    g.setColour (kMuted);
-    g.drawRoundedRectangle (130, 15, 64, 30, 15, 1.5f);
-    g.setColour (kLight);
-    g.setFont (font (reg, 13));
-    g.drawText ("Presets", juce::Rectangle<float> (130, 15, 64, 30), juce::Justification::centred);
 
-    g.setColour (kAcc);
-    g.fillRoundedRectangle (570, 11, 142, 38, 19);
-    g.setColour (kDark);
-    g.setFont (font (bld, 15));
-    g.drawText ("Save to library", juce::Rectangle<float> (570, 11, 142, 38), juce::Justification::centred);
-
-    g.setColour (kMuted);
-    g.setFont (font (reg, 13));
-    g.drawText ("Tilt", juce::Rectangle<float> (760, 18, 90, 24), juce::Justification::centredLeft);
     g.setColour (kLight);
     g.setFont (font (reg, 32));
     g.drawText (juce::String (juce::CharPointer_UTF8 ("\xce\xbd\xce\xad\xce\xba\xcf\x84\xce\xb1\xcf\x81")),
@@ -1654,32 +1636,24 @@ void NektarEditor::drawFace (Graphics& g)
         }
     }
 
-    // ================= the centre panel: categories, Random sounds, the relation
-    {
-        const auto cats = proc.libIndex.categories();
-        const int pages = juce::jmax (1, (cats.size() + 5) / 6);
-        chipPage = juce::jlimit (0, pages - 1, chipPage);
-        gChipN = pages > 1 ? 7 : 1 + juce::jmin (5, cats.size());
-        for (int i = 0; i < 7; ++i)
-        {
-            juce::String name; bool on = false;
-            if (i == 0) { name = "All"; on = proc.libCategory.isEmpty(); }
-            else if (i == 6) { if (pages <= 1) break; name = "+"; }
-            else { const int k = chipPage * 6 + i - 1; if (k >= cats.size()) break; name = cats[k]; on = proc.libCategory == name; }
-            const auto r = libChip (i);
-            g.setColour (on ? kAcc : Colour (0xff2f2d2b));
-            g.fillRoundedRectangle (r, 11);
-            g.setColour (on ? kDark : kLight);
-            g.setFont (font (regular, 11));
-            g.drawFittedText (name, r.reduced (3, 0).toNearestInt(), juce::Justification::centred, 1, 0.7f);
-        }
+    // ================= the centre panel: the library circle (sounds are chosen by dragging), the shared voice below it
+    {   // Save to library: an arrow into a tray, in the other corner
+        const auto c = kSaveAt;
+        g.setColour (kAcc);
+        g.fillEllipse (c.x - 13.0f, c.y - 13.0f, 26.0f, 26.0f);
+        g.setColour (kDark);
+        g.drawLine (c.x, c.y - 6.5f, c.x, c.y + 2.5f, 1.8f);
+        juce::Path head; head.addTriangle (c.x - 4.5f, c.y - 1.5f, c.x + 4.5f, c.y - 1.5f, c.x, c.y + 4.0f);
+        g.fillPath (head);
+        g.drawLine (c.x - 6.0f, c.y + 7.0f, c.x + 6.0f, c.y + 7.0f, 1.8f);
     }
-    bool allLocked = true, anySound = false;
-    for (int slot = 0; slot < 4; ++slot) { allLocked = allLocked && proc.slotLocked (slot); anySound = anySound || proc.getSample (slot) != nullptr; }
-    button (kRandBtn, ! allLocked, false);
-    g.setColour (allLocked ? kMuted.withAlpha (0.45f) : kLight);
-    g.setFont (font (regular, 13));
-    g.drawText ("Random sounds", kRandBtn, juce::Justification::centred);
+    {   // Presets: a round button in the corner of the library card (a list)
+        const auto c = kPresetAt;
+        g.setColour (Colour (0xff2f2d2b));
+        g.fillEllipse (c.x - 13.0f, c.y - 13.0f, 26.0f, 26.0f);
+        g.setColour (kLight);
+        for (int k = -1; k <= 1; ++k) g.drawLine (c.x - 6.0f, c.y + 4.5f * (float) k, c.x + 6.0f, c.y + 4.5f * (float) k, 1.6f);
+    }
     {   // the shared voice
         const float vx = proc.apvts.getRawParameterValue ("vcx")->load(), vy = proc.apvts.getRawParameterValue ("vcy")->load(), vi = proc.apvts.getRawParameterValue ("vci")->load();
         const bool on = vi > 0.02f;
@@ -1694,17 +1668,17 @@ void NektarEditor::drawFace (Graphics& g)
         g.fillEllipse (dx - 5.0f, dy - 5.0f, 10.0f, 10.0f);
         g.setColour (Colour (0xff1c1b19));
         g.fillRoundedRectangle (kVoiceBar, 6.0f);
-        const float fw = (kVoiceBar.getWidth() - 4.0f) * vi;
+        const float fw = (kVoiceBar.getWidth() - 16.0f) * vi + 8.0f;
         g.setColour (on ? kAcc : kMuted.withAlpha (0.5f));
         g.fillRoundedRectangle (kVoiceBar.getX() + 2.0f, kVoiceBar.getY() + 2.0f, juce::jmax (2.0f, fw), kVoiceBar.getHeight() - 4.0f, 4.0f);
+        const float hx = kVoiceBar.getX() + 8.0f + (kVoiceBar.getWidth() - 16.0f) * vi;   // the handle to drag
+        g.setColour (on ? kAcc : kMuted.withAlpha (0.7f));
+        g.fillEllipse (hx - 9.0f, kVoiceBar.getCentreY() - 9.0f, 18.0f, 18.0f);
+        g.setColour (Colour (0xff1c1b19));
+        g.drawEllipse (hx - 9.0f, kVoiceBar.getCentreY() - 9.0f, 18.0f, 18.0f, 1.5f);
         g.setColour (kMuted);
         g.setFont (font (regular, 10));
         g.drawText (on ? juce::String (NektarProcessor::voiceName (vx)) : juce::String ("2nd voice"), juce::Rectangle<float> (kVoicePad.getX(), kVoicePad.getY() + 2.0f, kVoicePad.getWidth(), 12.0f), juce::Justification::centred);
-    }
-    {
-        const int rel = juce::roundToInt (proc.apvts.getRawParameterValue ("relation")->load());
-        disc (kRelBtn, 13.0f, rel > 0, kAcc);
-        relationSymbol (g, rel, kRelBtn, 8.5f, rel > 0 ? kDark : kLight);
     }
 
     // ================= the bottom panel: the river of the four sounds
@@ -1770,17 +1744,18 @@ void NektarEditor::drawFace (Graphics& g)
     {   // Rec and Resample in one oval; in the middle, where the take goes: one chosen sound, or a new sound in the library
         const bool rs = proc.isResampling();
         const bool busyRec = micRec || rs;
-        g.setColour (Colour (0xff2a2927));
-        g.fillRoundedRectangle (kRecOval, kRecOval.getHeight() * 0.5f);
-        g.setColour (Colour (0xff7ec8e3).withAlpha (0.8f));
-        g.drawRoundedRectangle (kRecOval.reduced (0.5f), kRecOval.getHeight() * 0.5f, 1.4f);
+        g.setColour (Colour (0xff1e1d1b));   // the same as the two effects beside it
+        g.fillRoundedRectangle (kRecOval, 15.0f);
+        g.setColour (kMuted.withAlpha (0.8f));
+        g.drawRoundedRectangle (kRecOval.reduced (0.75f), 15.0f, 1.5f);
         const int tgt = busyRec ? proc.recordingSlot() : (recAll ? NektarProcessor::kToLibrary : selectedSlot);
         g.setColour (busyRec ? kLight : (tgt >= 0 ? kWada[tgt % 5] : kLight.withAlpha (0.8f)));
         g.setFont (font (regular, busyRec ? 12 : 13));
         const juce::String where = tgt >= 0 ? "-> " + juce::String (tgt + 1) : juce::String ("-> library");
-        g.drawText (busyRec ? clock (proc.getRecordedSeconds()) : where, kRecOval.reduced (40.0f, 0.0f), juce::Justification::centred);
-        {   // Rec
+        g.drawText (busyRec ? clock (proc.getRecordedSeconds()) : where, kRecOval.reduced (32.0f, 0.0f), juce::Justification::centred);
+        {   // Rec (the buttons are drawn at 0.8: the oval is as high as an effect's)
             const auto c = kRecAt;
+            g.saveState(); g.addTransform (juce::AffineTransform::scale (0.8f, 0.8f, c.x, c.y));
             if (micRec)
             {
                 const float lv = juce::jlimit (0.0f, 1.0f, proc.getInputLevel() * 1.5f);
@@ -1792,9 +1767,11 @@ void NektarEditor::drawFace (Graphics& g)
             g.setColour (micRec ? kDark : Colour (0xffe0614f).withAlpha (proc.canRecord() ? 1.0f : 0.4f));
             if (micRec) g.fillRect (c.x - 5.0f, c.y - 5.0f, 10.0f, 10.0f);
             else g.fillEllipse (c.x - 6.0f, c.y - 6.0f, 12.0f, 12.0f);
+            g.restoreState();
         }
         {   // Resample
             const auto c = kResampleAt;
+            g.saveState(); g.addTransform (juce::AffineTransform::scale (0.8f, 0.8f, c.x, c.y));
             if (rs)
             {
                 g.setColour (kAcc.withAlpha (0.3f + 0.2f * (float) std::sin (now * 4.0)));
@@ -1813,6 +1790,7 @@ void NektarEditor::drawFace (Graphics& g)
                 head.addTriangle (c.x + 3.5f, c.y - 8.5f, c.x + 10.0f, c.y - 6.5f, c.x + 5.5f, c.y - 1.5f);
                 g.fillPath (head);
             }
+            g.restoreState();
         }
     }
 
@@ -1851,16 +1829,23 @@ void NektarEditor::drawFace (Graphics& g)
         const juce::Colour cols[3] = { col.interpolatedWith (kLight, 0.45f), col, col.withMultipliedBrightness (0.7f) };
         juce::ignoreUnused (cols); // (the rings for how much Distill changes are gone: it draws anew)
         g.setColour (col);
-        g.fillEllipse (kMkArcs.x - 11.0f, kMkArcs.y - 11.0f, 22.0f, 22.0f);
+        g.fillRoundedRectangle (kMkOval, 16.0f);
         g.setColour (kDark);
-        g.setFont (font (bold, recAll ? 10 : 13));
-        g.drawText (recAll ? "1-4" : juce::String (selectedSlot + 1), juce::Rectangle<float> (kMkArcs.x - 11.0f, kMkArcs.y - 11.0f, 22.0f, 22.0f), juce::Justification::centred);
+        g.setFont (font (bold, 14));
+        const juce::String lab = proc.makeMask == 1 ? "1" : proc.makeMask == 3 ? "1 + 2" : proc.makeMask == 7 ? "1 + 2 + 3" : proc.makeMask == 15 ? "1 - 4" : juce::String (selectedSlot + 1);
+        g.drawText (lab, kMkOval, juce::Justification::centred);
     }
 
+    bool anySound = false;
+    for (int slot = 0; slot < 4; ++slot) anySound = anySound || proc.getSample (slot) != nullptr;
     // ================= Keep, Distill, Back
     const bool busy = proc.baking();
-    button (kKeepBtn, proc.vectorOn (0) || proc.vectorOn (1), false);
-    keepSymbol (g, kKeepBtn.getCentre().translated (0.0f, 2.0f), kLight);
+    for (int pr = 0; pr < 2; ++pr)
+    {
+        g.setColour (Colour (0xff2f2d2b));
+        g.fillEllipse (keepAt (pr).x - 15.0f, keepAt (pr).y - 15.0f, 30.0f, 30.0f);
+        keepSymbol (g, keepAt (pr).translated (0.0f, 2.0f), kLight);
+    }
     {   // Distill breathes slowly while the corners are being prepared
         const float br = busy ? 0.55f + 0.45f * (0.5f + 0.5f * (float) std::sin (now * 2.4)) : 1.0f;
         g.setColour ((anySound ? kAcc : Colour (0xff2f2d2b)).withMultipliedAlpha (br));
@@ -2104,7 +2089,7 @@ bool NektarEditor::charPanelClick (juce::Point<float> p)
     if (p.x < kCharPanelR().getX() + 44.0f)
     {   // the other sound of the pair
         panelSnd = snd % 2 == 0 ? snd + 1 : snd - 1;
-        recAll = true; // (the panel follows its own choice, not the chosen card)
+        recAll = true; proc.makeMask = 15; // (the panel follows its own choice, not the chosen card)
         say ("Bench of sound " + juce::String (panelSnd + 1) + ".");
         repaint(); return true;
     }
@@ -2219,7 +2204,7 @@ void NektarEditor::voiceSet (juce::Point<float> p)
     }
     else if (voiceDrag == 2)
     {
-        const float v = (p.x - kVoiceBar.getX() - 2.0f) / (kVoiceBar.getWidth() - 4.0f);
+        const float v = (p.x - kVoiceBar.getX() - 8.0f) / (kVoiceBar.getWidth() - 16.0f);
         set ("vci", v < 0.04f ? 0.0f : v);
         say (v < 0.04f ? "Second voice: off" : "Second voice: " + juce::String (juce::roundToInt (juce::jlimit (0.0f, 1.0f, v) * 100.0f)) + " %");
     }
@@ -2231,11 +2216,22 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
     auto setInt = [this] (const juce::String& id, float v) { if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (v)); };
     auto intOf = [this] (const juce::String& id) { return juce::roundToInt (proc.apvts.getRawParameterValue (id)->load()); };
     if (kVoicePad.expanded (4.0f).contains (p)) { voiceDrag = 1; voiceSet (p); return; }
-    if (kVoiceBar.expanded (4.0f, 5.0f).contains (p)) { voiceDrag = 2; voiceSet (p); return; }
-    if (kRandBtn.contains (p)) { say (proc.randomSounds()); recAll = true; repaint(); return; }
+    if (kVoiceBar.expanded (10.0f, 6.0f).contains (p)) { voiceDrag = 2; voiceSet (p); return; }
+    if (p.getDistanceFrom (kPresetAt) <= 15.0f) { showPresetMenu(); return; }
+    if (p.getDistanceFrom (kSaveAt) <= 15.0f) { say (proc.saveToLibrary (selectedSlot)); repaint(); return; }
     if (kMakeBtn.contains (p)) { say (proc.makeAll (recAll ? -1 : selectedSlot)); repaint(); return; }
     if (kBackBtn.contains (p)) { if (proc.backAll()) say ("Back to what was there before the last Distill."); repaint(); return; }
-    if (kKeepBtn.contains (p)) { pressKeep(); return; }
+    for (int pr = 0; pr < 2; ++pr) if (p.getDistanceFrom (keepAt (pr)) <= 15.0f) { pressKeep (pr); return; }
+    if (kMkOval.contains (p))
+    {
+        const int order[4] = { 1, 3, 7, 15 };
+        int i = 0; while (i < 4 && order[i] != proc.makeMask) ++i;
+        proc.makeMask = order[(i + 1) % 4];
+        recAll = (proc.makeMask != 1 && proc.makeMask != 2 && proc.makeMask != 4 && proc.makeMask != 8);
+        if (! recAll) selectedSlot = proc.makeMask == 1 ? 0 : proc.makeMask == 2 ? 1 : proc.makeMask == 4 ? 2 : 3;
+        say (proc.makeMask == 1 ? "Sound 1: Distill, Rec and Resample use it." : "Distill changes these sounds; Rec and Resample make a new sound in the library.");
+        repaint(); return;
+    }
     for (int pr = 0; pr < 2; ++pr)
     {
         if (p.getDistanceFrom (shapeAt (pr)) <= 15.0f)
@@ -2253,21 +2249,9 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
             return;
         }
     }
-    if (p.getDistanceFrom (kRelBtn) <= 14.0f)
-    {
-        int rel = (intOf ("relation") + (e.mods.isShiftDown() ? 4 : 1)) % 5;
-        if (rel == 1) rel = e.mods.isShiftDown() ? 0 : 2; // (Contrast is gone: each sound has its own flavours)
-        setInt ("relation", (float) rel);
-        const char* says[5] = { "The two pairs go their own ways.", "Contrast: Distill gives sounds 3 and 4 the opposite character of 1 and 2.",
-                                "Shadow: joystick 2 follows joystick 1, half a second later, mirrored.", "Call and response: the two pairs take turns, in time.",
-                                "Depth: sounds 1 and 2 near and in front, 3 and 4 far and behind." };
-        say (says[rel]);
-        repaint();
-        return;
-    }
-    if (p.getDistanceFrom (kResampleAt) <= 16.0f) { toggleResample(); repaint(); return; }
-    if (p.getDistanceFrom (kRecAt) <= 16.0f) { toggleRecording(); repaint(); return; }
-    if (kRiver.contains (p)) { recAll = true; say ("All four sounds: Rec and Resample make a new sound in the library."); repaint(); return; }
+    if (p.getDistanceFrom (kResampleAt) <= 13.0f) { toggleResample(); repaint(); return; }
+    if (p.getDistanceFrom (kRecAt) <= 13.0f) { toggleRecording(); repaint(); return; }
+    if (kRiver.contains (p)) { recAll = true; proc.makeMask = 15; say ("All four sounds: Rec and Resample make a new sound in the library."); repaint(); return; }
     for (int slot = 0; slot < 4; ++slot)
     {
         if (p.getDistanceFrom (lockAt (slot)) <= 10.0f)
@@ -2310,17 +2294,6 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
         repaint();
         return;
     }
-    for (int i = 0; i < gChipN; ++i)
-        if (libChip (i).contains (p))
-        {
-            const auto cats = proc.libIndex.categories();
-            if (i == 0) proc.libCategory = {};
-            else if (i == 6) { ++chipPage; chipPage = cats.size() > 0 ? chipPage % juce::jmax (1, (cats.size() + 5) / 6) : 0; }
-            else if (const int k = chipPage * 6 + i - 1; k < cats.size()) proc.libCategory = cats[k];
-            proc.rescanLibrary();
-            repaint();
-            return;
-        }
     {   // the three arcs: press on one and drag up or down
         const float d = p.getDistanceFrom (kArcs);
         for (int i = 0; i < 3; ++i)
@@ -2349,7 +2322,7 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
             partFrom = juce::jlimit (0.0f, 1.0f, (p.x - wv.getX()) / wv.getWidth());
             partDrag = slot; partOnBench = false; partMoved = false;
             selectedSlot = slot;
-            recAll = false;
+            recAll = false; proc.makeMask = 1 << slot;
             setBenchOpen (slot / 2);
             return;
         }
@@ -2394,8 +2367,8 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
         }
     if (const int sl = slotAt (p); sl >= 0)
     {   // a card: choose this sound; once more on the chosen one: all four
-        if (sl == selectedSlot && ! recAll) recAll = true;
-        else { selectedSlot = sl; recAll = false; }
+        if (sl == selectedSlot && ! recAll) { recAll = true; proc.makeMask = 15; }
+        else { selectedSlot = sl; recAll = false; proc.makeMask = 1 << sl; }
         say (recAll ? "All four sounds: Rec and Resample make a new sound in the library."
                     : "Sound " + juce::String (sl + 1) + ": Rec and Resample go into it.");
         repaint();
@@ -2466,14 +2439,16 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     }
     const char* harmNames[3] = { "As is", "One key", "Chord" };
     for (int i = 0; i < 3 && name.isEmpty(); ++i) if (harmChip (i).contains (p)) name = harmNames[i];
+    if (name.isEmpty() && p.getDistanceFrom (kPresetAt) <= 15.0f) name = "Presets";
+    if (name.isEmpty() && p.getDistanceFrom (kSaveAt) <= 15.0f) name = "Save the chosen sound to the library";
     if (name.isEmpty() && kVoicePad.contains (p)) name = "Second voice: pair 2 sings with pair 1. Across: unison, octave, fifth, third, seventh, ninth, cluster. Up: near, down: far";
     if (name.isEmpty() && kVoiceBar.contains (p)) name = "Second voice: how strong (left end: off)";
     if (name.isEmpty() && kKeyBtn.contains (p)) name = "Key (click: next, Shift-click: back)";
-    if (name.isEmpty() && p.getDistanceFrom (kRecAt) <= 16.0f) name = recAll ? "Rec: the microphone into a new sound in the library" : "Rec: the microphone into sound " + juce::String (selectedSlot + 1);
-    if (name.isEmpty() && p.getDistanceFrom (kResampleAt) <= 16.0f) name = recAll ? "Resample: the whole Nectar into a new sound in the library" : "Resample: sound " + juce::String (selectedSlot + 1) + " with all its changes, into itself";
-    if (name.isEmpty() && kKeepBtn.contains (p)) name = "Keep: save this sound as a preset";
+    if (name.isEmpty() && p.getDistanceFrom (kRecAt) <= 13.0f) name = recAll ? "Rec: the microphone into a new sound in the library" : "Rec: the microphone into sound " + juce::String (selectedSlot + 1);
+    if (name.isEmpty() && p.getDistanceFrom (kResampleAt) <= 13.0f) name = recAll ? "Resample: the whole Nectar into a new sound in the library" : "Resample: sound " + juce::String (selectedSlot + 1) + " with all its changes, into itself";
+    for (int pr = 0; pr < 2 && name.isEmpty(); ++pr) if (p.getDistanceFrom (keepAt (pr)) <= 15.0f) name = "Keep: save the sounds as a preset";
+    if (name.isEmpty() && kMkOval.contains (p)) name = "Which sounds: 1, 1+2, 1-3, 1-4 (press again for the next)";
     if (name.isEmpty() && kBackBtn.contains (p)) name = "Back: the sound before the last Distill";
-    if (name.isEmpty() && p.getDistanceFrom (kRelBtn) <= 14.0f) name = "How the two pairs behave towards each other (click: next)";
     {
         int hr = -1;
         for (int i = 0; i < 3; ++i)
