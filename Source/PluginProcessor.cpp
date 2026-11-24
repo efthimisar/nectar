@@ -352,8 +352,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
     // Tempo lock: sounds with a tempo are read faster or slower (pitch kept) to follow the host tempo
     l.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "tempolock", 1 }, "Lock to tempo", true));
     // Harmony: the four sounds as recorded, all moved into one key, or their keynotes on the notes of one chord
-    l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "harmony", 1 }, "Harmony",
-                                                          juce::StringArray { "As is", "One key", "Chord" }, 1));
+    for (int k = 0; k < 4; ++k)   // one choice for each sound (the first keeps the old id)
+        l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { k == 0 ? juce::String ("harmony") : "harmony" + juce::String (k + 1), 1 }, "Harmony " + juce::String (k + 1),
+                                                              juce::StringArray { "As is", "One key", "Chord" }, 1));
     l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "master", 1 }, "Master out (dB)",
                                                          NormalisableRange<float> (-24.0f, 6.0f, 0.1f), 0.0f));
     return l;
@@ -2519,7 +2520,8 @@ bool NektarProcessor::keyOf (int slot, int& tonic, bool& minor) const
 
 void NektarProcessor::applyHarmony()
 {
-    const int mode = juce::roundToInt (apvts.getRawParameterValue ("harmony")->load());
+    int modes[kSlots] {};
+    for (int slot = 0; slot < kSlots; ++slot) modes[slot] = harmonyModeOf (slot);
     const int key = juce::roundToInt (apvts.getRawParameterValue ("key")->load());
     int tonic[kSlots] {}; bool minor[kSlots] {}, has[kSlots] {};
     juce::String sig;
@@ -2529,9 +2531,12 @@ void NektarProcessor::applyHarmony()
         const auto s = getSample (slot);
         sig << (s != nullptr ? s->serial : -1) << (s != nullptr && s->keyKnown ? "k" : "") << ":" << (has[slot] ? tonic[slot] * 2 + (minor[slot] ? 1 : 0) : -1) << ";";
     }
-    sig << mode << "/" << key;
+    for (int slot = 0; slot < kSlots; ++slot) sig << modes[slot];
+    sig << "/" << key;
     if (sig == harmonySig) return;
     const bool waiting = [&] { for (int slot = 0; slot < kSlots; ++slot) { const auto s = getSample (slot); if (s != nullptr && ! s->keyKnown) return true; } return false; }();
+    int anyMode = 0; for (int slot = 0; slot < kSlots; ++slot) anyMode = juce::jmax (anyMode, modes[slot]);
+    juce::ignoreUnused (anyMode);
     harmonySig = sig;
     auto wrap = [] (int d) { d = ((d % 12) + 12) % 12; return d > 5 ? d - 12 : d; };
     int order = 0;
@@ -2541,6 +2546,7 @@ void NektarProcessor::applyHarmony()
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const auto s = getSample (slot);
+        const int mode = modes[slot];
         if (s == nullptr || (! s->keyKnown && waiting && mode != 0)) continue;
         float shift = 0.0f;
         if (mode == 1 && has[slot])
@@ -2571,7 +2577,7 @@ juce::String NektarProcessor::keyText (int slot) const
     if (! keyOf (slot, t, m)) return "no key";
     juce::String r = juce::String (Tonality::noteName (t)) + (m ? " minor" : " major");
     const float sh = harmonyShift[(size_t) slot];
-    if (juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) != 0 && std::abs (sh) > 0.01f)
+    if (harmonyModeOf (slot) != 0 && std::abs (sh) > 0.01f)
         r << " " << (sh > 0 ? "+" : "") << juce::roundToInt (sh);
     return r;
 }
@@ -2680,7 +2686,8 @@ void NektarProcessor::updateArpSteps()
 float NektarProcessor::resMixNow() const noexcept
 {
     const float own = modded (resMixP);
-    const bool chord = juce::roundToInt (apvts.getRawParameterValue ("harmony")->load()) == 2;
+    bool chord = false;
+    for (int slot = 0; slot < kSlots; ++slot) chord = chord || (harmonyModeOf (slot) == 2 && getSample (slot) != nullptr);
     return juce::jlimit (0.0f, 1.0f, own + (chord ? chordRing : 0.0f));
 }
 

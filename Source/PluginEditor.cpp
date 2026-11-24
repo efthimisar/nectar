@@ -16,28 +16,31 @@ constexpr float kLibR = 138.0f;                   // ...and drawn smaller: libra
 constexpr float kRingScale = kLibR / 255.0f;
 constexpr float kLibX = 520.0f, kLibY = 216.0f;
 constexpr float kPadCx[2] = { 180.0f, 860.0f };
-constexpr float kPadCy = 214.0f;
+constexpr float kPadCy = 202.0f;
+inline juce::Point<float> leadAt (int pr, int c) { return { kPadCx[pr] + (c == 0 ? -83.0f : 83.0f), kPadCy }; }          // which sound leads the rhythm
+inline juce::Point<float> tintAt (int pr, bool top) { return { kPadCx[pr], kPadCy + (top ? -77.0f : 77.0f) }; }       // whose colour the other takes
 constexpr float kCharR = 84.0f; // the characters round each joystick
 // ---- the main screen (design units): four panels
 const juce::Rectangle<float> kPanelL (10.0f, 68.0f, 340.0f, 392.0f), kPanelC (358.0f, 68.0f, 324.0f, 392.0f),
                              kPanelR (690.0f, 68.0f, 340.0f, 392.0f), kPanelB (10.0f, 468.0f, 1020.0f, 190.0f);
 // centre: the library categories, Random sounds and the relation of the pairs; the Space circle with its oval on the rim
 // the shared voice (pair 2 as a second voice of pair 1): a small pad (across: the interval, up and down: near - far) and its Intensity bar
-const juce::Rectangle<float> kVoicePad (410.0f, 366.0f, 220.0f, 60.0f), kVoiceBar (410.0f, 434.0f, 220.0f, 12.0f); // both centred on the panel (x 520)
+const juce::Rectangle<float> kVoicePad (368.0f, 386.0f, 304.0f, 60.0f), kVoiceBar (368.0f, 366.0f, 304.0f, 12.0f); // edge to edge of the centre panel, the same 10 from its sides as the sample screens; the strength bar above the pad
 inline juce::Rectangle<float> fxSlot (int i) { return { 355.0f + (float) i * 170.0f, 15.0f, 160.0f, 30.0f }; } // the two effects, top bar, centred on the window
 const juce::Point<float> kPresetAt (384.0f, 93.0f), kSaveAt (656.0f, 93.0f);   // the two corners of the library card: Presets (left), Save to library (right)
 //   // Presets: in the corner of the library card
 const juce::Rectangle<float> kSpaceOval (472.0f, 271.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
 // bottom: the river of the four sounds; the three arcs; Keep, Make, Back; Harmony and Key; the message
 const juce::Rectangle<float> kRiver (26.0f, 480.0f, 988.0f, 92.0f);
-const juce::Point<float> kArcs (54.0f, 615.0f);          // the whole sound: Motion, Weight, Light
+inline juce::Point<float> arcAt (int i) { return { 114.0f + 66.0f * (float) i, 615.0f }; }   // the whole sound: Motion, Weight, Light, each its own ring
+constexpr float kOneR = 25.0f;
+const juce::Rectangle<float> kOutOval (806.0f, 599.0f, 104.0f, 32.0f);   // master out, beside the key
 const juce::Rectangle<float> kMkOval (340.0f, 599.0f, 70.0f, 32.0f);   // which sounds Distill, Rec and Resample use: 1, 1+2, 1-3, 1-4 (each press, the next)
 const juce::Point<float> kMkArcs (375.0f, 615.0f);       // the chosen sound: what Make may change (rhythm, colour, texture)
 constexpr float kArcR[3] = { 16.0f, 22.0f, 28.0f };  // Motion (inside), Weight, Light (outside)
 // one row, the same gap between all its parts: rings, Rec oval, rings, Keep, Make, Back, Harmony, Key
 const juce::Rectangle<float> kMakeBtn (430.0f, 593.0f, 180.0f, 44.0f), kBackBtn (832.0f, 14.0f, 56.0f, 32.0f);
 inline juce::Point<float> keepAt (int pair) { return { pair == 0 ? 330.0f : 1010.0f, 93.0f }; }   // Keep: top right of each pair's card
-inline juce::Rectangle<float> harmChip (int i) { return { 734.0f + (float) i * 56.0f, 599.0f, 50.0f, 32.0f }; }
 const juce::Rectangle<float> kKeyBtn (920.0f, 599.0f, 94.0f, 32.0f);
 const juce::Rectangle<float> kMsgLine (320.0f, 640.0f, 440.0f, 16.0f);
 // a pair panel: the movement and Gentle - Wild on top, the joystick with the 13 characters round it, the two sound cards
@@ -74,6 +77,7 @@ inline juce::Rectangle<float> speedDots (int pair) { const auto c = shapeAt (pai
 inline juce::Rectangle<float> cardRect (int slot) { return { (slot < 2 ? 20.0f : 700.0f) + (float) (slot % 2) * 166.0f, 322.0f, 154.0f, 128.0f }; }
 inline juce::Rectangle<float> cardWave (int slot) { const auto r = cardRect (slot); return { r.getX() + 8.0f, r.getY() + 24.0f, r.getWidth() - 16.0f, 44.0f }; }
 inline juce::Point<float> lockAt (int slot) { const auto r = cardRect (slot); return { r.getRight() - 15.0f, r.getBottom() - 15.0f }; }
+inline juce::Rectangle<float> harmChip (int slot, int i) { const auto r = cardRect (slot); return { r.getX() + 10.0f + (float) i * 31.0f, r.getBottom() - 24.0f, 27.0f, 18.0f }; }   // Harmony of this sound: as is, one key, chord
 inline juce::Point<float> soloAt (int slot) { const auto r = cardRect (slot); return { r.getRight() - 38.0f, r.getBottom() - 15.0f }; }
 const juce::Rectangle<float> kRecOval (100.0f, 15.0f, 160.0f, 30.0f);  // Rec, where it goes, Resample: in the top bar, between the mark and the effects
 const juce::Point<float> kRecAt (kRecOval.getX() + 17.0f, kRecOval.getCentreY()), kResampleAt (kRecOval.getRight() - 17.0f, kRecOval.getCentreY());
@@ -235,10 +239,7 @@ void PairPad::paint (Graphics& g)
     g.drawEllipse (c - r, c - r, 2 * r, 2 * r, on ? 2.0f : 1.2f);
     if (! on)
     {
-        g.setColour (kMuted);
-        g.setFont (juce::Font (juce::FontOptions (w * 0.09f)));
-        g.drawFittedText ("Distill", getLocalBounds(), juce::Justification::centred, 1);
-        trail.clear();
+        trail.clear();   // (empty: just the dark disc; the moving dot shows when the stick is on)
         return;
     }
     auto toPix = [&] (float x01, float y01)
@@ -583,7 +584,6 @@ NektarEditor::NektarEditor (NektarProcessor& p) : juce::AudioProcessorEditor (&p
         addAndMakeVisible (*spaceOval);
     }
 
-    addKnob (250, 615, 13, "Out", false, 0.0f, "master"); // Master out, -24..+6 dB (default 0 dB)
     for (int i = 0; i < 2; ++i)
     {
         pairPads[i] = std::make_unique<PairPad> (proc, i);
@@ -1428,10 +1428,23 @@ void NektarEditor::drawFace (Graphics& g)
             g.setFont (11.0f);
             for (int c = 0; c < 2; ++c)
             {
-                g.setColour (kWada[(pr * 2 + c) % 5].withAlpha (0.85f));
+                g.setColour (kMuted.withAlpha (0.9f));
                 const float x = kPadCx[pr] + (c == 0 ? -96.0f : 70.0f);
-                g.drawText (c == 0 ? juce::String (pr * 2 + 1) + " leads" : juce::String (pr * 2 + 2) + " leads",
-                            juce::Rectangle<float> (x, kPadCy - 7.0f, 26.0f, 14.0f).expanded (14.0f, 0.0f), juce::Justification::centred);
+                {   // a disc in the colour of the sound that leads, with two arrows towards the other
+                    const auto lc = leadAt (pr, c);
+                    const float dir = c == 0 ? 1.0f : -1.0f;
+                    g.fillEllipse (lc.x - 8.0f, lc.y - 8.0f, 16.0f, 16.0f);
+                    g.setColour (kDark);
+                    g.setFont (font (bold, 11));
+                    g.drawText (juce::String (pr * 2 + c + 1), juce::Rectangle<float> (lc.x - 8.0f, lc.y - 8.0f, 16.0f, 16.0f), juce::Justification::centred);
+                    g.setColour (kMuted.withAlpha (0.9f));
+                    for (int k = 0; k < 2; ++k)
+                    {
+                        const float ax = lc.x + dir * (15.0f + 5.0f * (float) k);
+                        juce::Path ch; ch.startNewSubPath (ax - dir * 2.5f, lc.y - 4.0f); ch.lineTo (ax + dir * 1.5f, lc.y); ch.lineTo (ax - dir * 2.5f, lc.y + 4.0f);
+                        g.strokePath (ch, juce::PathStrokeType (1.4f));
+                    }
+                }
                 const float sx = proc.stickX (pr);
                 if (std::abs (sx - 0.5f) > 0.1f && (sx < 0.5f) == (c == 0) && proc.convDev (pr) < 0.06f)
                 {   // this sound leads, but it plays evenly: there is no beat for the other to follow
@@ -1442,16 +1455,23 @@ void NektarEditor::drawFace (Graphics& g)
             }
         }
         {   // Conversation, up and down: whose colour the other takes
-            g.setFont (10.0f);
-            g.setColour (kLight.withAlpha (0.5f));
-            g.drawText (juce::String (pr * 2 + 1) + " takes the colour of " + juce::String (pr * 2 + 2), juce::Rectangle<float> (kPadCx[pr] - 70.0f, kPadCy - 84.0f, 140.0f, 14.0f), juce::Justification::centred);
-            g.drawText (juce::String (pr * 2 + 2) + " takes the colour of " + juce::String (pr * 2 + 1), juce::Rectangle<float> (kPadCx[pr] - 70.0f, kPadCy + 74.0f, 140.0f, 14.0f), juce::Justification::centred);
+            for (int t = 0; t < 2; ++t)
+            {   // a disc ringed in the colour of the sound that takes, filled with the colour it takes
+                const auto tc = tintAt (pr, t == 0);
+                const int taker = pr * 2 + t, giver = pr * 2 + 1 - t;
+                juce::ignoreUnused (giver);
+                g.setColour (kMuted.withAlpha (0.9f));
+                g.fillEllipse (tc.x - 8.0f, tc.y - 8.0f, 16.0f, 16.0f);
+                g.setColour (kDark);
+                g.setFont (font (bold, 11));
+                g.drawText (juce::String (taker + 1), juce::Rectangle<float> (tc.x - 8.0f, tc.y - 8.0f, 16.0f, 16.0f), juce::Justification::centred);
+            }
         }
         // the main flavour of each sound of the pair, at its lower corner (sound 1 / 3 left, 2 / 4 right)
         for (int c = 0; c < 2; ++c)
         {
             const int ch = proc.mainFlavour (pr * 2 + c);
-            const juce::Point<float> at { kPadCx[pr] + (c == 1 ? 64.0f : -64.0f), kPadCy + 64.0f };
+            const juce::Point<float> at { cardRect (pr * 2 + c).getCentreX(), cardRect (pr * 2 + c).getY() - 14.0f };   // above its sample, in the middle
             const auto fc = familyColour (ch);
             g.setColour (fc); g.fillEllipse (at.x - 11.0f, at.y - 11.0f, 22.0f, 22.0f);
             charSymbol (g, ch, at, 6.5f, kDark);
@@ -1615,6 +1635,17 @@ void NektarEditor::drawFace (Graphics& g)
     {
         badge (lockAt (slot), proc.slotLocked (slot), 0);
         badge (soloAt (slot), proc.solo() == slot, 1);
+        const int hmS = proc.harmonyModeOf (slot);
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto r = harmChip (slot, i);
+            g.setColour (i == hmS ? kAcc : Colour (0xff2f2d2b));
+            g.fillRoundedRectangle (r, 9.0f);
+            g.saveState();
+            g.addTransform (juce::AffineTransform::scale (0.62f, 0.62f, r.getCentreX(), r.getCentreY()));
+            harmonySymbol (g, i, r.getCentre(), i == hmS ? kDark : kLight);
+            g.restoreState();
+        }
     }
     for (int pr = 0; pr < 2; ++pr)
     {
@@ -1813,16 +1844,41 @@ void NektarEditor::drawFace (Graphics& g)
             }
         }
     };
-    // the symbol of the ring under the mouse (or being dragged) shows in the middle of its set
-    const int shownRing = arcDrag >= 0 ? arcDrag : hoverRing;
-    {
-        g.setColour (Colour (0xff1c1b19));
-        g.fillEllipse (kArcs.x - 11.0f, kArcs.y - 11.0f, 22.0f, 22.0f);
+    {   // three separate rings: Motion, Weight, Light (each with its symbol in the middle)
         const juce::Colour cols[3] = { kWada[1], kWada[2], kWada[3] };
-        float v[3];
-        for (int i = 0; i < 3; ++i) v[i] = proc.apvts.getRawParameterValue (kArcIds[i])->load();
-        rings (kArcs, v, cols, 0);
-        if (shownRing >= 0 && shownRing < 3) arcIcon (g, shownRing, kArcs, cols[shownRing]);
+        const float a0 = juce::MathConstants<float>::pi * 0.75f, span = juce::MathConstants<float>::pi * 1.5f, hp = juce::MathConstants<float>::halfPi;
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto c = arcAt (i);
+            const float v = juce::jlimit (0.0f, 1.0f, proc.apvts.getRawParameterValue (kArcIds[i])->load());
+            g.setColour (Colour (0xff1c1b19));
+            g.fillEllipse (c.x - kOneR + 4.0f, c.y - kOneR + 4.0f, 2.0f * kOneR - 8.0f, 2.0f * kOneR - 8.0f);
+            juce::Path track, fill;
+            track.addCentredArc (c.x, c.y, kOneR, kOneR, 0.0f, a0 + hp, a0 + span + hp, true);
+            fill.addCentredArc (c.x, c.y, kOneR, kOneR, 0.0f, a0 + hp, a0 + span * v + hp, true);
+            g.setColour (Colour (0xff2a2927));
+            g.strokePath (track, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (v > 0.004f)
+            {
+                g.setColour (cols[i].withAlpha (arcDrag == i ? 1.0f : 0.9f));
+                g.strokePath (fill, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            arcIcon (g, i, c, cols[i]);
+        }
+    }
+    {   // Out: an oval beside the key; drag across
+        const float db = proc.apvts.getRawParameterValue ("master")->load();
+        g.setColour (Colour (0xff2f2d2b));
+        g.fillRoundedRectangle (kOutOval, 16.0f);
+        g.saveState();
+        juce::Path clip; clip.addRoundedRectangle (kOutOval, 16.0f);
+        g.reduceClipRegion (clip);
+        g.setColour (kWada[3].withAlpha (0.35f));
+        g.fillRect (kOutOval.withWidth (kOutOval.getWidth() * juce::jlimit (0.0f, 1.0f, (db + 24.0f) / 30.0f)));
+        g.restoreState();
+        g.setColour (kLight);
+        g.setFont (font (regular, 13));
+        g.drawText ("Out  " + juce::String (db, 1) + " dB", kOutOval, juce::Justification::centred);
     }
     {   // the chosen sound: its colour and its number in the middle (all four: "1-4")
         const auto col = recAll ? kLight : kWada[selectedSlot % 5];
@@ -1864,14 +1920,7 @@ void NektarEditor::drawFace (Graphics& g)
     }
 
     // ================= Harmony and Key
-    const int hm = juce::roundToInt (proc.apvts.getRawParameterValue ("harmony")->load());
-    for (int i = 0; i < 3; ++i)
-    {
-        const auto r = harmChip (i);
-        g.setColour (i == hm ? kAcc : Colour (0xff2f2d2b));
-        g.fillRoundedRectangle (r, 16);
-        harmonySymbol (g, i, r.getCentre(), i == hm ? kDark : kLight);
-    }
+    const int hm = juce::jmax (juce::jmax (proc.harmonyModeOf (0), proc.harmonyModeOf (1)), juce::jmax (proc.harmonyModeOf (2), proc.harmonyModeOf (3)));
     {
         const auto r = kKeyBtn;
         g.setColour (Colour (0xff2f2d2b));
@@ -2278,39 +2327,50 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
             repaint();
             return;
         }
-    for (int i = 0; i < 3; ++i)
-        if (harmChip (i).contains (p))
-        {
-            setInt ("harmony", (float) i);
-            const char* says[3] = { "As is: each sound plays as it was recorded.", "One key: all sounds with a key are moved into one key.",
-                                    "Chord: the keynotes of the sounds go to the notes of one chord." };
-            say (says[i]);
-            repaint();
-            return;
-        }
+    for (int slot = 0; slot < 4; ++slot)
+        for (int i = 0; i < 3; ++i)
+            if (harmChip (slot, i).contains (p))
+            {
+                setInt (slot == 0 ? juce::String ("harmony") : "harmony" + juce::String (slot + 1), (float) i);
+                const char* says[3] = { "As is: this sound plays as it was recorded.", "One key: this sound is moved into the chosen key.",
+                                        "Chord: this sound's keynote goes to a note of the chord." };
+                say (says[i]);
+                repaint();
+                return;
+            }
     if (kKeyBtn.contains (p))
     {
         setInt ("key", (float) (((intOf ("key") + (e.mods.isShiftDown() ? -1 : 1)) % 12 + 12) % 12));
         repaint();
         return;
     }
-    {   // the three arcs: press on one and drag up or down
-        const float d = p.getDistanceFrom (kArcs);
+    if (kOutOval.contains (p))
+    {
+        if (auto* pa = proc.apvts.getParameter ("master"))
+        {
+            if (e.getNumberOfClicks() >= 2) { pa->setValueNotifyingHost (pa->convertTo0to1 (0.0f)); say ("Out: 0 dB."); }
+            else { arcDrag = 3; pa->beginChangeGesture(); outFrom = pa->convertFrom0to1 (pa->getValue()); outX = p.x; say ("Out: the master level (drag across, double-click: 0 dB)."); }
+        }
+        repaint();
+        return;
+    }
+    {   // the three rings: press on one and drag up or down
         for (int i = 0; i < 3; ++i)
-            if (std::abs (d - kArcR[i]) <= 3.0f)
-            {
-                arcDrag = i;
-                arcFrom = proc.apvts.getRawParameterValue (kArcIds[i])->load();
-                arcY = p.y;
-                if (auto* pa = proc.apvts.getParameter (kArcIds[i])) pa->beginChangeGesture();
-                say (kArcNames[i]);
+        {
+            const float d = p.getDistanceFrom (arcAt (i));
+            if (d > kOneR + 4.0f) continue;
+            if (d < 12.0f && e.getNumberOfClicks() >= 2)
+            {   // double-click in the middle: this one back to "as Distill made it"
+                if (auto* pa = proc.apvts.getParameter (kArcIds[i])) pa->setValueNotifyingHost (pa->convertTo0to1 (0.5f));
+                say (juce::String (kArcNames[i]) + ": back to the middle.");
                 repaint();
                 return;
             }
-        if (d < 11.0f && e.getNumberOfClicks() >= 2)
-        {   // double-click in the middle: all three back to "as Distill made it"
-            for (auto* id : kArcIds) if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (0.5f));
-            say ("Motion, Weight and Light back to the middle.");
+            arcDrag = i;
+            arcFrom = proc.apvts.getRawParameterValue (kArcIds[i])->load();
+            arcY = p.y;
+            if (auto* pa = proc.apvts.getParameter (kArcIds[i])) pa->beginChangeGesture();
+            say (kArcNames[i]);
             repaint();
             return;
         }
@@ -2388,6 +2448,12 @@ void NektarEditor::mouseDrag (const juce::MouseEvent& e)
         repaint();
         return;
     }
+    if (arcDrag == 3)
+    {
+        if (auto* pa = proc.apvts.getParameter ("master")) pa->setValueNotifyingHost (pa->convertTo0to1 (juce::jlimit (-24.0f, 6.0f, outFrom + (p.x - outX) * 30.0f / kOutOval.getWidth())));
+        repaint();
+        return;
+    }
     if (arcDrag >= 0)
     {
         if (auto* pa = proc.apvts.getParameter (kArcIds[arcDrag]))
@@ -2408,6 +2474,7 @@ void NektarEditor::mouseDrag (const juce::MouseEvent& e)
 void NektarEditor::mouseUp (const juce::MouseEvent&)
 {
     if (arcDrag >= 0 && arcDrag < 3) if (auto* pa = proc.apvts.getParameter (kArcIds[arcDrag])) pa->endChangeGesture();
+    if (arcDrag == 3) if (auto* pa = proc.apvts.getParameter ("master")) pa->endChangeGesture();
     if (partDrag >= 0 && partOnBench && ! partMoved)
     {   // a click on the bench's wave: the point to read from, inside the part in use
         const float a = proc.apvts.getRawParameterValue (slotId ("grstart", partDrag))->load(), b = proc.apvts.getRawParameterValue (slotId ("grend", partDrag))->load();
@@ -2433,12 +2500,21 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
         if (charBtn (pr).contains (p)) name = "Bench: shape the chosen sound - material, timbre, rhythm, motion";
         if (name.isEmpty() && p.getDistanceFrom (shapeAt (pr)) <= 15.0f) name = "Movement of the joystick (click: next shape, wheel: speed)";
     }
+    for (int pr = 0; pr < 2 && name.isEmpty(); ++pr)
     {
-        const float d = p.getDistanceFrom (kArcs);
-        for (int i = 0; i < 3 && name.isEmpty(); ++i) if (std::abs (d - kArcR[i]) <= 3.0f) name = kArcNames[i];
+        for (int c = 0; c < 2; ++c)
+            if (name.isEmpty() && (p.getDistanceFrom (leadAt (pr, c)) <= 14.0f || p.getDistanceFrom (leadAt (pr, c).translated (c == 0 ? 20.0f : -20.0f, 0.0f)) <= 8.0f))
+                name = juce::String (pr * 2 + c + 1) + " leads: the stick to this side, and the other sound follows its rhythm";
+        for (int t = 0; t < 2; ++t)
+            if (name.isEmpty() && p.getDistanceFrom (tintAt (pr, t == 0)) <= 12.0f)
+                name = juce::String (pr * 2 + t + 1) + " takes the colour of " + juce::String (pr * 2 + 2 - t) + (t == 0 ? ": the stick up" : ": the stick down");
+    }
+    {
+        for (int i = 0; i < 3 && name.isEmpty(); ++i) if (p.getDistanceFrom (arcAt (i)) <= kOneR + 4.0f) name = kArcNames[i];
+        if (name.isEmpty() && kOutOval.contains (p)) name = "Out: the master level (drag across, double-click: 0 dB)";
     }
     const char* harmNames[3] = { "As is", "One key", "Chord" };
-    for (int i = 0; i < 3 && name.isEmpty(); ++i) if (harmChip (i).contains (p)) name = harmNames[i];
+    for (int slot = 0; slot < 4 && name.isEmpty(); ++slot) for (int i = 0; i < 3; ++i) if (harmChip (slot, i).contains (p)) name = juce::String ("Sound ") + juce::String (slot + 1) + " - " + harmNames[i];
     if (name.isEmpty() && p.getDistanceFrom (kPresetAt) <= 15.0f) name = "Presets";
     if (name.isEmpty() && p.getDistanceFrom (kSaveAt) <= 15.0f) name = "Save the chosen sound to the library";
     if (name.isEmpty() && kVoicePad.contains (p)) name = "Second voice: pair 2 sings with pair 1. Across: unison, octave, fifth, third, seventh, ninth, cluster. Up: near, down: far";
@@ -2451,10 +2527,7 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     if (name.isEmpty() && kBackBtn.contains (p)) name = "Back: the sound before the last Distill";
     {
         int hr = -1;
-        for (int i = 0; i < 3; ++i)
-        {
-            if (std::abs (p.getDistanceFrom (kArcs) - kArcR[i]) <= 3.0f) hr = i;
-        }
+        for (int i = 0; i < 3; ++i) if (p.getDistanceFrom (arcAt (i)) <= kOneR + 4.0f) hr = i;
         if (hr != hoverRing) { hoverRing = hr; repaint(); }
     }
     if (name != hoverSaid)

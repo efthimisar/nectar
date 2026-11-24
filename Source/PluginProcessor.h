@@ -153,6 +153,7 @@ public:
     }
     double spaceAdvance (int slot, int numSamples, float motion);  // e.g. "G minor +3" (the key and the shift Harmony gives it), "no key", "..."
     bool keyOf (int slot, int& tonic, bool& minor) const;
+    int harmonyModeOf (int slot) const { return juce::roundToInt (apvts.getRawParameterValue (slot == 0 ? juce::String ("harmony") : "harmony" + juce::String (slot + 1))->load()); }
     float harmonyShiftOf (int slot) const { return harmonyShift[(size_t) juce::jlimit (0, kSlots - 1, slot)]; }
     void setSolo (int slot) { soloSlot.store (slot); } // -1 = all
     int solo() const { return soloSlot.load(); }
