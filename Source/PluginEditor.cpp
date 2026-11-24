@@ -260,12 +260,23 @@ void PairPad::paint (Graphics& g)
     }
     const auto now = toPix (proc.vectorX (pair), proc.vectorY (pair));
     trail.push_back (now);
-    if (trail.size() > 48) trail.erase (trail.begin());
-    for (size_t i = 0; i + 1 < trail.size(); ++i)
-    {   // the trail of the stick
-        const float a = (float) i / (float) trail.size();
-        g.setColour (tint.withAlpha (0.5f * a));
-        g.fillEllipse (trail[i].x - 1.0f - 2.5f * a, trail[i].y - 1.0f - 2.5f * a, 2.0f + 5.0f * a, 2.0f + 5.0f * a);
+    if (trail.size() > 30) trail.erase (trail.begin());   // a short imprint
+    for (size_t i = 0; i + 1 < trail.size(); i += 5)
+    {   // fireflies: the older, the softer (blurred: wider and fainter), and each a little off the path
+        const float age = 1.0f - (float) i / (float) trail.size();            // 0 = new, 1 = old
+        const float life = (1.0f - age) * (1.0f - age);
+        const float off = 4.0f * age;
+        const auto q = juce::Point<float> (trail[i].x + std::sin ((float) i * 12.9f) * off, trail[i].y + std::cos ((float) i * 7.3f) * off);
+        const float halo = 3.0f + 10.0f * age;
+        for (int k = 3; k >= 0; --k)
+        {   // soft edge: four layers
+            const float rk = halo * (0.45f + 0.55f * (float) k / 3.0f);
+            g.setColour (tint.withAlpha (0.10f * life));
+            g.fillEllipse (q.x - rk, q.y - rk, 2.0f * rk, 2.0f * rk);
+        }
+        const float core = 2.2f * (1.0f - 0.6f * age);
+        g.setColour (juce::Colours::white.interpolatedWith (tint, 0.4f).withAlpha (0.8f * life));
+        g.fillEllipse (q.x - core, q.y - core, 2.0f * core, 2.0f * core);
     }
     g.setColour (tint.withAlpha (0.25f));
     g.fillEllipse (now.x - 13.0f, now.y - 13.0f, 26.0f, 26.0f);
