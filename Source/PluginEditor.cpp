@@ -12,8 +12,9 @@ const Colour kWada[] = { Colour (0xfffdc57e), Colour (0xffb5b1d8), Colour (0xff7
                          Colour (0xfffbe6a0), Colour (0xffc1c494) };
 constexpr float kDW = 1040.0f, kDH = 665.0f;   // design space of the editor (wide)
 constexpr float kCx = 500.0f, kCy = 410.0f, kRingR = 255.0f, kScreenR = 134.0f; // the library bowl is designed at this size...
-constexpr float kRingScale = 140.0f / 255.0f;    // ...and drawn smaller: library radius 140
-constexpr float kLibX = 520.0f, kLibY = 250.0f;
+constexpr float kLibR = 112.0f;                   // ...and drawn smaller: library radius 112 (room below for the second voice)
+constexpr float kRingScale = kLibR / 255.0f;
+constexpr float kLibX = 520.0f, kLibY = 244.0f;
 constexpr float kPadCx[2] = { 180.0f, 860.0f };
 constexpr float kPadCy = 214.0f;
 constexpr float kCharR = 84.0f; // the characters round each joystick
@@ -21,11 +22,14 @@ constexpr float kCharR = 84.0f; // the characters round each joystick
 const juce::Rectangle<float> kPanelL (10.0f, 68.0f, 340.0f, 392.0f), kPanelC (358.0f, 68.0f, 324.0f, 392.0f),
                              kPanelR (690.0f, 68.0f, 340.0f, 392.0f), kPanelB (10.0f, 468.0f, 1020.0f, 190.0f);
 // centre: the library categories, Random sounds and the relation of the pairs; the Space circle with its oval on the rim
-inline juce::Rectangle<float> libChip (int i) { return { 376.0f + (float) i * 42.0f, 80.0f, 38.0f, 22.0f }; }
-const juce::Rectangle<float> kRandBtn (440.0f, 404.0f, 130.0f, 28.0f);
+int gChipN = 7; // how many category chips there are now: the row is centred on the panel (x 520)
+inline juce::Rectangle<float> libChip (int i) { return { 520.0f - ((float) gChipN * 42.0f - 4.0f) * 0.5f + (float) i * 42.0f, 80.0f, 38.0f, 22.0f }; }
+const juce::Rectangle<float> kRandBtn (448.0f, 107.0f, 108.0f, 22.0f);
+// the shared voice (pair 2 as a second voice of pair 1): a small pad (across: the interval, up and down: near - far) and its Intensity bar
+const juce::Rectangle<float> kVoicePad (410.0f, 366.0f, 220.0f, 60.0f), kVoiceBar (410.0f, 434.0f, 220.0f, 12.0f); // both centred on the panel (x 520)
 inline juce::Rectangle<float> fxSlot (int i) { return { 214.0f + (float) i * 170.0f, 15.0f, 160.0f, 30.0f }; } // the two effects, top bar
-const juce::Point<float> kRelBtn (592.0f, 418.0f);
-const juce::Rectangle<float> kSpaceOval (472.0f, 305.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
+const juce::Point<float> kRelBtn (579.0f, 118.0f);   // beside Random sounds, the pair centred
+const juce::Rectangle<float> kSpaceOval (472.0f, 285.0f, 96.0f, 30.0f);      // sits on the bottom rim of the Space circle
 // bottom: the river of the four sounds; the three arcs; Keep, Make, Back; Harmony and Key; the message
 const juce::Rectangle<float> kRiver (26.0f, 480.0f, 988.0f, 92.0f);
 const juce::Point<float> kArcs (54.0f, 615.0f);          // the whole sound: Motion, Weight, Light
@@ -75,7 +79,7 @@ const juce::Rectangle<float> kRecOval (106.0f, 593.0f, 160.0f, 44.0f);  // Rec, 
 const juce::Point<float> kRecAt (kRecOval.getX() + 23.0f, kRecOval.getCentreY()), kResampleAt (kRecOval.getRight() - 23.0f, kRecOval.getCentreY());
 inline juce::Point<float> blendAt (int pair) { return { cardRect (pair * 2).getRight() + 6.0f, cardRect (pair * 2).getY() + 46.0f }; }
 inline juce::Rectangle<float> keyLabel (int slot) { const auto r = cardRect (slot); return { r.getX() + 10.0f, r.getY() + 92.0f, r.getWidth() - 20.0f, 14.0f }; }
-constexpr float kSpaceX = 520.0f, kSpaceY = 250.0f, kSpaceR = 70.0f; // the placement pad (top view of the listener)
+constexpr float kSpaceX = 520.0f, kSpaceY = 244.0f, kSpaceR = 56.0f; // the placement pad (top view of the listener)
 
 juce::Font font (const juce::Typeface::Ptr& tf, float h)
 {
@@ -631,7 +635,7 @@ void NektarEditor::resized()
                                               KnobComponent::kWidth * s, k->height() * s).toNearestInt());
     }
     if (libMap != nullptr)
-        libMap->setBounds (juce::Rectangle<float> ((kLibX - 140.0f) * s, (kLibY - 140.0f) * s, 280.0f * s, 280.0f * s).toNearestInt());
+        libMap->setBounds (juce::Rectangle<float> ((kLibX - kLibR) * s, (kLibY - kLibR) * s, 2.0f * kLibR * s, 2.0f * kLibR * s).toNearestInt());
     if (spaceOval != nullptr)
     {
         spaceOval->setBounds (juce::Rectangle<float> (kSpaceOval.getX() * s, kSpaceOval.getY() * s, kSpaceOval.getWidth() * s, kSpaceOval.getHeight() * s).toNearestInt());
@@ -1655,6 +1659,7 @@ void NektarEditor::drawFace (Graphics& g)
         const auto cats = proc.libIndex.categories();
         const int pages = juce::jmax (1, (cats.size() + 5) / 6);
         chipPage = juce::jlimit (0, pages - 1, chipPage);
+        gChipN = pages > 1 ? 7 : 1 + juce::jmin (5, cats.size());
         for (int i = 0; i < 7; ++i)
         {
             juce::String name; bool on = false;
@@ -1675,6 +1680,27 @@ void NektarEditor::drawFace (Graphics& g)
     g.setColour (allLocked ? kMuted.withAlpha (0.45f) : kLight);
     g.setFont (font (regular, 13));
     g.drawText ("Random sounds", kRandBtn, juce::Justification::centred);
+    {   // the shared voice
+        const float vx = proc.apvts.getRawParameterValue ("vcx")->load(), vy = proc.apvts.getRawParameterValue ("vcy")->load(), vi = proc.apvts.getRawParameterValue ("vci")->load();
+        const bool on = vi > 0.02f;
+        g.setColour (Colour (0xff1c1b19));
+        g.fillRoundedRectangle (kVoicePad, 8.0f);
+        g.setColour (kMuted.withAlpha (on ? 0.35f : 0.18f));
+        for (int k = 0; k < 7; ++k) g.drawLine (kVoicePad.getX() + 6.0f + (kVoicePad.getWidth() - 12.0f) * (float) k / 6.0f, kVoicePad.getY() + 6.0f, kVoicePad.getX() + 6.0f + (kVoicePad.getWidth() - 12.0f) * (float) k / 6.0f, kVoicePad.getBottom() - 6.0f, 1.0f);
+        g.setColour (kMuted.withAlpha (on ? 0.8f : 0.4f));
+        g.drawRoundedRectangle (kVoicePad.reduced (0.5f), 8.0f, 1.0f);
+        const float dx = kVoicePad.getX() + 6.0f + (kVoicePad.getWidth() - 12.0f) * std::round (vx * 6.0f) / 6.0f, dy = kVoicePad.getY() + 6.0f + (kVoicePad.getHeight() - 12.0f) * vy;
+        g.setColour (on ? kAcc : kMuted.withAlpha (0.5f));
+        g.fillEllipse (dx - 5.0f, dy - 5.0f, 10.0f, 10.0f);
+        g.setColour (Colour (0xff1c1b19));
+        g.fillRoundedRectangle (kVoiceBar, 6.0f);
+        const float fw = (kVoiceBar.getWidth() - 4.0f) * vi;
+        g.setColour (on ? kAcc : kMuted.withAlpha (0.5f));
+        g.fillRoundedRectangle (kVoiceBar.getX() + 2.0f, kVoiceBar.getY() + 2.0f, juce::jmax (2.0f, fw), kVoiceBar.getHeight() - 4.0f, 4.0f);
+        g.setColour (kMuted);
+        g.setFont (font (regular, 10));
+        g.drawText (on ? juce::String (NektarProcessor::voiceName (vx)) : juce::String ("2nd voice"), juce::Rectangle<float> (kVoicePad.getX(), kVoicePad.getY() + 2.0f, kVoicePad.getWidth(), 12.0f), juce::Justification::centred);
+    }
     {
         const int rel = juce::roundToInt (proc.apvts.getRawParameterValue ("relation")->load());
         disc (kRelBtn, 13.0f, rel > 0, kAcc);
@@ -2180,10 +2206,32 @@ void NektarEditor::spaceOvalClick (const juce::MouseEvent& e)
     }
 }
 
+void NektarEditor::voiceSet (juce::Point<float> p)
+{
+    auto set = [this] (const char* id, float v) { if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (juce::jlimit (0.0f, 1.0f, v))); };
+    if (voiceDrag == 1)
+    {
+        const float vx = (p.x - kVoicePad.getX() - 6.0f) / (kVoicePad.getWidth() - 12.0f), vy = (p.y - kVoicePad.getY() - 6.0f) / (kVoicePad.getHeight() - 12.0f);
+        const float stop = std::round (juce::jlimit (0.0f, 1.0f, vx) * 6.0f) / 6.0f;
+        set ("vcx", stop); set ("vcy", vy);
+        if (proc.apvts.getRawParameterValue ("vci")->load() <= 0.02f) set ("vci", 0.7f); // touching the pad switches the voice on
+        say (juce::String ("Second voice: ") + NektarProcessor::voiceName (stop) + (vy < 0.4f ? ", near" : vy > 0.6f ? ", far" : ", at the distance of pair 2"));
+    }
+    else if (voiceDrag == 2)
+    {
+        const float v = (p.x - kVoiceBar.getX() - 2.0f) / (kVoiceBar.getWidth() - 4.0f);
+        set ("vci", v < 0.04f ? 0.0f : v);
+        say (v < 0.04f ? "Second voice: off" : "Second voice: " + juce::String (juce::roundToInt (juce::jlimit (0.0f, 1.0f, v) * 100.0f)) + " %");
+    }
+    repaint();
+}
+
 void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
 {
     auto setInt = [this] (const juce::String& id, float v) { if (auto* pa = proc.apvts.getParameter (id)) pa->setValueNotifyingHost (pa->convertTo0to1 (v)); };
     auto intOf = [this] (const juce::String& id) { return juce::roundToInt (proc.apvts.getRawParameterValue (id)->load()); };
+    if (kVoicePad.expanded (4.0f).contains (p)) { voiceDrag = 1; voiceSet (p); return; }
+    if (kVoiceBar.expanded (4.0f, 5.0f).contains (p)) { voiceDrag = 2; voiceSet (p); return; }
     if (kRandBtn.contains (p)) { say (proc.randomSounds()); recAll = true; repaint(); return; }
     if (kMakeBtn.contains (p)) { say (proc.makeAll (recAll ? -1 : selectedSlot)); repaint(); return; }
     if (kBackBtn.contains (p)) { if (proc.backAll()) say ("Back to what was there before the last Distill."); repaint(); return; }
@@ -2262,7 +2310,7 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
         repaint();
         return;
     }
-    for (int i = 0; i < 7; ++i)
+    for (int i = 0; i < gChipN; ++i)
         if (libChip (i).contains (p))
         {
             const auto cats = proc.libIndex.categories();
@@ -2357,6 +2405,7 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
 void NektarEditor::mouseDrag (const juce::MouseEvent& e)
 {
     const auto p = e.position / ((float) getWidth() / kDW);
+    if (voiceDrag > 0) { voiceSet (p); return; }
     if (chkDrag >= 2000 && charPanel >= 0)
     {   // a knob of the bench: up = more
         const int snd = panelSound(), idx = chkDrag - 2000;
@@ -2399,6 +2448,7 @@ void NektarEditor::mouseUp (const juce::MouseEvent&)
     partDrag = -1;
     partOnBench = false;
     chkDrag = -1;
+    voiceDrag = 0;
 }
 
 void NektarEditor::mouseMove (const juce::MouseEvent& e)
@@ -2416,6 +2466,8 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     }
     const char* harmNames[3] = { "As is", "One key", "Chord" };
     for (int i = 0; i < 3 && name.isEmpty(); ++i) if (harmChip (i).contains (p)) name = harmNames[i];
+    if (name.isEmpty() && kVoicePad.contains (p)) name = "Second voice: pair 2 sings with pair 1. Across: unison, octave, fifth, third, seventh, ninth, cluster. Up: near, down: far";
+    if (name.isEmpty() && kVoiceBar.contains (p)) name = "Second voice: how strong (left end: off)";
     if (name.isEmpty() && kKeyBtn.contains (p)) name = "Key (click: next, Shift-click: back)";
     if (name.isEmpty() && p.getDistanceFrom (kRecAt) <= 16.0f) name = recAll ? "Rec: the microphone into a new sound in the library" : "Rec: the microphone into sound " + juce::String (selectedSlot + 1);
     if (name.isEmpty() && p.getDistanceFrom (kResampleAt) <= 16.0f) name = recAll ? "Resample: the whole Nectar into a new sound in the library" : "Resample: sound " + juce::String (selectedSlot + 1) + " with all its changes, into itself";

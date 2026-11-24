@@ -183,6 +183,8 @@ private:
     std::array<bool, 300> riverBeat {};
     int riverAt = 0;
     float lastBeat = 0.0f;
+    int voiceDrag = 0;                  // the shared voice: 1 = its pad, 2 = its Intensity bar
+    void voiceSet (juce::Point<float> p);
     int arcDrag = -1;                   // which of Motion / Weight / Light is being dragged
     int charPanel = -1;                 // the characters' panel open for joystick 0 or 1 (-1: closed)
     int chkDrag = -1;                   // a knob of the panel being dragged: character * 3 + knob (1000 + character: its share)

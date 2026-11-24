@@ -342,6 +342,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NektarProcessor::createLayou
                                                                         juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
             }
         // how the two pairs behave towards each other
+        // the shared voice: pair 2 as a second voice of pair 1 (our own design). Across: the interval; up and down: near or far; Intensity: 0 = off
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "vcx", 1 }, "Voice interval", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "vcy", 1 }, "Voice distance", juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f));
+        l.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "vci", 1 }, "Voice intensity", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f));
         l.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "relation", 1 }, "Relation of the pairs",
                                                               juce::StringArray { "None", "Contrast", "Shadow", "Call and response", "Depth" }, 0));
     }
@@ -746,6 +750,13 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     const float motionKnob = juce::jlimit (0.0f, 1.0f, modded (mSpeedP));
     const float motion = std::pow (2.0f, 4.0f * (motionKnob - 0.5f));
     const double motionSteps = std::pow (2.0, std::round (4.0 * ((double) motionKnob - 0.5)));
+    // the shared voice: the interval of pair 2 against pair 1 slides (about 70 ms), it comes in and out smoothly
+    {
+        const float vi = apvts.getRawParameterValue ("vci")->load(), vx = apvts.getRawParameterValue ("vcx")->load();
+        const float on = vi > 0.02f ? 1.0f : 0.0f;
+        voiceOnNow += (on - voiceOnNow) * 0.12f;
+        voiceSemisNow += (voiceSemisOf (vx) - voiceSemisNow) * 0.15f;
+    }
     const juce::MidiBuffer emptyMidi;
     std::array<bool, kSlots> loadedNow {};
     std::array<float, kSlots> pans {};
@@ -777,6 +788,11 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         if (slot % 2 == 1)
             p.level *= std::sqrt (1.0f - juce::jmin (1.0f, modded (pairMorphP[(size_t) (slot / 2)]) * 50.0f)); // heard inside the morph of its pair
         p.pitchSemis = modded (pitchP[(size_t) slot]);
+        if (slot >= 2)
+        {   // the shared voice: this pair is a second voice, a chosen interval from the first, and as strong as Intensity says
+            p.pitchSemis += voiceSemisNow * voiceOnNow;
+            p.level *= 1.0f + voiceOnNow * ((0.35f + 0.65f * apvts.getRawParameterValue ("vci")->load()) - 1.0f);
+        }
         p.tempoRatio = tempoRatioFor (slot, pl.getSample().get(), hostBpm, hostHasBpm);
         p.releaseSec = kTail;
         pl.setVoiceLimit (limit);
@@ -875,6 +891,7 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             while (az > 180.0f) az -= 360.0f;
             while (az < -180.0f) az += 360.0f;
         }
+        if (slot >= 2 && voiceOnNow > 0.001f) di = juce::jlimit (0.0f, 1.0f, di + (apvts.getRawParameterValue ("vcy")->load() - 0.5f) * voiceOnNow); // up: nearer, down: further (the pad's own way)
         spAzShown[(size_t) slot].store (az); spDistShown[(size_t) slot].store (di);
         space.azDeg[(size_t) slot] = az;
         space.dist[(size_t) slot] = di;

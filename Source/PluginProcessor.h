@@ -100,6 +100,18 @@ public:
     struct HostNow { double bpm = 120.0; bool has = false; double ppq = 0.0; bool hasPpq = false; };
     HostNow hostNow;                                   // audio thread
     std::atomic<int> relation { 0 };
+    // the shared voice: stops across the stick, unison - octave - fifth - third, then seventh - ninth - cluster (semitones of pair 2 over pair 1)
+    static float voiceSemisOf (float x)
+    {
+        static const float st[7] = { 0.0f, 12.0f, 7.0f, 4.0f, 10.0f, 14.0f, 1.0f };
+        return st[juce::jlimit (0, 6, juce::roundToInt (x * 6.0f))];
+    }
+    static const char* voiceName (float x)
+    {
+        static const char* nm[7] = { "unison", "octave", "fifth", "third", "seventh", "ninth", "cluster" };
+        return nm[juce::jlimit (0, 6, juce::roundToInt (x * 6.0f))];
+    }
+    float voiceSemisNow = 0.0f, voiceOnNow = 0.0f;
     std::array<float, 2> pairGainNow { { 1.0f, 1.0f } };
     std::array<std::array<std::atomic<float>, 9>, 2> padDbNow {};  // the pad's level correction now (audio thread reads)
     std::atomic<int> onlyPair { -1 };                                 // the hidden copy listens to one pair alone
