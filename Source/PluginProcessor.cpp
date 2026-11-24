@@ -1267,6 +1267,20 @@ juce::String NektarProcessor::loadFactory (int index)
     return "Factory: " + names[juce::jlimit (0, names.size() - 1, index)];
 }
 
+// Older presets and sessions had one Harmony choice for all sounds: it now belongs to each sound, so the old one is copied to the other three
+static void upgradeHarmony (juce::ValueTree& state)
+{
+    const auto old = state.getChildWithProperty ("id", "harmony");
+    if (! old.isValid() || state.getChildWithProperty ("id", "harmony2").isValid()) return;
+    for (int slot = 2; slot <= 4; ++slot)
+    {
+        juce::ValueTree c ("PARAM");
+        c.setProperty ("id", "harmony" + juce::String (slot), nullptr);
+        c.setProperty ("value", old.getProperty ("value"), nullptr);
+        state.appendChild (c, nullptr);
+    }
+}
+
 void NektarProcessor::storeSnapshot (int which)
 {
     auto state = apvts.copyState();
@@ -1353,6 +1367,7 @@ juce::String NektarProcessor::loadPreset (const juce::File& file)
         if (path.isNotEmpty() && ! findSampleFile (path, getLibraryFolder()).existsAsFile())
             missing += (missing.isEmpty() ? "" : ", ") + juce::String (slot + 1) + " (" + juce::File (path).getFileName() + ")";
     }
+    upgradeHarmony (state);
     apvts.replaceState (state);
     readModFromState (state);
     for (int slot = 0; slot < kSlots; ++slot)
@@ -1407,6 +1422,7 @@ void NektarProcessor::setStateInformation (const void* data, int size)
         auto state = juce::ValueTree::fromXml (*xml);
         if (state.isValid())
         {
+            upgradeHarmony (state);
             apvts.replaceState (state);
             readModFromState (state);
             for (int slot = 0; slot < kSlots; ++slot)
