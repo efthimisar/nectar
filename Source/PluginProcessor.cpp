@@ -597,6 +597,7 @@ void NektarProcessor::installResult (int slot, std::shared_ptr<Sample> s)
 void NektarProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     limGain = 1.0f;
+    kbMidi.ensureSize (4096);
     fxRack.prepare (sampleRate, samplesPerBlock);
     mixer.prepare (sampleRate, samplesPerBlock);
     for (auto& pl : players)
@@ -689,7 +690,12 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
     }
 
-    keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+    const bool takeOn = takeRec.beginBlock (buffer.getNumSamples()); // a take only looks: it never changes the sound
+    if (takeOn) takeRec.captureMidi (midi, 0);   // the host's notes, before the keyboard's are added
+    kbMidi.clear();
+    keyboardState.processNextMidiBuffer (kbMidi, 0, buffer.getNumSamples(), true);
+    midi.addEvents (kbMidi, 0, buffer.getNumSamples(), 0);
+    if (takeOn) takeRec.captureMidi (kbMidi, 1);
 
     {   // the host's tempo and position, for the tempo lock and the movements that follow the beat
         hostNow = {};
@@ -961,6 +967,9 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
             }
         }
     }
+    if (takeOn)
+        for (int slot = 0; slot < kSlots; ++slot)
+            if (loadedNow[(size_t) slot]) takeRec.captureStem (slot, mixer.viewOf (slot, buffer.getNumSamples()));
     mixer.setSolo (soloSlot.load());
     mixer.setCross ({ modded (xmorphP[0]), modded (xmorphP[1]) });
     mixer.mix (buffer, buffer.getNumSamples(), loadedNow, pans, { modded (imorphP[0]), modded (imorphP[1]) }, space);
@@ -1026,6 +1035,8 @@ void NektarProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                 d[i] = std::copysign (0.9f + 0.1f * std::tanh ((a - 0.9f) / 0.1f), d[i]);
         }
     }
+
+    if (takeOn) takeRec.endBlock (buffer); // the output as heard
 
     // Resample: copy what is about to be heard
     if (recState.load() == 1 && recSource.load() == 1)
@@ -1198,6 +1209,68 @@ juce::File NektarProcessor::getLibraryFolder()
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Nektar Library");
 }
 
+
+// ---- Take for ichochroma: what Nectar knows exactly at the start; what it does not know stays null
+bool NektarProcessor::startTake()
+{
+    static const char* const kFlavourNamesFixed[13] = { "Cloud", "Rhythm", "Metal", "Air", "Reverse", "Drone", "Swell", "Glitch", "Dust", "Bells", "Shimmer", "Melt", "Arp" };
+    static const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    auto param = [this] (const juce::String& id, int slot) -> juce::var
+    {
+        if (auto* p = apvts.getRawParameterValue (id + (slot == 0 ? juce::String() : juce::String (slot + 1)))) return std::round ((double) p->load() * 10000.0) / 10000.0;
+        return {};
+    };
+    juce::Array<juce::var> slotList;
+    for (int slot = 0; slot < kSlots; ++slot)
+    {
+        const auto s = getSample (slot);
+        if (s == nullptr) continue;
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("index", slot + 1);
+        o->setProperty ("sound", s->name);
+        o->setProperty ("sound_path", s->path.isNotEmpty() ? juce::var (s->path) : juce::var());
+        const int gm = juce::roundToInt (grP[(size_t) slot][0]->load());
+        o->setProperty ("engine", gm == 1 ? "grains_melodic" : (gm == 2 ? "grains_rhythmic" : "sample"));
+        int tonic = 0; bool minor = false;
+        if (keyOf (slot, tonic, minor))
+        {
+            auto* k = new juce::DynamicObject();
+            k->setProperty ("tonic", tonic);
+            k->setProperty ("tonic_name", kNoteNames[juce::jlimit (0, 11, tonic)]);
+            k->setProperty ("minor", minor);
+            o->setProperty ("key", juce::var (k));
+        }
+        else o->setProperty ("key", juce::var());
+        o->setProperty ("detected_bpm", s->tempoKnown && s->tempo.bpm > 0.0f ? juce::var ((double) s->tempo.bpm) : juce::var());
+        juce::Array<juce::var> fl;
+        for (const auto& f : flavours (slot))
+        {
+            auto* fo = new juce::DynamicObject();
+            fo->setProperty ("id", f.first);
+            fo->setProperty ("name", kFlavourNamesFixed[juce::jlimit (0, 12, f.first)]);
+            fo->setProperty ("percent", std::round (f.second * 1000.0) / 10.0);
+            fl.add (juce::var (fo));
+        }
+        o->setProperty ("flavours", fl);
+        auto* b = new juce::DynamicObject();   // raw values of the knobs as they are stored (level 0..1, pitch in semitones)
+        b->setProperty ("level", param ("level", slot));
+        b->setProperty ("pitch_semitones", param ("pitch", slot));
+        b->setProperty ("air", param ("air", slot));
+        b->setProperty ("shift", param ("fshift", slot));
+        b->setProperty ("ring", param ("ring", slot));
+        o->setProperty ("settings_at_start", juce::var (b));
+        slotList.add (juce::var (o));
+    }
+    auto* t = new juce::DynamicObject();
+    const double hb = hostBpmAtomic.load();
+    if (hb > 1.0) { t->setProperty ("bpm", hb); t->setProperty ("source", "host"); }
+    else           { t->setProperty ("bpm", 120.0); t->setProperty ("source", "free_run"); }   // the clock Nectar's own movements run on without a host
+    t->setProperty ("time_signature", juce::var());
+    t->setProperty ("measured_at", "take_start");
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : hostRate.load();
+    return takeRec.start (getLibraryFolder().getChildFile ("Takes"), sr, getLatencySamples(), juce::var (slotList), juce::var (t));
+}
+
 juce::String NektarProcessor::saveToLibrary (int slot)
 {
     auto s = getSample (slot);
@@ -1296,6 +1369,7 @@ bool NektarProcessor::recallSnapshot (int which)
     auto state = snap.createCopy();
     apvts.replaceState (state);
     readModFromState (state);
+    takeRec.addMarker ("snapshot_recall", which == 0 ? "A" : "B");
     return true;
 }
 
@@ -1370,6 +1444,7 @@ juce::String NektarProcessor::loadPreset (const juce::File& file)
     upgradeHarmony (state);
     apvts.replaceState (state);
     readModFromState (state);
+    takeRec.addMarker ("preset_load", file.getFileNameWithoutExtension());
     for (int slot = 0; slot < kSlots; ++slot)
     {
         const auto path = state.getProperty ("samplePath" + juce::String (slot + 1)).toString();
@@ -2359,6 +2434,7 @@ void NektarProcessor::readModFromState (const juce::ValueTree& state)
 // ---- the main screen: Distill / Back / random sounds / random space
 juce::String NektarProcessor::makeAll (int target)
 {
+    takeRec.addMarker ("distill", target < 0 ? "all" : "sound " + juce::String (target + 1));
     int parts[2] = { 0, 0 };
     bool anySound = false;
     for (int pair = 0; pair < 2; ++pair)
@@ -2421,6 +2497,7 @@ juce::String NektarProcessor::makeAll (int target)
 
 bool NektarProcessor::backAll()
 {
+    takeRec.addMarker ("back");
     bool any = false;
     for (int pair = 0; pair < 2; ++pair)
     {

@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include "SamplePlayer.h"
+#include "TakeRecorder.h"
 #include "Granular.h"
 #include "Shifter.h"
 #include "TiltFilter.h"
@@ -186,6 +187,12 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
     juce::MidiKeyboardState keyboardState; // computer-keyboard notes from the UI
+
+    // A "take" for ichochroma: the output, the stem of each sound, and what Nectar knows, written to Takes in the library
+    TakeRecorder takeRec;
+    bool startTake();                      // message thread
+    void stopTake() { takeRec.stop(); }
+    juce::MidiBuffer kbMidi;               // the keyboard notes of this block (kept apart so a take can tell them from the host's)
 
 private:
     static BusesProperties makeBuses();

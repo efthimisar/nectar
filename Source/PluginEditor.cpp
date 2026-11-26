@@ -80,6 +80,7 @@ inline juce::Point<float> lockAt (int slot) { const auto r = cardRect (slot); re
 inline juce::Rectangle<float> harmChip (int slot, int i) { const auto r = cardRect (slot); return { r.getX() + 10.0f + (float) i * 31.0f, r.getBottom() - 24.0f, 27.0f, 18.0f }; }   // Harmony of this sound: as is, one key, chord
 inline juce::Point<float> soloAt (int slot) { const auto r = cardRect (slot); return { r.getRight() - 38.0f, r.getBottom() - 15.0f }; }
 const juce::Rectangle<float> kRecOval (100.0f, 15.0f, 160.0f, 30.0f);  // Rec, where it goes, Resample: in the top bar, between the mark and the effects
+const juce::Point<float> kTakeAt (735.0f, 30.0f);   // Take for ichochroma: the viewfinder, in the top bar after the effects
 const juce::Point<float> kRecAt (kRecOval.getX() + 17.0f, kRecOval.getCentreY()), kResampleAt (kRecOval.getRight() - 17.0f, kRecOval.getCentreY());
 inline juce::Point<float> blendAt (int pair) { return { cardRect (pair * 2).getRight() + 6.0f, cardRect (pair * 2).getY() + 46.0f }; }
 inline juce::Rectangle<float> keyLabel (int slot) { const auto r = cardRect (slot); return { r.getX() + 10.0f, r.getY() + 92.0f, r.getWidth() - 20.0f, 14.0f }; }
@@ -735,6 +736,7 @@ void NektarEditor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
 
 void NektarEditor::pressKeep (int pair)
 {
+    proc.takeRec.addMarker ("keep", "pair " + juce::String (pair + 1));
     say (proc.savePreset ("Keep " + juce::String (pair + 1) + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S")));
 }
 
@@ -930,6 +932,7 @@ void NektarEditor::toggleResample()
 void NektarEditor::timerCallback()
 {
     if (const auto m = proc.takeMakeMessage(); m.isNotEmpty()) { say (m); repaint(); }
+    if (const auto m = proc.takeRec.takeResult(); m.isNotEmpty()) { say (m); repaint(); }
     if (proc.baking() && proc.judgeSteps.load() > 0 && proc.judgeStep.load() <= proc.judgeSteps.load() && message.startsWith ("Listening"))
     {
         const juce::String m = "Listening to version " + juce::String (juce::jmax (1, proc.judgeStep.load())) + " of " + juce::String (proc.judgeSteps.load()) + "...";
@@ -1836,6 +1839,34 @@ void NektarEditor::drawFace (Graphics& g)
         }
     }
 
+    {   // Take: a viewfinder (four corners) with a dot in the middle; while a take records the dot blinks red and the time runs
+        const bool tk = proc.takeRec.isRecording();
+        const auto c = kTakeAt;
+        const float blink = 0.35f + 0.65f * (0.5f + 0.5f * (float) std::sin (now * 5.0));
+        if (tk)
+        {
+            g.setColour (Colour (0xffe0614f).withAlpha (0.18f * blink));
+            g.fillEllipse (c.x - 19.0f, c.y - 19.0f, 38.0f, 38.0f);
+            g.setColour (Colour (0xffe0614f).withAlpha (0.9f));
+            g.setFont (font (regular, 12));
+            g.drawText (clock ((float) proc.takeRec.seconds()), juce::Rectangle<float> (c.x + 22.0f, c.y - 10.0f, 56.0f, 20.0f), juce::Justification::centredLeft);
+        }
+        g.setColour (Colour (0xff3a3936));
+        g.fillEllipse (c.x - 15.0f, c.y - 15.0f, 30.0f, 30.0f);
+        g.setColour (tk ? Colour (0xffe0614f) : kLight);
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+            {
+                juce::Path corner;
+                corner.startNewSubPath (c.x + sx * 4.0f, c.y + sy * 8.0f);
+                corner.lineTo (c.x + sx * 8.0f, c.y + sy * 8.0f);
+                corner.lineTo (c.x + sx * 8.0f, c.y + sy * 4.0f);
+                g.strokePath (corner, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+        if (tk) { g.setColour (Colour (0xffe0614f).withAlpha (blink)); g.fillEllipse (c.x - 3.5f, c.y - 3.5f, 7.0f, 7.0f); }
+        else    { g.setColour (kLight.withAlpha (0.8f)); g.drawEllipse (c.x - 3.0f, c.y - 3.0f, 6.0f, 6.0f, 1.3f); }
+    }
+
     // ================= two sets of three rings: the whole sound (Motion, Weight, Light) and the chosen sound (rhythm, colour, texture)
     auto rings = [&] (juce::Point<float> at, const float* values, const juce::Colour* cols, int dragBase)
     {
@@ -2309,6 +2340,13 @@ void NektarEditor::faceClick (const juce::MouseEvent& e, juce::Point<float> p)
             return;
         }
     }
+    if (p.getDistanceFrom (kTakeAt) <= 16.0f)
+    {
+        if (proc.takeRec.isRecording()) { proc.stopTake(); say ("Take stopped: the files are being written."); }
+        else if (proc.takeRec.isBusy()) say ("The last take is still being written.");
+        else say (proc.startTake() ? "Recording a take for ichochroma." : "The take could not start.");
+        repaint(); return;
+    }
     if (p.getDistanceFrom (kResampleAt) <= 13.0f) { toggleResample(); repaint(); return; }
     if (p.getDistanceFrom (kRecAt) <= 13.0f) { toggleRecording(); repaint(); return; }
     if (kRiver.contains (p)) { recAll = true; proc.makeMask = 15; say ("All four sounds: Rec and Resample make a new sound in the library."); repaint(); return; }
@@ -2531,6 +2569,7 @@ void NektarEditor::mouseMove (const juce::MouseEvent& e)
     if (name.isEmpty() && kVoicePad.contains (p)) name = "Second voice: pair 2 sings with pair 1. Across: unison, octave, fifth, third, seventh, ninth, cluster. Up: near, down: far";
     if (name.isEmpty() && kVoiceBar.contains (p)) name = "Second voice: how strong (left end: off)";
     if (name.isEmpty() && kKeyBtn.contains (p)) name = "Key (click: next, Shift-click: back)";
+    if (name.isEmpty() && p.getDistanceFrom (kTakeAt) <= 16.0f) name = proc.takeRec.isRecording() ? "Take: press again to stop" : "Take: record the sound, each sound on its own and what Nectar knows, for ichochroma";
     if (name.isEmpty() && p.getDistanceFrom (kRecAt) <= 13.0f) name = recAll ? "Rec: the microphone into a new sound in the library" : "Rec: the microphone into sound " + juce::String (selectedSlot + 1);
     if (name.isEmpty() && p.getDistanceFrom (kResampleAt) <= 13.0f) name = recAll ? "Resample: the whole Nectar into a new sound in the library" : "Resample: sound " + juce::String (selectedSlot + 1) + " with all its changes, into itself";
     for (int pr = 0; pr < 2 && name.isEmpty(); ++pr) if (p.getDistanceFrom (keepAt (pr)) <= 15.0f) name = "Keep: save the sounds as a preset";

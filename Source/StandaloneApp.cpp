@@ -2,6 +2,7 @@
 // is NOT muted (Nektar never plays the input back; it only records it).
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#include "PluginProcessor.h"
 
 namespace
 {
@@ -33,6 +34,18 @@ public:
         {
             quit();
             return;
+        }
+
+        // always open in Init: forget the last session's state (the audio device settings stay), and the old presets are cleared once, below
+        appProperties.getUserSettings()->removeValue ("filterState");
+        {   // once: presets made by earlier versions no longer work, so they go to the Trash (presets made after this stay)
+            const auto mark = NektarProcessor::getPresetFolder().getChildFile (".cleared_v2");
+            if (! mark.existsAsFile())
+            {
+                for (auto& f : NektarProcessor::listPresets()) f.moveToTrash();
+                NektarProcessor::getPresetFolder().createDirectory();
+                mark.create();
+            }
         }
 
         auto holder = std::make_unique<juce::StandalonePluginHolder> (appProperties.getUserSettings(), false, juce::String {},
